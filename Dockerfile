@@ -37,7 +37,11 @@ COPY panel/ ./panel/
 COPY templates/ ./templates/
 COPY examples/ ./examples/
 
-RUN mkdir -p /data /workspace && chown -R app:app /data /workspace /opt/lightsout
+# The credential directories must exist in the image and belong to app: Docker
+# initialises a named volume from the image path, so an absent path would be
+# created as root and the engines could not write their tokens (RT-03, RT-04).
+RUN mkdir -p /data /workspace /home/app/.claude /home/app/.codex \
+    && chown -R app:app /data /workspace /opt/lightsout /home/app
 
 USER app
 ENV NODE_ENV=production \

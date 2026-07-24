@@ -22,6 +22,7 @@ COPY package*.json tsconfig.json ./
 RUN npm install --no-audit --no-fund
 COPY src/ ./src/
 COPY test/ ./test/
+COPY examples/ ./examples/
 CMD ["npm", "test"]
 
 FROM node:22-slim

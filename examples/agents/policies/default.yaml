@@ -1,0 +1,19 @@
+# Default policy pack (PE-01, DESIGN §7.2). First match wins, evaluated top-down.
+# The hard floor of PE-03 applies on top and cannot be relaxed here:
+# outside_workspace never allows; credentials and publish_external never go below
+# require_human.
+id: default
+rules:
+  - { class: project_read, verdict: allow }
+  - { class: project_write, verdict: allow }
+  - { class: exec_check, verdict: allow }
+  - { class: git_local, verdict: allow }
+  - { class: deps_install, verdict: require_human, reason: "dependencies change the build" }
+  - { class: delete, verdict: require_human, reason: "deletions are hard to undo" }
+  - { class: git_push, verdict: deny, reason: "pushing is the orchestrator's job (PM-05)" }
+  - { class: network, verdict: deny, reason: "outbound access is allowlisted (RT-05)" }
+  - { class: outside_workspace, verdict: deny }
+  - { class: credentials, verdict: require_human }
+  - { class: publish_external, verdict: require_human }
+  - { class: other, verdict: require_human }
+matchers: {}

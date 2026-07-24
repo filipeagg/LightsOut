@@ -14,6 +14,7 @@ import { createHttpServer } from "./http/server.js";
 import { checkDatabase, openDb } from "./db/db.js";
 import { migrate } from "./db/migrate.js";
 import { createRepos } from "./db/repos/index.js";
+import { AgentsLoader } from "./agents/loader.js";
 
 async function readVersion(): Promise<string> {
   try {
@@ -61,7 +62,25 @@ async function main(): Promise<void> {
     console.warn(`[boot] ${interrupted.length} run(s) marked interrupted (RT-07)`);
   }
 
-  // 4. TODO(phase 3): load agent profiles and policy packs (AP-01..03).
+  // 4. Agent profiles and policy packs (AP-01..03), seeded from examples on first boot.
+  const agents = new AgentsLoader(config.workspace, (report) => {
+    console.log(`[agents] reloaded: ${report.loaded} profile(s), ${report.packs} pack(s)`);
+    for (const bad of report.rejected) console.warn(`[agents] rejected ${bad.file}: ${bad.error}`);
+    repos.events.append({
+      type: "system",
+      payload: { reason: "agents reloaded", loaded: report.loaded, rejected: report.rejected },
+    });
+    bus.emit("overview");
+  });
+  const agentsReport = await agents.load();
+  console.log(
+    `[boot] agents: ${agentsReport.loaded} profile(s), ${agentsReport.packs} pack(s)` +
+      (agentsReport.seeded ? " (examples seeded)" : ""),
+  );
+  for (const bad of agentsReport.rejected) {
+    console.warn(`[boot] rejected agent file ${bad.file}: ${bad.error}`);
+  }
+  agents.startWatching();
 
   // 5. Engine detection and auth probe (RT-04, RT-06).
   const health = new HealthProbe(config, version);
@@ -95,7 +114,8 @@ async function main(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`[shutdown] ${signal} received`);
-    // TODO(phase 3/4): cancel active ACP sessions and persist run state.
+    // TODO(phase 4): cancel active ACP sessions through the orchestrator registry.
+    agents.stopWatching();
     await app.close();
     db.close();
     process.exit(0);

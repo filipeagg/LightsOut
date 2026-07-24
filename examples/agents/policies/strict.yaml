@@ -1,0 +1,16 @@
+# Strict pack: nothing that changes the environment happens without a human.
+id: strict
+rules:
+  - { class: project_read, verdict: allow }
+  - { class: project_write, verdict: allow }
+  - { class: exec_check, verdict: allow }
+  - { class: git_local, verdict: require_human }
+  - { class: deps_install, verdict: deny }
+  - { class: delete, verdict: deny }
+  - { class: git_push, verdict: deny }
+  - { class: network, verdict: deny }
+  - { class: outside_workspace, verdict: deny }
+  - { class: credentials, verdict: require_human }
+  - { class: publish_external, verdict: require_human }
+  - { class: other, verdict: require_human }
+matchers: {}

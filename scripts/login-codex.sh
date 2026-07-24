@@ -1,45 +1,55 @@
 #!/usr/bin/env bash
 # One-time interactive login for the Codex engine (RT-04).
-# Credentials land in the codex-auth volume mounted at /home/app/.codex (RT-03).
 #
-# Default: device authorization. The CLI prints a URL and a code; you open the URL
-# on the host and type the code. Nothing has to reach the container, which is what
-# a headless container needs.
+# The login runs in an ephemeral container that shares the host network namespace
+# and mounts the codex-auth volume (RT-03). Host networking matters: the OAuth
+# callback goes to localhost:1455, and a login server bound to the loopback of an
+# isolated container namespace is unreachable from the host even with a published
+# port. The long-lived orchestrator container keeps its own isolated network.
 #
-# Alternatives:
-#   OPENAI_API_KEY=sk-... ./scripts/login-codex.sh --api-key   # API billing (NF-03)
-#   ./scripts/login-codex.sh --browser                         # local callback flow;
-#       requires the 1455 port published (see docker-compose.yml)
+# Usage:
+#   ./scripts/login-codex.sh                                   # ChatGPT subscription
+#   OPENAI_API_KEY=sk-... ./scripts/login-codex.sh --api-key    # API billing (NF-03)
+#   ./scripts/login-codex.sh --device-auth                      # if your workspace allows it
 set -euo pipefail
 
-CONTAINER="${LO_CONTAINER:-lightsout}"
+PROJECT="${COMPOSE_PROJECT_NAME:-lightsout}"
+VOLUME="${LO_CODEX_VOLUME:-${PROJECT}_codex-auth}"
+IMAGE="${LO_IMAGE:-lightsout:local}"
 
-if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
-  echo "Container '$CONTAINER' is not running. Start it first: docker compose up -d" >&2
+if ! docker volume inspect "$VOLUME" >/dev/null 2>&1; then
+  echo "Volume '$VOLUME' not found. Start the stack once: docker compose up -d" >&2
   exit 1
 fi
+
+run_login() {
+  docker run --rm -it \
+    --network host \
+    --user 1000:1000 \
+    -e CODEX_HOME=/home/app/.codex \
+    -v "$VOLUME":/home/app/.codex \
+    "$IMAGE" "$@"
+}
 
 case "${1:-}" in
   --api-key)
     : "${OPENAI_API_KEY:?set OPENAI_API_KEY in the environment first}"
-    printf '%s' "$OPENAI_API_KEY" | docker exec -i "$CONTAINER" codex login --with-api-key
+    printf '%s' "$OPENAI_API_KEY" | docker run --rm -i \
+      --user 1000:1000 \
+      -e CODEX_HOME=/home/app/.codex \
+      -v "$VOLUME":/home/app/.codex \
+      "$IMAGE" codex login --with-api-key
     ;;
-  --browser)
-    if ! docker port "$CONTAINER" 1455 >/dev/null 2>&1; then
-      echo "Port 1455 is not published: the browser callback cannot reach the container." >&2
-      echo "Uncomment the auth-callback port in docker-compose.yml, run 'docker compose up -d'," >&2
-      echo "or use the default device flow: $0" >&2
-      exit 1
-    fi
-    docker exec -it "$CONTAINER" codex login
+  --device-auth)
+    run_login codex login --device-auth
     ;;
   *)
-    echo "Starting Codex device authorization inside '$CONTAINER'."
-    echo "Open the printed URL on the host and enter the code shown."
-    docker exec -it "$CONTAINER" codex login --device-auth
+    echo "Opening the Codex browser login. Complete it in the browser that opens,"
+    echo "or copy the printed URL into one on this machine."
+    run_login codex login
     ;;
 esac
 
 echo
-docker exec "$CONTAINER" codex login status || true
+docker exec "${LO_CONTAINER:-lightsout}" codex login status || true
 echo "Verify with: curl -s localhost:${LO_PORT:-8484}/health"

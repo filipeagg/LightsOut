@@ -6,6 +6,9 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:${LO_PORT:-8484}:8484"      # panel + API + /mcp (WP-09)
+      # Loopback-only auth callback, needed once for the Codex browser login (RT-04).
+      # Uncomment, `docker compose up -d`, run scripts/login-codex.sh, then comment again.
+      # - "127.0.0.1:1455:1455"
     volumes:
       - ${LIGHTSOUT_WORKSPACE}:/workspace       # RT-02
       - lightsout-db:/data                      # DB-01

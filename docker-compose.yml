@@ -6,10 +6,13 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:${LO_PORT:-8484}:8484"      # panel + API + /mcp (WP-09)
-      # No auth-callback port is needed: the login scripts run the OAuth flow in an
-      # ephemeral container on the host network (see scripts/login-*.sh, RT-04).
+      - "127.0.0.1:1455:1455"                  # engine OAuth callback (SU-04, phase 8)
     volumes:
-      - ${LIGHTSOUT_WORKSPACE}:/workspace       # RT-02
+      # RT-02: managed volume by default, so a target machine configures nothing.
+      # Advanced: set LIGHTSOUT_WORKSPACE and swap the two lines below.
+      - lightsout-workspace:/workspace
+      # - ${LIGHTSOUT_WORKSPACE}:/workspace
+      # - ${LO_EXPORT_DIR}:/export              # optional sync target (SU-06)
       - lightsout-db:/data                      # DB-01
       - claude-auth:/home/app/.claude           # RT-03
       - codex-auth:/home/app/.codex             # RT-03
@@ -34,5 +37,6 @@ services:
 
 volumes:
   lightsout-db:
+  lightsout-workspace:
   claude-auth:
   codex-auth:

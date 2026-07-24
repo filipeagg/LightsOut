@@ -3,6 +3,12 @@
 Everything runs inside one container. The host only needs Docker: Node, TypeScript and
 the engine CLIs live in the image (NF-01).
 
+> **Two audiences.** This guide is the maintainer path: clone the repository, build the
+> image, run the phase gates. From phase 8 on there is a second, much shorter path for end
+> users — install Docker Desktop, run one `docker run` line against the published image, and
+> complete the rest in the browser (SU-01..08, DESIGN §14). Until phase 8 ships, use the
+> maintainer path below.
+
 ## 1. Prerequisites
 
 - Windows 11 with WSL2 (Ubuntu 22.04 or newer), or plain Linux.
@@ -33,9 +39,13 @@ git clone <remote> lightsout && cd lightsout     # or copy the folder
 cp .env.example .env
 ```
 
-Edit `.env` and set `LIGHTSOUT_WORKSPACE` to a **WSL2 ext4 path** such as
-`/home/<user>/lightsout-data`. A `/mnt/c/...` path works but is several times slower for
-git and file I/O. Everything else has sensible defaults (DESIGN §3.4).
+Nothing has to be edited: every setting has a working default (DESIGN §3.4) and projects
+live in the managed `lightsout-workspace` volume (RT-02).
+
+Only if you want projects in a host folder instead: set `LIGHTSOUT_WORKSPACE` to a **WSL2
+ext4 path** such as `/home/<user>/lightsout-data` and swap the two workspace volume lines in
+`docker-compose.yml`. A `/mnt/c/...` path works but is several times slower for git and
+file I/O.
 
 ## 3. Build and start
 
@@ -85,8 +95,9 @@ docker compose -f docker-compose.yml -f docker-compose.secure.yml --profile secu
 - `.env` — ignored by git, written per machine.
 - Engine credentials — in Docker volumes; every machine does its own login.
 - The SQLite database — a Docker volume; it is that machine's history.
-- The workspace (`projects/`, `agents/`) — share projects through their git remotes
-  (PM-05), not by copying volumes.
+- The workspace volume (`projects/`, `agents/`) — share projects through their git remotes
+  (PM-05), not by copying volumes. From phase 8 the panel can also export a project as a zip
+  or sync it to a host folder (SU-06).
 - Agent profiles and policy packs live in the workspace, not in the repo. A fresh machine
   starts from `examples/agents/`, copied on first boot when `agents/` is empty. Keep tuned
   profiles in their own repository if you want them on several machines.

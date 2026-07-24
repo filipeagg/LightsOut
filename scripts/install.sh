@@ -13,19 +13,22 @@ docker compose version >/dev/null 2>&1 || fail "docker compose v2 plugin not fou
 
 if [ ! -f .env ]; then
   cp .env.example .env
-  echo "Created .env from .env.example — edit LIGHTSOUT_WORKSPACE before continuing."
+  echo "Created .env from .env.example — defaults work as-is."
 fi
 
 # shellcheck disable=SC1091
 set -a; . ./.env; set +a
 
-[ -n "${LIGHTSOUT_WORKSPACE:-}" ] || fail "LIGHTSOUT_WORKSPACE is not set in .env"
-case "$LIGHTSOUT_WORKSPACE" in
-  /mnt/c/*) echo "WARNING: workspace on /mnt/c is slow; a WSL2 ext4 path is recommended (RT-02)." ;;
-esac
-
-mkdir -p "$LIGHTSOUT_WORKSPACE/agents/policies" "$LIGHTSOUT_WORKSPACE/projects"
-echo "Workspace ready at $LIGHTSOUT_WORKSPACE"
+# RT-02: the workspace is a managed volume unless a host path was chosen explicitly.
+if [ -n "${LIGHTSOUT_WORKSPACE:-}" ]; then
+  case "$LIGHTSOUT_WORKSPACE" in
+    /mnt/c/*) echo "WARNING: workspace on /mnt/c is slow; a WSL2 ext4 path is recommended." ;;
+  esac
+  mkdir -p "$LIGHTSOUT_WORKSPACE/agents/policies" "$LIGHTSOUT_WORKSPACE/projects"
+  echo "Workspace: host folder $LIGHTSOUT_WORKSPACE (remember to swap the volume lines in docker-compose.yml)"
+else
+  echo "Workspace: managed volume lightsout-workspace"
+fi
 
 docker compose build
 docker compose up -d

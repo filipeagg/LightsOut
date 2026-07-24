@@ -148,8 +148,11 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:${LO_PORT:-8484}:8484"     # panel + API + /mcp (WP-09)
+      - "127.0.0.1:1455:1455"                 # engine OAuth callback (SU-04)
     volumes:
-      - ${LIGHTSOUT_WORKSPACE}:/workspace      # RT-02
+      - lightsout-workspace:/workspace         # RT-02 default: managed volume
+      # - ${LIGHTSOUT_WORKSPACE}:/workspace    # advanced: host bind mount
+      # - ${LO_EXPORT_DIR}:/export             # optional, project sync target (SU-06)
       - lightsout-db:/data                     # DB-01
       - claude-auth:/home/app/.claude          # RT-03
       - codex-auth:/home/app/.codex            # RT-03
@@ -161,6 +164,7 @@ services:
     env_file: .env
 volumes:
   lightsout-db:
+  lightsout-workspace:
   claude-auth:
   codex-auth:
 ```
@@ -173,7 +177,8 @@ Pilot mechanism: an egress HTTP(S) proxy sidecar (tinyproxy) with an allowlist f
 
 | Var | Default | Purpose |
 |---|---|---|
-| `LIGHTSOUT_WORKSPACE` | — (required, host side) | Host path bind-mounted at /workspace |
+| `LIGHTSOUT_WORKSPACE` | — (optional, host side) | Host path bind-mounted at /workspace; unset means the managed `lightsout-workspace` volume (RT-02) |
+| `LO_EXPORT_DIR` | — (optional, host side) | Host folder mounted at /export as the project sync target (SU-06) |
 | `LO_PORT` | `8484` | Host port for panel/API/MCP |
 | `LO_DB` | `/data/lightsout.db` | SQLite path |
 | `LO_MAX_PARALLEL` | `3` | Max concurrent runs across projects (SR-07) |
@@ -622,7 +627,19 @@ GET /api/projects/:id/history?limit&before
 GET /api/runs/:id/events?after=<id>  → paginated event timeline
 ```
 
-All handlers are SELECT-only against SQLite (OB-01). No POST/PUT/DELETE routes exist outside `/mcp`.
+All handlers are SELECT-only against SQLite (OB-01).
+
+The only mutating HTTP routes outside `/mcp` are the setup and export actions (SU-05),
+enumerated here and nowhere else. They never touch chains, tasks, runs or doubts:
+
+```
+POST /api/setup/login/:engine        → start the interactive login, returns {flowId}
+GET  /api/setup/login/:flowId        → SSE: url, code, progress, final auth state
+POST /api/setup/login/:engine/key    → store an API key through the engine CLI (NF-03)
+POST /api/setup/examples             → copy examples/agents into the workspace
+POST /api/setup/project              → create the first project (same path as create_project)
+POST /api/export/project/:id         → zip download, or sync to /export when mounted (SU-06)
+```
 
 ### 12.2 SSE (`GET /api/stream`) (WP-03)
 
@@ -645,11 +662,81 @@ Single `index.html`, hash routes: `#/` global (attention strip: open doubts with
 | 5 | Doubts + advisor auto-continue | DO-01..05, SR-08, PE-06 | a seeded ambiguous task auto-continues on agreement and opens a doubt on disagreement |
 | 6 | MCP server + stdio bridge + all tools | MC-01..06 | full flow driven from Claude Desktop only |
 | 7 | Panel + SSE | WP-01..08, OB-03 | chain progress visible live in the browser |
+| 8 | Published image + first-run wizard | SU-01..08, RT-02/04 | on a clean machine: pull, start, and the whole setup completes in the browser |
 
 Each phase ends with its own verify script under `scripts/verify/` (the project applies its own medicine: green gate before moving on).
 
-## 14. Open implementation decisions (to settle in phase 1-2)
+## 14. Setup, distribution and first-run onboarding (SU-01..08, phase 8)
 
-- Exact npm package names/versions of the two ACP adapters (pin in Dockerfile; commands already configurable).
+Target experience on a clean machine: install Docker Desktop, run one line, open the panel.
+Nothing else, and no terminal after that line.
+
+### 14.1 Image publication (SU-01, SU-08)
+
+`docker buildx` builds `linux/amd64` and `linux/arm64` and pushes to
+`ghcr.io/<org>/lightsout` with `:x.y.z` and `:latest`. A GitHub Actions workflow builds on
+tag. Updating is `docker pull` + restart: migrations run at boot, so no manual step (SU-08).
+Volumes carry all state, so a container replaced by a newer image keeps credentials,
+database and projects.
+
+### 14.2 Start command (SU-02)
+
+```
+docker run -d --name lightsout --restart unless-stopped \
+  -p 127.0.0.1:8484:8484 -p 127.0.0.1:1455:1455 \
+  -v lightsout-db:/data -v lightsout-workspace:/workspace \
+  -v claude-auth:/home/app/.claude -v codex-auth:/home/app/.codex \
+  ghcr.io/<org>/lightsout:latest
+```
+
+Every setting has a working default (DESIGN §3.4), so no `.env` is needed. The compose file
+stays for maintainers and for the egress-restricted profile.
+
+### 14.3 First-run wizard (SU-03)
+
+The panel detects "not set up yet" from three facts read from SQLite and the health probe:
+engines unauthenticated, workspace `agents/` empty, no projects. It then shows four steps,
+each independently repeatable later from `#/health` and `#/settings`:
+
+1. **Connect engines.** One button per engine (§14.4), or a field to paste an API key.
+2. **Connect Claude Desktop.** The exact `claude_desktop_config.json` block with a copy
+   button, the file path per OS, and a "test connection" indicator that turns green when the
+   first MCP call arrives.
+3. **Install examples.** Copies `examples/agents` into the workspace (`POST /api/setup/examples`).
+4. **First project.** Name, optional git remote, optional verify command; scaffolds through
+   the same code path as `create_project` (PM-01).
+
+### 14.4 Login without a terminal (SU-04)
+
+`POST /api/setup/login/:engine` spawns the engine CLI login inside the container and returns
+a `flowId`; the panel subscribes to `GET /api/setup/login/:flowId` (SSE) and renders the URL
+and code parsed from the CLI output, then the final state from a fresh auth probe.
+
+The callback needs care. Both CLIs bind their loopback listener inside the container, which a
+published port cannot reach (the mapping arrives on the container's external interface). A
+small TCP forwarder in the orchestrator process listens on the container's non-loopback
+address, port 1455, and pipes to `127.0.0.1:1455`; the published port then works. The
+forwarder only runs while a login flow is active and needs no new dependency (`node:net`).
+
+### 14.5 Taking projects out of the managed volume (SU-06)
+
+Default storage is the `lightsout-workspace` volume, so nothing has to be configured at
+start; the trade-off is that projects are not browsable in the host file manager. Two exits:
+`POST /api/export/project/:id` streams a zip to the browser, and when a host folder is
+mounted at `/export`, the same call can mirror the project there (`git clone --local` plus
+`doc/`, so the history survives). A project with a git remote needs neither: push covers it.
+
+### 14.6 Boundaries (SU-05)
+
+The setup surface is the six routes listed in §12.1 and nothing else. It cannot launch,
+abort, answer doubts or write project files outside the scaffold: operational control stays
+in MCP (MC-01). All of it is localhost-bound (WP-09), and the pilot builds no auth.
+
+## 15. Open implementation decisions
+
 - Whether `session/load` resume is exposed by both adapters at pin time; if not, functional-doubt resume falls back to "new run with decision context" (already specified) with no design change.
 - tinyproxy vs squid for the egress sidecar (feature-equivalent for this allowlist use).
+- GHCR organisation/namespace for the published image (phase 8).
+
+Settled during implementation: ACP adapter packages and versions are pinned in the
+Dockerfile and recorded in `doc/DECISIONS.md`.

@@ -10,9 +10,9 @@ Priority levels: MUST (pilot fails without it), SHOULD (build if cheap, else bac
 ## 1. RT — Runtime and container
 
 - RT-01 MUST. One command (`docker compose up`) starts the whole system: orchestrator, MCP endpoint, web panel, database volume.
-- RT-02 MUST. Workspace is a bind mount from the host (WSL2 path), containing `projects/` and `agents/`. Path set by env var.
+- RT-02 MUST. Workspace holds `projects/` and `agents/` in a managed Docker volume by default, so a target machine needs no path configuration. A host bind mount is an advanced option set by env var. Projects can be taken out through the panel (SU-06).
 - RT-03 MUST. Engine credentials (`~/.claude`, `~/.codex`) persist in a named volume and survive container rebuilds.
-- RT-04 MUST. One-time interactive login per engine is scripted (`docker exec`). Missing or expired auth is detected and reported through MCP and the panel; it never fails silently.
+- RT-04 MUST. Engine login is completable from the web panel without a terminal (SU-04). Scripts (`docker exec`) remain as a fallback. Missing or expired auth is detected and reported through MCP and the panel; it never fails silently.
 - RT-05 MUST. Outbound network is an allowlist (engine APIs, git remotes). Everything else is denied. Configurable.
 - RT-06 MUST. `/health` endpoint reports orchestrator, database, engines detected and auth status.
 - RT-07 SHOULD. Graceful shutdown: running sessions receive cancel, state is persisted. On restart, orphaned runs are marked `interrupted` with resume info.
@@ -94,7 +94,7 @@ Priority levels: MUST (pilot fails without it), SHOULD (build if cheap, else bac
 ## 10. WP — Web panel (read-only)
 
 - WP-01 MUST. Served by the container on a configurable port, with no external runtime dependencies.
-- WP-02 MUST. Strictly read-only: no mutating endpoint is exposed.
+- WP-02 MUST. Read-only for all operational data: no endpoint mutates projects, chains, tasks, runs or doubts. The only mutating endpoints are the explicitly listed setup and export actions of the onboarding wizard (SU-05).
 - WP-03 MUST. Real-time updates via SSE or WebSocket, under 2 seconds from event to screen, with automatic reconnection.
 - WP-04 MUST. Global view: active runs across projects, open doubts, engine and auth health.
 - WP-05 MUST. Project view: current run (state, elapsed vs timeout, inactivity vs limit, last action, engine declaration line), chain progress, plan checklist, doc summary, open doubts.
@@ -111,6 +111,21 @@ Priority levels: MUST (pilot fails without it), SHOULD (build if cheap, else bac
 - OB-04 SHOULD. Structured JSON logs to stdout (`docker logs`), tagged with run and task ids, for container-level diagnostics only (startup, crashes, DB unavailable). Never a data source for the panel or history.
 - OB-05 SHOULD. Basic metrics (runs by state, cost per project per day) available through `get_history`, computed from SQLite.
 
+## 12. SU — Setup and distribution
+
+Goal: on a target machine, running LightsOut is "install a container runtime, start the
+container, open the panel". Everything else happens in the browser. Building the image
+stays a maintainer task.
+
+- SU-01 MUST. A prebuilt multi-architecture image (linux/amd64 + linux/arm64) is published to a public registry (GHCR) with version tags and `latest`. The target machine pulls it; it never clones the repository and never compiles.
+- SU-02 MUST. Start is one action with working defaults: a single `docker run` line or a short compose file, no file to edit, no path to choose. Restart policy brings it back automatically after a reboot.
+- SU-03 MUST. First-run web wizard covering: engine connection, the Claude Desktop MCP configuration (shown ready to copy, with the file path), creation of the first project, and installation of the example agent profiles and policy packs.
+- SU-04 MUST. Engine login completes from the panel: the flow runs inside the container, its URL and code are shown on screen, the OAuth loopback callback reaches the container, and the panel reports live progress until auth is green. Pasting an API key is offered as an alternative (NF-03).
+- SU-05 MUST. The mutating surface of the panel is narrow, explicitly enumerated in the design, bound to localhost, and limited to setup and export actions. Operational control stays in MCP.
+- SU-06 SHOULD. A project can be taken out of the managed volume from the panel: download as a zip, or sync to a host folder when one is mounted for that purpose.
+- SU-07 SHOULD. A Windows quick start is documented against Docker Desktop as the official runtime, noting that larger organisations need a paid subscription and that free alternatives exist.
+- SU-08 SHOULD. Updating is `docker pull` plus restart: migrations apply automatically and no manual step is required.
+
 ---
 
 ## Non-functional
@@ -125,7 +140,7 @@ Priority levels: MUST (pilot fails without it), SHOULD (build if cheap, else bac
 - Task DAG with parallel fan-out inside one project (pilot is a linear chain).
 - Optimistic execution with automatic rewind to checkpoints (PE-06 leaves the hook).
 - Preference learning from answered doubts.
-- Web panel write actions, authentication, multi-user.
+- Web panel write actions beyond the setup and export surface of SU-05; authentication; multi-user.
 - Push notifications of any kind (webhooks, mobile). Status awareness stays on the web panel.
 - Browser-based regression testing harness (Playwright).
 - Engines beyond Claude Code and Codex.

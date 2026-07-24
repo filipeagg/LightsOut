@@ -1,0 +1,32 @@
+# Egress-restricted overlay (RT-05).
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.secure.yml --profile secure up -d
+#
+# The lightsout service loses its default route: it sits on an internal network
+# together with the proxy, which is the only container with outbound access.
+services:
+  lightsout:
+    networks:
+      - internal
+    environment:
+      - LO_BIND=0.0.0.0
+      - LO_DB=/data/lightsout.db
+      - LO_WORKSPACE=/workspace
+      - HTTP_PROXY=http://egress:8888
+      - HTTPS_PROXY=http://egress:8888
+      - http_proxy=http://egress:8888
+      - https_proxy=http://egress:8888
+      - NO_PROXY=localhost,127.0.0.1,egress
+      - no_proxy=localhost,127.0.0.1,egress
+      - LO_EGRESS=proxy
+
+  egress:
+    networks:
+      - internal
+      - outbound
+
+networks:
+  internal:
+    internal: true
+  outbound:
+    driver: bridge

@@ -1,0 +1,15 @@
+# Allowlisted destination hosts (extended regex, one per line).
+# Engine APIs and subscription auth (NF-03).
+^api\.anthropic\.com$
+^.*\.anthropic\.com$
+^.*\.claude\.ai$
+^claude\.ai$
+^api\.openai\.com$
+^auth\.openai\.com$
+^chatgpt\.com$
+^.*\.chatgpt\.com$
+# Package registry (image build only; harmless at runtime).
+^registry\.npmjs\.org$
+# Git remotes: uncomment or add the hosts declared in your project configs.
+#^github\.com$
+#^gitlab\.com$

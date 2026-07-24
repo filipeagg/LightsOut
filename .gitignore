@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Secrets and local environment
+.env
+*.pem
+*.key
+
+# Local data (never committed: DB lives in a Docker volume)
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Logs and OS noise
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+
+# Test/coverage artifacts
+coverage/
+.vitest/

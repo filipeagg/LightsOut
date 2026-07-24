@@ -1,0 +1,12 @@
+# Per-project configuration (DESIGN §9.1). Filled in by phase 4; this template is
+# copied verbatim by create_project (PM-01).
+name: CHANGEME
+default_agent: CHANGEME
+policy: default
+verify:
+  # Commands run by the verify gate (OR-04). Non-zero exit fails the task.
+  - echo "no verify command configured"
+git:
+  remote: ""
+  branch: main
+  push: false

@@ -1,0 +1,36 @@
+services:
+  lightsout:
+    build: .
+    image: lightsout:local
+    container_name: lightsout
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${LO_PORT:-8484}:8484"      # panel + API + /mcp (WP-09)
+    volumes:
+      - ${LIGHTSOUT_WORKSPACE}:/workspace       # RT-02
+      - lightsout-db:/data                      # DB-01
+      - claude-auth:/home/app/.claude           # RT-03
+      - codex-auth:/home/app/.codex             # RT-03
+      # - ${SSH_DIR:-~/.ssh}:/home/app/.ssh:ro  # optional, git push (PM-05)
+    environment:
+      - LO_BIND=0.0.0.0
+      - LO_DB=/data/lightsout.db
+      - LO_WORKSPACE=/workspace
+    env_file: .env
+
+  # Egress allowlist proxy (RT-05). Enable with: docker compose --profile secure up -d
+  egress:
+    image: monokal/tinyproxy:latest
+    container_name: lightsout-egress
+    profiles: ["secure"]
+    restart: unless-stopped
+    command: ANY
+    volumes:
+      - ./proxy/tinyproxy.conf:/etc/tinyproxy/tinyproxy.conf:ro
+    expose:
+      - "8888"
+
+volumes:
+  lightsout-db:
+  claude-auth:
+  codex-auth:

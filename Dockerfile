@@ -44,10 +44,15 @@ RUN mkdir -p /data /workspace /home/app/.claude /home/app/.codex \
     && chown -R app:app /data /workspace /opt/lightsout /home/app
 
 USER app
+# CLAUDE_CONFIG_DIR / CODEX_HOME point both engines entirely inside their mounted
+# volumes. Claude Code otherwise keeps ~/.claude.json in the container layer, which
+# a rebuild would discard together with the login state (RT-03).
 ENV NODE_ENV=production \
     LO_BIND=0.0.0.0 \
     LO_DB=/data/lightsout.db \
-    LO_WORKSPACE=/workspace
+    LO_WORKSPACE=/workspace \
+    CLAUDE_CONFIG_DIR=/home/app/.claude \
+    CODEX_HOME=/home/app/.codex
 
 EXPOSE 8484
 ENTRYPOINT ["tini","--"]

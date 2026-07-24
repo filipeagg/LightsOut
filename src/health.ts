@@ -2,10 +2,10 @@
  * Engine detection and auth probing (RT-04, RT-06, DESIGN §11.1 step 5).
  *
  * Detection = the ACP adapter command is resolvable on PATH.
- * Auth       = a credential artifact exists for the engine (subscription login
- *              file written by the CLI, or an API key in the environment).
- * The probe never performs a network call and never reads secret values; it only
- * reports presence, so a probe can never leak credentials (NF-02).
+ * Auth       = the engine CLI's own status command says so (`claude auth status`,
+ *              `codex login status`), with credential-artifact presence as fallback
+ *              when the CLI cannot be run. Both status commands are local and cheap.
+ * The probe never reads secret values, so it cannot leak credentials (NF-02).
  * Results are cached for 10 minutes and re-probed on failure.
  */
 import { access, stat } from "node:fs/promises";
@@ -46,17 +46,72 @@ export type SystemHealth = {
 
 const ENGINE_SPECS: Record<
   EngineName,
-  { credentialFiles: string[]; apiKeyEnv: string[] }
+  {
+    /** CLI status command: [command, ...args]. */
+    statusCommand: string[];
+    credentialFiles: string[];
+    apiKeyEnv: string[];
+  }
 > = {
   claude: {
+    statusCommand: ["claude", "auth", "status"],
     credentialFiles: [".claude/.credentials.json", ".claude/credentials.json"],
     apiKeyEnv: ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"],
   },
   codex: {
+    statusCommand: ["codex", "login", "status"],
     credentialFiles: [".codex/auth.json"],
     apiKeyEnv: ["OPENAI_API_KEY"],
   },
 };
+
+/**
+ * Read the engine CLI's own auth status.
+ * Returns null when the CLI cannot be run, so the caller can fall back.
+ */
+async function cliAuthStatus(
+  engine: EngineName,
+  command: string[],
+): Promise<EngineHealth["authSource"] | "none" | null> {
+  const [bin, ...args] = command;
+  if (!bin) return null;
+  let output = "";
+  try {
+    const { stdout, stderr } = await execFileAsync(bin, args, {
+      timeout: 8000,
+      maxBuffer: 256 * 1024,
+    });
+    output = `${stdout}\n${stderr}`;
+  } catch (err) {
+    // Both CLIs exit non-zero in some "not logged in" states; use their output.
+    const e = err as { stdout?: string; stderr?: string; code?: unknown };
+    if (e.stdout === undefined && e.stderr === undefined) return null;
+    output = `${e.stdout ?? ""}\n${e.stderr ?? ""}`;
+  }
+
+  if (engine === "claude") {
+    // `claude auth status` prints JSON: { loggedIn, authMethod, apiProvider }.
+    const match = output.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      const parsed = JSON.parse(match[0]) as {
+        loggedIn?: boolean;
+        authMethod?: string;
+      };
+      if (parsed.loggedIn !== true) return "none";
+      return parsed.authMethod === "apiKey" ? "api_key" : "subscription";
+    } catch {
+      return null;
+    }
+  }
+
+  // `codex login status` prints "Not logged in" or a description of the method.
+  const text = output.toLowerCase();
+  if (text.includes("not logged in")) return "none";
+  if (text.includes("api key")) return "api_key";
+  if (text.includes("logged in")) return "subscription";
+  return null;
+}
 
 async function commandExists(command: string): Promise<boolean> {
   if (command.includes("/")) {
@@ -95,14 +150,20 @@ async function probeEngine(
   const detected = await commandExists(adapter);
 
   let authSource: EngineHealth["authSource"] = null;
-  for (const rel of spec.credentialFiles) {
-    if (await nonEmptyFile(path.join(homedir(), rel))) {
-      authSource = "subscription";
-      break;
+  const fromCli = await cliAuthStatus(engine, spec.statusCommand);
+  if (fromCli === "subscription" || fromCli === "api_key") {
+    authSource = fromCli;
+  } else if (fromCli === null) {
+    // CLI unavailable: fall back to credential artifacts and API keys.
+    for (const rel of spec.credentialFiles) {
+      if (await nonEmptyFile(path.join(homedir(), rel))) {
+        authSource = "subscription";
+        break;
+      }
     }
-  }
-  if (!authSource && spec.apiKeyEnv.some((k) => (env[k] ?? "").length > 0)) {
-    authSource = "api_key";
+    if (!authSource && spec.apiKeyEnv.some((k) => (env[k] ?? "").length > 0)) {
+      authSource = "api_key";
+    }
   }
 
   return {

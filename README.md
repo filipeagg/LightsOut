@@ -44,6 +44,19 @@ git remote hosts and start with the overlay:
 docker compose -f docker-compose.yml -f docker-compose.secure.yml --profile secure up -d
 ```
 
+## Troubleshooting (WSL2)
+
+- **Everything network hangs inside WSL but works on Windows.** A host firewall may be
+  dropping the WSL NAT traffic. Create `%USERPROFILE%\.wslconfig` with
+  `[wsl2]` / `networkingMode=mirrored` / `dnsTunneling=true` / `autoProxy=true`, then
+  `wsl --shutdown`.
+- **`error getting credentials … docker-credential-desktop.exe: exec format error`.** A
+  leftover Docker Desktop config in `~/.docker` (a `credsStore` entry plus symlinks to the
+  Windows `.docker` folder). Use a clean config dir: `export DOCKER_CONFIG=$HOME/.docker-lo`
+  (create it with `{}` inside `config.json`).
+- **`docker` resolves but the socket is missing.** `/usr/bin/docker` may be a dead symlink
+  into `/mnt/wsl/docker-desktop/...`; remove it and reinstall `docker-ce-cli`.
+
 ## Development
 
 ```bash

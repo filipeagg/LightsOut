@@ -44,9 +44,10 @@ function resolvePanelFile(urlPath: string): string | null {
 }
 
 export async function createHttpServer(deps: ServerDeps): Promise<FastifyInstance> {
+  // Log level defaults to "warn": the panel polls constantly, and per-request
+  // info lines would drown the boot and run output. Errors still surface.
   const app = Fastify({
-    logger: { level: process.env.LO_LOG_LEVEL ?? "info" },
-    disableRequestLogging: true,
+    logger: { level: process.env.LO_LOG_LEVEL ?? "warn" },
   });
 
   app.get("/health", async () => {

@@ -4,7 +4,9 @@
 FROM node:22-slim AS builder
 WORKDIR /build
 COPY package*.json tsconfig.json ./
-RUN npm install --no-audit --no-fund
+# --ignore-scripts: the builder only typechecks/emits JS, so native modules
+# (better-sqlite3) must not be compiled here. The runtime stage builds them.
+RUN npm install --ignore-scripts --no-audit --no-fund
 COPY src/ ./src/
 RUN npx tsc -p tsconfig.json
 
@@ -21,7 +23,10 @@ RUN npm install -g --no-audit --no-fund \
       @agentclientprotocol/claude-agent-acp@0.62.0 \
       @agentclientprotocol/codex-acp@1.1.7
 
-RUN useradd -m -u 1000 app
+# node:22-slim already ships a uid 1000 user named "node"; rename it to app with
+# home /home/app so the credential volumes mount where the design expects (RT-03).
+RUN usermod -l app -d /home/app -m node \
+    && groupmod -n app node
 WORKDIR /opt/lightsout
 
 COPY package*.json ./

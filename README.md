@@ -9,6 +9,7 @@ Copyright 2026 Filipe Gomes. Licensed under the Apache License, Version 2.0 (see
 
 ## Documents
 
+- `doc/INSTALL.md` — full installation guide, including a fresh machine.
 - `doc/REQUIREMENTS.md` — what the system must do (requirement IDs).
 - `doc/DESIGN.md` — how it is built, section by section.
 - `doc/STATE.md` — current phase, last milestone, next step.
@@ -30,6 +31,8 @@ cp .env.example .env
 ./scripts/login-codex.sh
 ./scripts/verify/phase1.sh    # must print PHASE 1 GREEN
 ```
+
+Full guide, including installing on another machine: `doc/INSTALL.md`.
 
 Panel and API: <http://127.0.0.1:8484/> (bound to localhost only).
 Health: `curl -s localhost:8484/health`.

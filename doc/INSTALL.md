@@ -1,0 +1,122 @@
+# LightsOut — installation guide
+
+Everything runs inside one container. The host only needs Docker: Node, TypeScript and
+the engine CLIs live in the image (NF-01).
+
+## 1. Prerequisites
+
+- Windows 11 with WSL2 (Ubuntu 22.04 or newer), or plain Linux.
+- Docker Engine + compose v2 **inside WSL2**. Docker Desktop is not required and its
+  leftovers actively get in the way (see Troubleshooting).
+- A Claude subscription or Anthropic API key, and a ChatGPT subscription or OpenAI API key.
+
+Docker Engine on Ubuntu, if absent:
+
+```bash
+sudo apt-get update && sudo apt-get install -y ca-certificates curl gnupg
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
+sudo apt-get update && sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker
+sudo usermod -aG docker "$USER"
+```
+
+Then close the shell, run `wsl --shutdown` from PowerShell, and reopen it so the `docker`
+group applies. `docker info` must work without sudo before continuing.
+
+## 2. Get the code and configure
+
+```bash
+git clone <remote> lightsout && cd lightsout     # or copy the folder
+cp .env.example .env
+```
+
+Edit `.env` and set `LIGHTSOUT_WORKSPACE` to a **WSL2 ext4 path** such as
+`/home/<user>/lightsout-data`. A `/mnt/c/...` path works but is several times slower for
+git and file I/O. Everything else has sensible defaults (DESIGN §3.4).
+
+## 3. Build and start
+
+```bash
+./scripts/install.sh
+```
+
+It checks Docker, creates `agents/` and `projects/` in the workspace, builds the image
+(~5 minutes the first time) and starts the stack. The equivalent manual commands are
+`docker compose build` and `docker compose up -d`.
+
+## 4. Authenticate the engines (once per machine)
+
+```bash
+./scripts/login-claude.sh      # or --console for API billing, --token for a long-lived token
+./scripts/login-codex.sh       # or --api-key with OPENAI_API_KEY set
+```
+
+Each script runs the OAuth flow in a throwaway container that shares the host network and
+mounts only that engine's credential volume, so the browser callback on `localhost` works
+while the long-lived container keeps its isolated network. Credentials live in the
+`claude-auth` and `codex-auth` volumes and survive rebuilds (RT-03).
+
+If your ChatGPT workspace has device-code auth disabled by policy, use the default browser
+flow (or `--api-key`); `--device-auth` will be rejected by the identity provider.
+
+## 5. Verify
+
+```bash
+./scripts/verify/phase1.sh
+```
+
+Must print `PHASE 1 GREEN`. Panel and API: <http://127.0.0.1:8484/> (localhost only).
+Health JSON: `curl -s localhost:8484/health`.
+
+## 6. Optional: enforce the egress allowlist (RT-05)
+
+By default outbound traffic is unrestricted and `/health` reports
+`network: unrestricted`. To restrict it, add your git remote hosts to `proxy/filter`, then:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.secure.yml --profile secure up -d
+```
+
+## What is per-machine and is never copied
+
+- `.env` — ignored by git, written per machine.
+- Engine credentials — in Docker volumes; every machine does its own login.
+- The SQLite database — a Docker volume; it is that machine's history.
+- The workspace (`projects/`, `agents/`) — share projects through their git remotes
+  (PM-05), not by copying volumes.
+- Agent profiles and policy packs live in the workspace, not in the repo. A fresh machine
+  starts from `examples/agents/`, copied on first boot when `agents/` is empty. Keep tuned
+  profiles in their own repository if you want them on several machines.
+
+## Troubleshooting (WSL2)
+
+- **All network hangs inside WSL while Windows works.** A host firewall is dropping the
+  WSL NAT traffic (seen with Panda Adaptive Defense 360). Create `%USERPROFILE%\.wslconfig`:
+
+  ```ini
+  [wsl2]
+  networkingMode=mirrored
+  dnsTunneling=true
+  autoProxy=true
+  ```
+
+  Then `wsl --shutdown` from PowerShell.
+
+- **`error getting credentials … docker-credential-desktop.exe: exec format error`.** A
+  Docker Desktop leftover in `~/.docker/config.json` (`credsStore`) plus symlinks into the
+  Windows `.docker` folder. Use a clean config dir:
+
+  ```bash
+  mkdir -p ~/.docker-lo && echo '{}' > ~/.docker-lo/config.json
+  export DOCKER_CONFIG=$HOME/.docker-lo
+  ```
+
+- **`docker` resolves but the socket is missing.** `/usr/bin/docker` is a dead symlink into
+  `/mnt/wsl/docker-desktop/...`; remove it and reinstall `docker-ce-cli`.
+
+- **A login page ends blank or with a broken icon.** The engine's login server was reached
+  through a published port instead of the host network. Use `scripts/login-*.sh`, which
+  already handle this; do not run `docker exec … login` directly.

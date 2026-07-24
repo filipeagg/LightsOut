@@ -269,7 +269,8 @@ CREATE INDEX ix_events_run ON events(run_id, id);
 CREATE INDEX ix_events_ts  ON events(ts);
 
 CREATE TABLE doubts (
-  id             TEXT PRIMARY KEY,             -- 'D-' || counter per project (human-friendly)
+  id             TEXT PRIMARY KEY,             -- ulid
+  ref            TEXT NOT NULL,                -- 'D-' || counter per project (human-friendly)
   project_id     TEXT NOT NULL REFERENCES projects(id),
   task_id        TEXT NOT NULL REFERENCES tasks(id),
   run_id         TEXT REFERENCES runs(id),
@@ -282,7 +283,8 @@ CREATE TABLE doubts (
   second_opinion TEXT CHECK (second_opinion IS NULL OR json_valid(second_opinion)),
   answer         TEXT,                         -- option id or free text
   created_at     TEXT NOT NULL,
-  answered_at    TEXT
+  answered_at    TEXT,
+  UNIQUE (project_id, ref)
 );
 CREATE INDEX ix_doubts_open ON doubts(status) WHERE status = 'open';
 
@@ -312,6 +314,10 @@ CREATE TABLE permission_audit (                -- PE-04
 
 CREATE TABLE settings ( key TEXT PRIMARY KEY, value TEXT NOT NULL );
 ```
+
+Doubt identity: `id` is a ulid like every other entity; `ref` is the human-friendly label
+(`D-3`) numbered per project and unique within it. Everything user-facing (panel, MCP
+responses, doc mirrors) shows `ref`; foreign keys use `id`.
 
 Aggregations (costs per project/day, runs by state — OB-05) are SQL views over `runs`, not separate tables.
 
@@ -581,8 +587,8 @@ Uniform envelope: success `{ok:true, …}`; failure `{ok:false, error:{code,mess
 | `launch_chain` | `{projectId, title, tasks:[{title,spec,agentId,level?,verify?}]}` | `{chainId, taskIds, started:bool, queued:bool}` | fire-and-forget (MC-06) |
 | `launch_task` | `{projectId, title, spec, agentId, level?, verify?, chainId?}` | `{taskId, runId?, queued}` | appends to chain if given |
 | `abort_run` | `{runId?, chainId?}` | `{aborted:[ids]}` | OR-06 |
-| `list_doubts` | `{projectId?, status?:'open'}` | `{doubts:[{id,projectId,taskTitle,kind,context,blocks,options,recommendation,secondOpinion?,ageMin}]}` | Desktop renders options as buttons (MC-03) |
-| `answer_doubt` | `{doubtId, choice, note?}` | `{resumed:bool, runId?}` | DO-04 |
+| `list_doubts` | `{projectId?, status?:'open'}` | `{doubts:[{id,ref,projectId,taskTitle,kind,context,blocks,options,recommendation,secondOpinion?,ageMin}]}` | Desktop renders options as buttons (MC-03) |
+| `answer_doubt` | `{doubtId, choice, note?}` | `{resumed:bool, runId?}` | DO-04; `doubtId` accepts the ulid or the `ref` (`D-3`) when `projectId` context is unambiguous |
 | `get_history` | `{projectId?, limit?:20, before?}` | `{runs:[{id,task,engine,model,status,startedAt,durationS,costUsd?,summary}], totals:{byStatus,costUsd}}` | OB-05 |
 | `read_doc` | `{projectId, doc:'STATE'\|'PLAN'\|'DECISIONS'\|'QUESTIONS'}` | `{content, updatedAt}` | |
 | `write_doc` | `{projectId, doc, content}` | `{written:true}` | rejected if a run is active on the project (`CONFLICT`); scoped to doc/ (MC-04) |

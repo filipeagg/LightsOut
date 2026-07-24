@@ -77,6 +77,13 @@ echo "-- engine CLIs"
 check "docker exec $CONTAINER sh -lc 'command -v claude'" "claude CLI on PATH"
 check "docker exec $CONTAINER sh -lc 'command -v codex'" "codex CLI on PATH"
 
+# Guard against a gate that silently skips checks (a quoting slip must not read green).
+expected_checks=19
+[ "$BUILD" = "1" ] || expected_checks=18
+if [ "$((pass + fail))" -ne "$expected_checks" ]; then
+  bad "gate integrity: ran $((pass + fail)) checks, expected $expected_checks"
+fi
+
 echo
 echo "phase 1: ${pass} passed, ${fail} failed"
 [ "$fail" = "0" ] || exit 1

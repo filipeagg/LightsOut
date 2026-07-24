@@ -8,7 +8,21 @@ COPY package*.json tsconfig.json ./
 # (better-sqlite3) must not be compiled here. The runtime stage builds them.
 RUN npm install --ignore-scripts --no-audit --no-fund
 COPY src/ ./src/
-RUN npx tsc -p tsconfig.json
+COPY scripts/copy-assets.mjs ./scripts/
+RUN npx tsc -p tsconfig.json && node scripts/copy-assets.mjs
+
+# Test stage: dev dependencies plus the toolchain better-sqlite3 needs.
+# Built and run by scripts/verify/phase2.sh; not part of the runtime image.
+FROM node:22-slim AS test
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+COPY package*.json tsconfig.json ./
+RUN npm install --no-audit --no-fund
+COPY src/ ./src/
+COPY test/ ./test/
+CMD ["npm", "test"]
 
 FROM node:22-slim
 

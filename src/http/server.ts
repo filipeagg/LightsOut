@@ -12,12 +12,14 @@ import Fastify, { type FastifyInstance } from "fastify";
 import type { Config } from "../config.js";
 import type { Bus } from "../bus.js";
 import type { HealthProbe } from "../health.js";
+import type { Repos } from "../db/repos/index.js";
 
 export type ServerDeps = {
   config: Config;
   bus: Bus;
   health: HealthProbe;
-  /** Database liveness check; phase 2 wires the real one. */
+  /** Read-only access for the JSON API and SSE (phase 7); SELECT-only (OB-01). */
+  repos: Repos;
   checkDatabase: () => { ok: boolean; error?: string };
 };
 

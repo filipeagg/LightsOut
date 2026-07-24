@@ -11,6 +11,9 @@ import { loadConfig } from "./config.js";
 import { createBus } from "./bus.js";
 import { HealthProbe } from "./health.js";
 import { createHttpServer } from "./http/server.js";
+import { checkDatabase, openDb } from "./db/db.js";
+import { migrate } from "./db/migrate.js";
+import { createRepos } from "./db/repos/index.js";
 
 async function readVersion(): Promise<string> {
   try {
@@ -30,8 +33,33 @@ async function main(): Promise<void> {
   const version = await readVersion();
   const bus = createBus();
 
-  // 2-3. TODO(phase 2/4): open DB + migrations, then the recovery pass (§11.2).
-  const checkDatabase = () => ({ ok: true });
+  // 2. Database: single writable connection, migrations applied before anything reads.
+  const db = openDb({ file: config.dbPath });
+  const migration = migrate(db);
+  if (migration.applied.length > 0) {
+    console.log(
+      `[boot] migrations ${migration.from} -> ${migration.to}: ${migration.applied.join(", ")}`,
+    );
+  }
+  const repos = createRepos(db);
+
+  // 3. Recovery pass (§11.2): interrupted work is surfaced, never silently retried.
+  const interrupted = repos.runs.markInterrupted("container restart");
+  for (const run of interrupted) {
+    repos.events.append({
+      runId: run.id,
+      type: "run.state",
+      payload: {
+        status: "interrupted",
+        reason: "container restart",
+        acpSession: run.acp_session,
+      },
+    });
+    repos.tasks.setStatus(run.task_id, "interrupted");
+  }
+  if (interrupted.length > 0) {
+    console.warn(`[boot] ${interrupted.length} run(s) marked interrupted (RT-07)`);
+  }
 
   // 4. TODO(phase 3): load agent profiles and policy packs (AP-01..03).
 
@@ -51,7 +79,13 @@ async function main(): Promise<void> {
   }
 
   // 6. HTTP: panel, health (JSON API, SSE and /mcp land in phases 6-7).
-  const app = await createHttpServer({ config, bus, health, checkDatabase });
+  const app = await createHttpServer({
+    config,
+    bus,
+    health,
+    repos,
+    checkDatabase: () => checkDatabase(db),
+  });
   await app.listen({ host: config.bind, port: config.port });
   console.log(`[boot] listening on http://${config.bind}:${config.port}`);
 
@@ -63,6 +97,7 @@ async function main(): Promise<void> {
     console.log(`[shutdown] ${signal} received`);
     // TODO(phase 3/4): cancel active ACP sessions and persist run state.
     await app.close();
+    db.close();
     process.exit(0);
   };
   process.on("SIGTERM", () => void shutdown("SIGTERM"));

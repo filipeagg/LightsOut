@@ -1,0 +1,54 @@
+/**
+ * Repository bundle: the single object the rest of the process uses to reach the
+ * database. Constructed once at boot from the one writable connection (DB-03, ST-02).
+ */
+import type { Db } from "../db.js";
+import { ProjectsRepo } from "./projects.js";
+import { ChainsRepo } from "./chains.js";
+import { TasksRepo } from "./tasks.js";
+import { RunsRepo } from "./runs.js";
+import { EventsRepo } from "./events.js";
+import { DoubtsRepo } from "./doubts.js";
+import { DecisionsRepo } from "./decisions.js";
+import { AuditRepo } from "./audit.js";
+import { SettingsRepo } from "./settings.js";
+
+export type Repos = {
+  db: Db;
+  projects: ProjectsRepo;
+  chains: ChainsRepo;
+  tasks: TasksRepo;
+  runs: RunsRepo;
+  events: EventsRepo;
+  doubts: DoubtsRepo;
+  decisions: DecisionsRepo;
+  audit: AuditRepo;
+  settings: SettingsRepo;
+};
+
+export function createRepos(db: Db): Repos {
+  return {
+    db,
+    projects: new ProjectsRepo(db),
+    chains: new ChainsRepo(db),
+    tasks: new TasksRepo(db),
+    runs: new RunsRepo(db),
+    events: new EventsRepo(db),
+    doubts: new DoubtsRepo(db),
+    decisions: new DecisionsRepo(db),
+    audit: new AuditRepo(db),
+    settings: new SettingsRepo(db),
+  };
+}
+
+export {
+  ProjectsRepo,
+  ChainsRepo,
+  TasksRepo,
+  RunsRepo,
+  EventsRepo,
+  DoubtsRepo,
+  DecisionsRepo,
+  AuditRepo,
+  SettingsRepo,
+};

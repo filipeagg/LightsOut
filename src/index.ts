@@ -15,6 +15,8 @@ import { checkDatabase, openDb } from "./db/db.js";
 import { migrate } from "./db/migrate.js";
 import { createRepos } from "./db/repos/index.js";
 import { AgentsLoader } from "./agents/loader.js";
+import { recoverInterrupted } from "./orchestrator/recovery.js";
+import { Orchestrator } from "./orchestrator/orchestrator.js";
 
 async function readVersion(): Promise<string> {
   try {
@@ -45,21 +47,11 @@ async function main(): Promise<void> {
   const repos = createRepos(db);
 
   // 3. Recovery pass (§11.2): interrupted work is surfaced, never silently retried.
-  const interrupted = repos.runs.markInterrupted("container restart");
-  for (const run of interrupted) {
-    repos.events.append({
-      runId: run.id,
-      type: "run.state",
-      payload: {
-        status: "interrupted",
-        reason: "container restart",
-        acpSession: run.acp_session,
-      },
-    });
-    repos.tasks.setStatus(run.task_id, "interrupted");
-  }
-  if (interrupted.length > 0) {
-    console.warn(`[boot] ${interrupted.length} run(s) marked interrupted (RT-07)`);
+  const recovery = recoverInterrupted(repos);
+  if (recovery.runs > 0) {
+    console.warn(
+      `[boot] ${recovery.runs} run(s) marked interrupted, ${recovery.chainsPaused.length} chain(s) paused (RT-07)`,
+    );
   }
 
   // 4. Agent profiles and policy packs (AP-01..03), seeded from examples on first boot.
@@ -97,6 +89,10 @@ async function main(): Promise<void> {
     console.warn("[boot] network: unrestricted (egress allowlist disabled, RT-05)");
   }
 
+  // 5b. Orchestrator: owns chains, project locks and the concurrency cap (OR-*, SR-07).
+  // Phase 6 exposes it over MCP; nothing resumes on its own after a restart (RT-07).
+  const orchestrator = new Orchestrator(config, repos, bus, agents);
+
   // 6. HTTP: panel, health (JSON API, SSE and /mcp land in phases 6-7).
   const app = await createHttpServer({
     config,
@@ -114,8 +110,12 @@ async function main(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`[shutdown] ${signal} received`);
-    // TODO(phase 4): cancel active ACP sessions through the orchestrator registry.
     agents.stopWatching();
+    const active = orchestrator.activeRuns;
+    if (active.length > 0) {
+      console.log(`[shutdown] waiting for ${active.length} active run(s)`);
+      await orchestrator.idle();
+    }
     await app.close();
     db.close();
     process.exit(0);

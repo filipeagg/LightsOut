@@ -65,6 +65,18 @@ export function spawnAdapter(input: SpawnAdapterInput): AdapterProcess {
     stdio: ["pipe", "pipe", "pipe"],
   }) as ChildProcessWithoutNullStreams;
 
+  // An adapter that writes after we stopped reading raises EPIPE on its pipe. Unhandled,
+  // that 'error' event takes the whole orchestrator process down, which for an unattended
+  // system is the worst possible failure: swallow pipe errors and report the rest.
+  const ignorePipeError = (label: string) => (err: NodeJS.ErrnoException) => {
+    if (err.code === "EPIPE" || err.code === "ERR_STREAM_DESTROYED") return;
+    input.onStderr?.(`${label} stream error: ${err.message}`);
+  };
+  child.stdin.on("error", ignorePipeError("stdin"));
+  child.stdout.on("error", ignorePipeError("stdout"));
+  child.stderr.on("error", ignorePipeError("stderr"));
+  child.on("error", (err) => input.onStderr?.(`adapter process error: ${err.message}`));
+
   if (input.onStderr) {
     let buffer = "";
     child.stderr.setEncoding("utf8");
@@ -82,6 +94,8 @@ export function spawnAdapter(input: SpawnAdapterInput): AdapterProcess {
   );
 
   const stop = async (graceMs = 10_000): Promise<void> => {
+    // Close our end first so the adapter sees EOF instead of writing into a live pipe.
+    child.stdin.end();
     if (child.exitCode !== null || child.signalCode !== null) return;
     await new Promise<void>((resolve) => {
       const done = () => resolve();

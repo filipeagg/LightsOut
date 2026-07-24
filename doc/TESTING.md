@@ -18,6 +18,15 @@ Not built yet, so not a bug:
 - One-command install and the setup wizard (phase 8).
 - The advisor second opinion, provisional decisions and checkpoint tags (phase 5).
 
+## Control interface
+
+The intended way to drive LightsOut is MCP from Claude Desktop: `list_projects`,
+`project_status`, `create_project`, `launch_task`, `launch_chain`, `abort_run`, `list_doubts`,
+`answer_doubt`, `get_history`, `read_doc`, `write_doc`, `list_agents`, `health`. That server is
+phase 6 and does not exist yet, so until it ships the CLIs below are the only way in, and the
+terminal stays useful afterwards for what MCP does not expose: files on disk, git history,
+container logs, the database, and restarting the container mid-run.
+
 ## Prerequisites
 
 Docker Engine must be running inside WSL2 Ubuntu, and the container must be up:

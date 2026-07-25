@@ -167,20 +167,33 @@ expect_eq "$(sql "SELECT COUNT(*) AS n FROM tasks WHERE chain_id='${bad_chain}' 
   "the task did not report success (DO-03)"
 expect_eq "$(sql "SELECT COUNT(*) AS n FROM tasks WHERE chain_id='${bad_chain}' AND status='queued'")" "1" \
   "the next task was never started"
-doubt_ref=$(sql "SELECT ref FROM doubts WHERE project_id='${BAD}' ORDER BY created_at DESC LIMIT 1")
-# The ref counter is per project and survives re-runs of this gate, so only the shape matters.
+# What the agent does with a contradictory acceptance command is its own judgement, so the gate
+# does not pin one path: it may raise a doubt (DO-01), the advisor may settle it provisionally
+# with a checkpoint (PE-06), or the run may simply fail the verify gate (OR-04). All three are
+# correct; guessing success is not. Everything is scoped to this chain, because the rows of
+# previous runs of this gate stay in the database.
+doubt_ref=$(sql "SELECT d.ref FROM doubts d JOIN tasks t ON t.id=d.task_id WHERE t.chain_id='${bad_chain}' ORDER BY d.created_at DESC LIMIT 1")
+provisional=$(sql "SELECT COUNT(*) AS n FROM decisions d JOIN tasks t ON t.id=d.task_id WHERE t.chain_id='${bad_chain}' AND d.kind='provisional' AND d.checkpoint_tag IS NOT NULL")
 if printf '%s' "$doubt_ref" | grep -Eq '^D-[0-9]+$'; then
-  ok "a doubt was recorded with a per-project ref (DO-01) (got $doubt_ref)"
+  ok "the ambiguity was parked as a doubt with a per-project ref (DO-01) (got $doubt_ref)"
+  expect_ge "$(sql "SELECT COUNT(*) AS n FROM doubts d JOIN tasks t ON t.id=d.task_id WHERE t.chain_id='${bad_chain}' AND json_array_length(d.options) >= 2")" 1 \
+    "the doubt carries at least two options (MC-03)"
+elif [ "${provisional:-0}" -ge 1 ]; then
+  ok "the ambiguity was settled provisionally with a checkpoint (DO-03, PE-06)"
+  expect_ge "${provisional}" 1 "the provisional decision recorded its checkpoint tag (PE-06)"
 else
-  bad "a doubt was recorded with a per-project ref (DO-01) (got '$doubt_ref')"
+  expect_ge "$(sql "SELECT COUNT(*) AS n FROM tasks WHERE chain_id='${bad_chain}' AND status='verify_failed'")" 1 \
+    "the contradictory gate stopped the task at verify (OR-04)"
+  expect_ge "$(sql "SELECT COUNT(*) AS n FROM runs r JOIN tasks t ON t.id=r.task_id WHERE t.chain_id='${bad_chain}' AND r.exit_reason LIKE 'verify exit%'")" 1 \
+    "the run carries the verify failure as recovery info (OR-05)"
 fi
-expect_ge "$(sql "SELECT COUNT(*) AS n FROM doubts WHERE project_id='${BAD}' AND json_array_length(options) >= 2")" 1 \
-  "the doubt carries at least two options (MC-03)"
+expect_eq "$(sql "SELECT status FROM chains WHERE id='${bad_chain}'")" "paused" \
+  "the chain is paused for the human, not failed silently (OR-05)"
 check "! docker exec $CONTAINER test -f /workspace/projects/${BAD}/second.txt" \
   "the second task produced nothing"
 
 # Guard against a gate that silently skips checks.
-expected_checks=25
+expected_checks=26
 if [ "$((pass + fail))" -ne "$expected_checks" ]; then
   bad "gate integrity: ran $((pass + fail)) checks, expected $expected_checks"
 fi

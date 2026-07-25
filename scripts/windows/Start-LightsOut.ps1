@@ -7,12 +7,21 @@
 param(
   [string]$Image = $env:LO_IMAGE,
   [int]$Port = 8484,
+  [string]$Workspace = $env:LIGHTSOUT_WORKSPACE,
   [switch]$Recreate
 )
 
 $ErrorActionPreference = "Stop"
 if (-not $Image) { $Image = "lightsout:local" }   # replaced by the published image in SU-01
 $container = "lightsout"
+
+# RT-02: the workspace is a folder on this machine, so projects open in the user's own editor.
+if (-not $Workspace) { $Workspace = Join-Path $env:USERPROFILE "Documents\LightsOut" }
+$Workspace = [System.IO.Path]::GetFullPath($Workspace)
+if (-not (Test-Path $Workspace)) {
+  New-Item -ItemType Directory -Path $Workspace -Force | Out-Null
+  Write-Host "Created workspace folder: $Workspace" -ForegroundColor Cyan
+}
 
 function Find-Docker {
   $candidates = @(
@@ -74,9 +83,10 @@ if ($running -eq $container -and -not $Recreate) {
     -p "127.0.0.1:${Port}:8484" `
     -p "127.0.0.1:1455:1455" `
     -v lightsout-db:/data `
-    -v lightsout-workspace:/workspace `
+    -v "${Workspace}:/workspace" `
     -v claude-auth:/home/app/.claude `
     -v codex-auth:/home/app/.codex `
+    -e LO_WORKSPACE_MODE=host `
     $Image | Out-Null
   if ($LASTEXITCODE -ne 0) { Write-Host "The container did not start." -ForegroundColor Red; exit 1 }
 }
@@ -99,6 +109,7 @@ $claude = $health.engines | Where-Object { $_.engine -eq "claude" }
 $codex = $health.engines | Where-Object { $_.engine -eq "codex" }
 Write-Host ""
 Write-Host "LightsOut is running: http://127.0.0.1:$Port" -ForegroundColor Green
+Write-Host "  Workspace: $Workspace"
 Write-Host ("  Claude: " + $(if ($claude.auth) { "connected" } else { "NOT connected" }))
 Write-Host ("  Codex:  " + $(if ($codex.auth) { "connected" } else { "NOT connected" }))
 if (-not ($claude.auth -and $codex.auth)) {

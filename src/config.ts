@@ -12,6 +12,10 @@ const schema = z.object({
   port: intFromEnv(8484),
   dbPath: z.string().min(1).default("/data/lightsout.db"),
   workspace: z.string().min(1).default("/workspace"),
+  /** `host` = bind-mounted user folder (RT-02 default), `volume` = managed volume (headless). */
+  workspaceMode: z.enum(["host", "volume"]).default("host"),
+  /** Loader poll interval: bind mounts do not deliver reliable inotify events (AP-03). */
+  watchPollMs: intFromEnv(2000, 250),
   maxParallel: intFromEnv(3),
   timeoutQuickMin: intFromEnv(30),
   timeoutFullMin: intFromEnv(90),
@@ -33,6 +37,8 @@ function raw(env: NodeJS.ProcessEnv) {
     port: env.LO_PORT_INTERNAL ?? "8484",
     dbPath: env.LO_DB,
     workspace: env.LO_WORKSPACE,
+    workspaceMode: env.LO_WORKSPACE_MODE,
+    watchPollMs: env.LO_WATCH_POLL_MS,
     maxParallel: env.LO_MAX_PARALLEL,
     timeoutQuickMin: env.LO_TIMEOUT_QUICK_MIN,
     timeoutFullMin: env.LO_TIMEOUT_FULL_MIN,

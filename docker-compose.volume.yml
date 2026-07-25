@@ -1,0 +1,14 @@
+# Managed-volume workspace, for headless installs where there is no user to open the folder
+# (RT-02, DESIGN §3.2). One override instead of commenting lines in and out of the main file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.volume.yml up -d
+services:
+  lightsout:
+    volumes:
+      - lightsout-workspace:/workspace
+    environment:
+      - LO_WORKSPACE_MODE=volume
+
+volumes:
+  lightsout-workspace:
+    name: lightsout-workspace

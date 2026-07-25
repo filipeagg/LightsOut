@@ -74,8 +74,11 @@ echo "-- credential and data volumes (RT-03, DB-01)"
 for v in claude-auth codex-auth lightsout-db; do
   check "docker volume ls --format '{{.Name}}' | grep -q ${v}\$" "volume ${v} exists"
 done
-check "docker volume ls --format '{{.Name}}' | grep -q lightsout-workspace\$" "workspace volume exists (RT-02)"
+mount_type=$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Type}}{{end}}{{end}}' 2>/dev/null)
+check "[ \"$mount_type\" = bind ]" "workspace is a host bind mount (RT-02)"
 check "docker exec $CONTAINER test -w /workspace" "workspace mounted and writable (RT-02)"
+check "docker exec $CONTAINER sh -lc 'test -d /workspace/agents/policies && test -d /workspace/templates && test -d /workspace/knowledge && test -d /workspace/projects'" "workspace layout ensured at boot (§11.1)"
+check "docker exec $CONTAINER sh -lc 'grep -q vault.yaml /workspace/.gitignore'" "workspace .gitignore covers vault.yaml (VT-01)"
 check "docker exec $CONTAINER sh -lc 'command -v claude-agent-acp'" "claude-agent-acp on PATH"
 check "docker exec $CONTAINER sh -lc 'command -v codex-acp'" "codex-acp on PATH"
 
@@ -84,8 +87,8 @@ check "docker exec $CONTAINER sh -lc 'command -v claude'" "claude CLI on PATH"
 check "docker exec $CONTAINER sh -lc 'command -v codex'" "codex CLI on PATH"
 
 # Guard against a gate that silently skips checks (a quoting slip must not read green).
-expected_checks=20
-[ "$BUILD" = "1" ] || expected_checks=19
+expected_checks=22
+[ "$BUILD" = "1" ] || expected_checks=21
 if [ "$((pass + fail))" -ne "$expected_checks" ]; then
   bad "gate integrity: ran $((pass + fail)) checks, expected $expected_checks"
 fi

@@ -15,6 +15,7 @@ import { checkDatabase, openDb } from "./db/db.js";
 import { migrate } from "./db/migrate.js";
 import { createRepos } from "./db/repos/index.js";
 import { AgentsLoader } from "./agents/loader.js";
+import { ensureWorkspaceLayout } from "./workspace/layout.js";
 import { recoverInterrupted } from "./orchestrator/recovery.js";
 import { Orchestrator } from "./orchestrator/orchestrator.js";
 import { DoubtService } from "./orchestrator/doubts.js";
@@ -55,7 +56,15 @@ async function main(): Promise<void> {
     );
   }
 
-  // 4. Agent profiles and policy packs (AP-01..03), seeded from examples on first boot.
+  // 4. Workspace layout (RT-02, §11.1 step 4): the loaders and the scaffolder assume it exists.
+  const layout = await ensureWorkspaceLayout(config.workspace);
+  console.log(
+    `[boot] workspace ${config.workspace} (${config.workspaceMode})` +
+      (layout.created.length > 0 ? `: created ${layout.created.join(", ")}` : "") +
+      (layout.gitignoreUpdated ? " (.gitignore updated)" : ""),
+  );
+
+  // 4b. Agent profiles and policy packs (AP-01..03), seeded from examples on first boot.
   const agents = new AgentsLoader(config.workspace, (report) => {
     console.log(`[agents] reloaded: ${report.loaded} profile(s), ${report.packs} pack(s)`);
     for (const bad of report.rejected) console.warn(`[agents] rejected ${bad.file}: ${bad.error}`);
@@ -73,7 +82,7 @@ async function main(): Promise<void> {
   for (const bad of agentsReport.rejected) {
     console.warn(`[boot] rejected agent file ${bad.file}: ${bad.error}`);
   }
-  agents.startWatching();
+  agents.startWatching(config.watchPollMs);
 
   // 5. Engine detection and auth probe (RT-04, RT-06).
   const health = new HealthProbe(config, version);

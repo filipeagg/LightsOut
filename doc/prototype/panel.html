@@ -1,0 +1,1271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LightsOut — panel prototype</title>
+<!--
+  STATIC PROTOTYPE. Visual reference for DESIGN.md §12.3.
+  No network, no SSE, no backend: every number below is hand-written fake data.
+  Actions that would mutate something show the confirmation and then stop.
+-->
+<style>
+:root{
+  --bg:#0b0d10; --bg-2:#12151a; --bg-3:#181c22; --bg-4:#1f242c;
+  --line:#252b33; --line-2:#323a45;
+  --fg:#e6e9ee; --fg-2:#a8b0bd; --fg-3:#6d7686;
+  --amber:#f0b429; --green:#3ec98a; --red:#f2635f; --blue:#5aa9f0; --violet:#a98bf5;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--fg);font:14px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;cursor:pointer}
+input,select,textarea{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line-2);border-radius:6px;padding:7px 9px;width:100%}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--blue)}
+textarea{resize:vertical;font-family:var(--mono);font-size:12.5px;line-height:1.6}
+code,.mono{font-family:var(--mono);font-size:12.5px}
+
+/* ---------- shell ---------- */
+#app{display:grid;grid-template-columns:216px 1fr;min-height:100%}
+aside{background:var(--bg-2);border-right:1px solid var(--line);padding:16px 12px;display:flex;flex-direction:column;gap:2px;position:sticky;top:0;height:100vh;overflow:auto}
+.brand{display:flex;align-items:center;gap:9px;padding:4px 8px 16px;font-weight:650;letter-spacing:.02em}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--amber);box-shadow:0 0 10px var(--amber)}
+.navsec{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--fg-3);padding:14px 8px 5px}
+aside a{padding:6.5px 9px;border-radius:6px;color:var(--fg-2);display:flex;justify-content:space-between;align-items:center;gap:8px}
+aside a:hover{background:var(--bg-3);color:var(--fg)}
+aside a.on{background:var(--bg-4);color:var(--fg);box-shadow:inset 2px 0 0 var(--amber)}
+main{padding:26px 32px 90px;max-width:1180px}
+h1{font-size:21px;margin:0 0 3px;font-weight:620}
+h2{font-size:15px;margin:30px 0 12px;font-weight:600}
+.sub{color:var(--fg-3);font-size:12.5px;margin:0 0 22px;max-width:70ch}
+
+/* ---------- primitives ---------- */
+.card{background:var(--bg-2);border:1px solid var(--line);border-radius:10px}
+.pad{padding:16px 18px}
+.row{display:flex;gap:10px;align-items:center}
+.between{display:flex;gap:12px;align-items:center;justify-content:space-between}
+.wrap{flex-wrap:wrap}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:920px){.g2,.g3,.g4{grid-template-columns:1fr}}
+.muted{color:var(--fg-3)}.dim{color:var(--fg-2)}
+.tiny{font-size:11.5px}
+.btn{background:var(--bg-4);border:1px solid var(--line-2);border-radius:6px;padding:6px 12px;font-size:12.5px}
+.btn:hover{border-color:var(--fg-3)}
+.btn.primary{background:var(--amber);border-color:var(--amber);color:#1a1400;font-weight:600}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.danger{color:var(--red);border-color:#4a2b2b}
+.btn.danger:hover{background:#2a1a1a}
+.btn.sm{padding:3.5px 9px;font-size:11.5px}
+.btn:disabled{opacity:.38;cursor:not-allowed}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2.5px 8px;border-radius:999px;border:1px solid var(--line-2);background:var(--bg-3);color:var(--fg-2);white-space:nowrap}
+.pill b{font-weight:600;color:var(--fg)}
+.pill.green{color:var(--green);border-color:#22503c;background:#10201a}
+.pill.amber{color:var(--amber);border-color:#4d3c14;background:#1f1a0c}
+.pill.red{color:var(--red);border-color:#4a2b2b;background:#201414}
+.pill.blue{color:var(--blue);border-color:#1e3d5c;background:#0e1a26}
+.pill.violet{color:var(--violet);border-color:#3a2f5c;background:#161226}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--fg-3);font-weight:600;padding:0 12px 9px;border-bottom:1px solid var(--line)}
+td{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--bg-3)}
+.bar{height:5px;border-radius:3px;background:var(--bg-4);overflow:hidden;display:flex}
+.bar i{display:block;height:100%}
+.kv{display:grid;grid-template-columns:160px 1fr;gap:7px 14px;font-size:13px;margin:0}
+.kv dt{color:var(--fg-3)}
+.kv dd{margin:0}
+.empty{color:var(--fg-3);text-align:center;padding:34px;font-size:13px}
+.note{border-left:2px solid var(--line-2);padding:2px 0 2px 12px;color:var(--fg-3);font-size:12.5px}
+
+/* ---------- attention strip (OB-03) ---------- */
+.attn{border:1px solid #4d3c14;background:linear-gradient(180deg,#1c1709,#141108);border-radius:10px;padding:14px 16px;margin-bottom:22px}
+.attn.calm{border-color:#22503c;background:linear-gradient(180deg,#0f1c17,#0c1512)}
+.attn h3{margin:0 0 10px;font-size:11.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--amber)}
+.attn.calm h3{color:var(--green)}
+.attnitem{display:flex;gap:11px;align-items:flex-start;padding:9px 0;border-top:1px solid #241d0b}
+.attnitem:first-of-type{border-top:none;padding-top:2px}
+.attnitem .ic{width:18px;text-align:center;flex:0 0 18px}
+
+/* ---------- phases (TP-06) ---------- */
+.phase{display:grid;grid-template-columns:26px 1fr auto;gap:12px;padding:13px 0;border-top:1px solid var(--line);align-items:start}
+.phase:first-child{border-top:none}
+.mark{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;border:1.5px solid var(--line-2);color:var(--fg-3);background:var(--bg-3)}
+.mark.done{border-color:#22503c;background:#10201a;color:var(--green)}
+.mark.running{border-color:#4d3c14;background:#1f1a0c;color:var(--amber);animation:pulse 1.9s ease-in-out infinite}
+.mark.failed{border-color:#4a2b2b;background:#201414;color:var(--red)}
+.mark.skipped{border-style:dashed}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.42}}
+.phase .ttl{font-weight:560}
+.phase.pending .ttl{color:var(--fg-2)}
+.phase.skipped .ttl{color:var(--fg-3);text-decoration:line-through}
+.phasemeta{display:flex;gap:7px;flex-wrap:wrap;margin-top:6px}
+.phasebar{display:flex;gap:3px;margin-top:4px;min-width:120px}
+.phasebar i{height:5px;flex:1;border-radius:2px;background:var(--bg-4)}
+.phasebar i.done{background:var(--green)}
+.phasebar i.running{background:var(--amber)}
+.phasebar i.failed{background:var(--red)}
+.phasebar i.skipped{background:var(--line-2)}
+
+/* ---------- misc ---------- */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:0 0 20px}
+.tabs a{padding:8px 13px;font-size:13px;color:var(--fg-3);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a:hover{color:var(--fg-2)}
+.tabs a.on{color:var(--fg);border-bottom-color:var(--amber)}
+.stat{padding:14px 16px}
+.stat .n{font-size:25px;font-weight:640;letter-spacing:-.02em;line-height:1.1}
+.stat .l{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--fg-3);margin-top:5px}
+.timeline{font-family:var(--mono);font-size:12px;line-height:1.9}
+.timeline > div{display:flex;gap:12px}
+.timeline .t{color:var(--fg-3);flex:0 0 52px}
+.timeline .k{flex:0 0 128px;color:var(--blue)}
+.timeline .v{color:var(--fg-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+dialog{border:1px solid var(--line-2);background:var(--bg-2);color:var(--fg);border-radius:12px;padding:0;max-width:680px;width:calc(100% - 40px);box-shadow:0 24px 60px rgba(0,0,0,.6)}
+dialog::backdrop{background:rgba(4,5,7,.72)}
+.dlg-h{padding:16px 20px;border-bottom:1px solid var(--line);font-weight:600}
+.dlg-b{padding:20px;max-height:64vh;overflow:auto;display:grid;gap:15px}
+.dlg-f{padding:14px 20px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:9px;background:var(--bg-3);border-radius:0 0 12px 12px}
+label{display:block;font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--fg-3);margin-bottom:5px}
+.fake{position:fixed;right:14px;bottom:14px;background:var(--bg-4);border:1px solid var(--line-2);color:var(--fg-3);font-size:11px;padding:6px 11px;border-radius:999px;z-index:50}
+.drag{cursor:grab;color:var(--fg-3);padding:0 3px;user-select:none}
+.wizstep{display:grid;grid-template-columns:30px 1fr;gap:14px;padding:17px 0;border-top:1px solid var(--line)}
+.wizstep:first-of-type{border-top:none;padding-top:2px}
+.wizn{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:11.5px;font-weight:700;background:var(--bg-4);color:var(--fg-3);border:1px solid var(--line-2)}
+.wizn.ok{background:#10201a;border-color:#22503c;color:var(--green)}
+.wizn.now{background:#1f1a0c;border-color:#4d3c14;color:var(--amber)}
+.copy{display:flex;gap:8px;align-items:center;background:var(--bg);border:1px solid var(--line-2);border-radius:6px;padding:8px 10px;font-family:var(--mono);font-size:12.5px}
+.copy span{flex:1;overflow:auto;white-space:nowrap}
+.opt{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border:1px solid var(--line-2);border-radius:8px;background:var(--bg-3);cursor:pointer}
+.opt:hover{border-color:var(--fg-3)}
+.opt input{width:auto;margin-top:3px}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside>
+    <div class="brand"><span class="dot"></span> LightsOut</div>
+    <a href="#/" data-r="/">Overview</a>
+    <a href="#/projects" data-r="/projects">Projects <span class="pill amber">2</span></a>
+    <div class="navsec">Configuration</div>
+    <a href="#/agents" data-r="/agents">Agents</a>
+    <a href="#/templates" data-r="/templates">Templates</a>
+    <a href="#/knowledge" data-r="/knowledge">Knowledge</a>
+    <a href="#/vault" data-r="/vault">Vault</a>
+    <div class="navsec">System</div>
+    <a href="#/health" data-r="/health">Health <span class="pill red">1</span></a>
+    <a href="#/setup" data-r="/setup">Setup</a>
+  </aside>
+  <main id="view"></main>
+</div>
+<div class="fake">static prototype — no backend</div>
+<dialog id="dlg"></dialog>
+
+<script>
+/* ======================================================================
+   FAKE DATA. Shapes mirror DESIGN §10.2 / §12.1 so the real panel can swap
+   in fetch() without reshaping a single renderer.
+   ====================================================================== */
+const ENGINES = {
+  claude:{installed:true, auth:true,  models:['claude-opus-5','claude-sonnet-5','claude-haiku-4-5'], reasoning:['low','medium','high']},
+  codex: {installed:true, auth:false, models:['gpt-5-codex','gpt-5-codex-mini'],                     reasoning:['low','medium','high']}
+};
+
+const AGENTS = [
+ {id:'prompt-architect',name:'Prompt architect',engine:'claude',model:'claude-opus-5',reasoning:'high',policy:'read-only',deliverable:'doc/PROMPT.md',enabled:true,source:'builtin',tags:['shaping'],valid:true,
+  instructions:"The user's raw request is in the task spec. Interrogate it.\n\nName every risk you see, in plain words, without softening them. List what you cannot decide alone and open a doubt for each — never fill a gap by assumption.\n\nProduce doc/PROMPT.md covering: scope, non-goals, actors, data, integrations, constraints, acceptance criteria and failure modes."},
+ {id:'contract-prober',name:'Contract prober',engine:'codex',model:'gpt-5-codex',reasoning:'medium',policy:'probe',deliverable:'doc/CONTRACTS.md',enabled:true,source:'builtin',tags:['api','python'],valid:true,
+  instructions:"For every API the prompt depends on, write real Python probes under probes/ against the test credentials in the vault, and record what actually happens — not what the documentation claims.\n\nIf a credential you need is missing, open a doubt naming the entry. Never hardcode, never guess a base URL."},
+ {id:'planner',name:'Planner',engine:'claude',model:'claude-opus-5',reasoning:'high',policy:'read-only',deliverable:'doc/PLAN.md',enabled:true,source:'builtin',tags:['planning'],valid:true,
+  instructions:'Write a plan another agent can execute without asking a single question. Contracts, signatures, file paths, edge cases, order of work. Ambiguity is the defect you exist to remove.'},
+ {id:'builder',name:'Builder',engine:'claude',model:'claude-sonnet-5',reasoning:'medium',policy:'default',deliverable:'code + tests',enabled:true,source:'workspace',tags:['dev'],valid:true,
+  instructions:'You are a senior developer with fifteen years behind you. Execute exactly the piece of the plan you were given. Do not refactor what you were not asked to touch. Tests ship with the code, in the same commit.'},
+ {id:'coordinator',name:'Coordinator',engine:'claude',model:'claude-sonnet-5',reasoning:'medium',policy:'read-only',deliverable:'—',enabled:true,source:'builtin',tags:['meta'],valid:true,
+  instructions:'You own the project across its phases: which phase it is in, what it is waiting on, what the user still has to decide. Answer other agents’ doubts when you can, escalate when you cannot.'},
+ {id:'software-auditor',name:'Software auditor',engine:'codex',model:'gpt-5-codex',reasoning:'high',policy:'read-only',deliverable:'doc/AUDIT.md',enabled:true,source:'builtin',tags:['quality'],valid:true,
+  instructions:'Audit what was delivered: correctness, test coverage, error handling, dependency hygiene, dead code. Rank findings by what would actually hurt in production. No style opinions.'},
+ {id:'qa-engineer',name:'QA engineer',engine:'claude',model:'claude-sonnet-5',reasoning:'medium',policy:'test',deliverable:'doc/QA-REPORT.md',enabled:true,source:'builtin',tags:['qa'],valid:true,
+  instructions:'Write and run regression and integration tests, including a scripted walk through the web interface. Report what passed and what did not, with an exact reproduction for each failure.'},
+ {id:'codebase-analyst',name:'Codebase analyst',engine:'claude',model:'claude-opus-5',reasoning:'high',policy:'curate',deliverable:'workspace:knowledge/&lt;base&gt;/*.md',enabled:true,source:'builtin',tags:['analysis'],valid:true,
+  instructions:'Read the system until you understand it. Write it up for another AI to consume: structure, rules, invariants, components, gotchas. Whatever you cannot determine alone becomes a doubt, not a guess.'},
+ {id:'answerer',name:'Answerer',engine:'claude',model:'claude-haiku-4-5',reasoning:'low',policy:'no-write',deliverable:'the answer',enabled:true,source:'builtin',tags:['fast'],valid:true,
+  instructions:'Answer the question against the attached knowledge. Briefly. If the knowledge does not contain the answer, say so, and say what would.'},
+ {id:'reviewer',name:'Reviewer',engine:'codex',model:'gpt-5-codex-mini',reasoning:'medium',policy:'read-only',deliverable:'review notes',enabled:false,source:'builtin',tags:['review'],valid:true,
+  instructions:'Review the diff for the task. Correctness first, then maintainability.'},
+ {id:'legacy-migrator',name:'Legacy migrator',engine:'codex',model:'gpt-4o-codex',reasoning:'high',policy:'default',deliverable:'code',enabled:true,source:'workspace',tags:['legacy'],valid:false,
+  error:"unknown model 'gpt-4o-codex' for engine codex — AP-08 rejects it before launch",instructions:'Port the legacy module to the new interfaces without changing behaviour.'}
+];
+
+const POLICIES = [
+ {id:'default',  summary:'Writes and local git inside the project; deps and deletes need a human; push and network denied.'},
+ {id:'read-only',summary:'Writes allowed only under doc/. Source is untouchable.'},
+ {id:'no-write', summary:'No writes at all. Nothing to commit.'},
+ {id:'probe',    summary:'Network and execute; writes confined to probes/; vault entries must be test_only.'},
+ {id:'test',     summary:'Execute plus loopback network; writes confined to the test directories.'},
+ {id:'curate',   summary:'knowledge_write allowed, narrowed to the one base the project declared writable.'},
+ {id:'advisor',  summary:'Everything read-only, terminal denied. Used by second-opinion sessions.'}
+];
+
+const TEMPLATES = [
+ {id:'quick-prototype',name:'Quick prototype',source:'builtin',valid:true,
+  description:'Proving an idea works. No planning phase, no audit: speed over durability, and the code is expected to be thrown away.',
+  phases:[
+   {id:'shape-the-prompt',title:'Turn the idea into a workable prompt',agent:'prompt-architect',gate:'human',deliverable:'doc/PROMPT.md'},
+   {id:'build',title:'Build it',agent:'builder',gate:'auto',repeatable:true},
+   {id:'qa-smoke',title:'Smoke test',agent:'qa-engineer',gate:'auto',optional:true}]},
+ {id:'full-development',name:'Full development',source:'builtin',valid:true,
+  description:'Work that has to survive. Two human gates — on the prompt and on the plan — because those are the two places where a wrong turn is cheapest to fix.',
+  phases:[
+   {id:'shape-the-prompt',title:'Turn the idea into a workable prompt',agent:'prompt-architect',gate:'human',deliverable:'doc/PROMPT.md'},
+   {id:'probe-contracts',title:'Probe the external contracts',agent:'contract-prober',gate:'auto',deliverable:'doc/CONTRACTS.md',optional:true,repeatable:true},
+   {id:'plan',title:'Write the development plan',agent:'planner',gate:'human',deliverable:'doc/PLAN.md'},
+   {id:'build',title:'Implement the plan',agent:'builder',gate:'auto',repeatable:true,verify:'npm test'},
+   {id:'qa',title:'Regression and integration tests',agent:'qa-engineer',gate:'auto',deliverable:'doc/QA-REPORT.md'},
+   {id:'audit',title:'Audit the delivered code',agent:'software-auditor',gate:'auto',deliverable:'doc/AUDIT.md'}]},
+ {id:'knowledge-curation',name:'Knowledge curation',source:'builtin',valid:true,
+  description:'Turning an existing system into a knowledge base. The only template that runs with a writable knowledge base attached.',
+  phases:[
+   {id:'analyse',title:'Analyse the existing system',agent:'codebase-analyst',gate:'auto',deliverable:'doc/ANALYSIS.md',repeatable:true},
+   {id:'interrogate',title:'Ask what cannot be inferred',agent:'codebase-analyst',gate:'human',deliverable:'doc/OPEN-QUESTIONS.md'},
+   {id:'write-base',title:'Write the knowledge base',agent:'codebase-analyst',gate:'auto',deliverable:'workspace:knowledge/&lt;base&gt;/index.md'}]},
+ {id:'quick-answers',name:'Quick answers',source:'builtin',valid:true,
+  description:'Questions against curated knowledge, or generic ones. One phase, launched again for each question. No verify, nothing to commit.',
+  phases:[{id:'answer',title:'Answer the question',agent:'answerer',gate:'auto',repeatable:true}]},
+ {id:'erp-integration',name:'ERP integration (ours)',source:'workspace',valid:false,
+  error:"phase 'migrate-review' references agent 'legacy-migrator', which is invalid — TP-03 refuses the template",
+  description:'Cloned from full-development, with the probing phase made mandatory and a migration review added.',
+  phases:[
+   {id:'shape-the-prompt',title:'Turn the idea into a workable prompt',agent:'prompt-architect',gate:'human',deliverable:'doc/PROMPT.md'},
+   {id:'probe-contracts',title:'Probe the ERP contracts',agent:'contract-prober',gate:'human',deliverable:'doc/CONTRACTS.md'},
+   {id:'migrate-review',title:'Review the migration path',agent:'legacy-migrator',gate:'human'}]}
+];
+
+const KNOWLEDGE = [
+ {id:'erpagro-core',name:'ERPagro core',kind:'technical',updated:'2026-07-21',docs:7,chars:96400,owner:'felipe.gomes@hispatec.com',tags:['erp','agro','sql-server','legacy'],attachedTo:['erpagro-sync','margaret-forecast'],
+  description:'How the ERPagro core is structured and what its invariants are. Written by a knowledge-curation project over the 2019 codebase.'},
+ {id:'margaret-api',name:'Margaret public API',kind:'technical',updated:'2026-07-24',docs:4,chars:41200,owner:'felipe.gomes@hispatec.com',tags:['api','rest','margaret'],attachedTo:['margaret-forecast'],
+  description:'Endpoint-by-endpoint behaviour of the Margaret API as observed by probes, including the pagination quirk on /orders.'},
+ {id:'agro-domain',name:'Agronomy domain',kind:'functional',updated:'2026-06-30',docs:11,chars:132000,owner:'product',tags:['domain','crops','irrigation'],attachedTo:['erpagro-sync','margaret-forecast'],
+  description:'What a plot, a campaign and a treatment actually mean to a customer, and which of those meanings differ by country.'},
+ {id:'hispatec-ways',name:'How we work',kind:'organisational',updated:'2026-05-12',docs:5,chars:28900,owner:'engineering',tags:['process','review','release'],attachedTo:['erpagro-sync'],
+  description:'Branching, review expectations, release cadence, who signs off on what. Preferences, not constraints — and labelled as such on purpose.'},
+ {id:'competitors-2026',name:'Market landscape 2026',kind:'market',updated:'2026-04-02',docs:3,chars:19800,owner:'strategy',tags:['market','pricing'],attachedTo:[],
+  description:'Who else sells this, at what price, with which gaps. Ages fast — check the date before trusting it.'}
+];
+
+const VAULT = [
+ {id:'erpagro-sandbox',label:'ERPagro sandbox API',base_url:'https://sandbox.erpagro.example.com/api/v2',auth:'bearer',test_only:true,scope:['*'],
+  notes:'Rate-limited to 60 rpm. /orders paginates from 1, not 0.',fields:[{name:'token',present:true,updated:'2026-07-24'}]},
+ {id:'margaret-staging',label:'Margaret staging',base_url:'https://staging.margaret.example.com',auth:'api_key',test_only:true,scope:['margaret-forecast'],
+  notes:'Header is X-Margaret-Key, not Authorization.',fields:[{name:'api_key',present:true,updated:'2026-07-22'},{name:'tenant',present:true,updated:'2026-07-22'}]},
+ {id:'weather-provider',label:'Weather provider',base_url:'https://api.weather.example.com/v3',auth:'api_key',test_only:false,scope:['margaret-forecast'],
+  notes:'Production only — no sandbox exists, so the probe pack refuses it (VT-06).',fields:[{name:'api_key',present:true,updated:'2026-07-18'}]},
+ {id:'erpagro-prod',label:'ERPagro production',base_url:'https://erpagro.example.com/api/v2',auth:'bearer',test_only:false,scope:[],
+  notes:'Placeholder. No value stored and none should be.',fields:[{name:'token',present:false,updated:null}]}
+];
+
+const PROJECTS = [
+ {id:'erpagro-sync',name:'ERPagro ⇄ Margaret sync',template:'full-development',knowledge:['erpagro-core','agro-domain','hispatec-ways'],
+  remote:'git@github.com:hispatec/erpagro-sync.git',verify:'npm test',lastActivity:'4 min ago',
+  run:{id:'01JZ8Q','status':'running',engine:'claude',model:'claude-sonnet-5',elapsed:'12m 40s',timeout:'90m',inactivity:'18s',inactivityLimit:'8m',
+       lastAction:'edit src/sync/orders.ts',phase:'build',tokens:'184k in / 21k out',cost:'$1.42'},
+  phases:[
+   {id:'shape-the-prompt',title:'Turn the idea into a workable prompt',agent:'prompt-architect',status:'done',gate:'human',deliverable:'doc/PROMPT.md',ended:'yesterday 18:20'},
+   {id:'probe-contracts',title:'Probe the external contracts',agent:'contract-prober',status:'done',gate:'auto',deliverable:'doc/CONTRACTS.md',optional:true,repeatable:true,ended:'today 09:05'},
+   {id:'plan',title:'Write the development plan',agent:'planner',status:'done',gate:'human',deliverable:'doc/PLAN.md',ended:'today 11:48'},
+   {id:'build',title:'Implement the plan',agent:'builder',status:'running',gate:'auto',repeatable:true,verify:'npm test',started:'today 17:29'},
+   {id:'qa',title:'Regression and integration tests',agent:'qa-engineer',status:'pending',gate:'auto',deliverable:'doc/QA-REPORT.md'},
+   {id:'audit',title:'Audit the delivered code',agent:'software-auditor',status:'pending',gate:'auto',deliverable:'doc/AUDIT.md'}],
+  doubts:[
+   {ref:'D-7',kind:'permission',age:'22 min',blocks:'installing a dependency',
+    context:'The builder wants to run `npm i zod@3` to validate the sync payloads. The class is deps_install, which the default pack resolves to require_human.',
+    options:[{id:'A',text:'Allow it once for this run'},{id:'B',text:'Allow and remember for this project'},{id:'C',text:'Deny — use the validation already in the repo'}],
+    recommendation:'A'}],
+  state:{next:'Finish the build phase, then QA.',lastDecision:'D-6: paginate from 1, per the probe (provisional, both engines agreed).'}},
+
+ {id:'margaret-forecast',name:'Margaret forecast widget',template:'quick-prototype',knowledge:['margaret-api','agro-domain'],
+  remote:null,verify:null,lastActivity:'1 h ago',run:null,
+  phases:[
+   {id:'shape-the-prompt',title:'Turn the idea into a workable prompt',agent:'prompt-architect',status:'done',gate:'human',deliverable:'doc/PROMPT.md',ended:'today 15:10'},
+   {id:'build',title:'Build it',agent:'builder',status:'failed',gate:'auto',repeatable:true,started:'today 16:02',ended:'today 16:31',
+    error:'verify_failed — 3 of 41 tests red in the chart renderer'},
+   {id:'qa-smoke',title:'Smoke test',agent:'qa-engineer',status:'pending',gate:'auto',optional:true}],
+  doubts:[
+   {ref:'D-3',kind:'functional',age:'1 h 12 min',blocks:'the chart renderer',
+    context:'The Margaret API returns forecast confidence as a band (p10/p50/p90), but the mockup shows a single line. Rendering only p50 throws away the information the customer asked for; rendering the band changes the agreed design.',
+    options:[{id:'A',text:'Single p50 line, as the mockup shows'},{id:'B',text:'Shaded band with the p50 line on top'},{id:'C',text:'Line now, band behind a toggle'}],
+    recommendation:'B',
+    secondOpinion:{engine:'codex',agrees:false,confidence:0.55,reasoning:'Prefers A: the mockup is signed off, and widening scope mid-prototype is how prototypes stop being prototypes. Disagreement is why this doubt opened instead of auto-continuing (DO-03).'}}],
+  state:{next:'Answer D-3, then re-launch the build phase.',lastDecision:'D-2: use the staging tenant for all probes (human).'}},
+
+ {id:'erpagro-knowledge',name:'ERPagro knowledge base',template:'knowledge-curation',knowledge:['erpagro-core'],writable:'erpagro-core',
+  remote:null,verify:null,lastActivity:'3 days ago',run:null,
+  phases:[
+   {id:'analyse',title:'Analyse the existing system',agent:'codebase-analyst',status:'done',gate:'auto',deliverable:'doc/ANALYSIS.md',repeatable:true,ended:'22 Jul 12:40'},
+   {id:'interrogate',title:'Ask what cannot be inferred',agent:'codebase-analyst',status:'done',gate:'human',deliverable:'doc/OPEN-QUESTIONS.md',ended:'22 Jul 17:05'},
+   {id:'write-base',title:'Write the knowledge base',agent:'codebase-analyst',status:'done',gate:'auto',deliverable:'workspace:knowledge/erpagro-core/index.md',ended:'22 Jul 19:31'}],
+  doubts:[],state:{next:'Nothing pending. The base it produced is attached to two projects.',lastDecision:'D-9: treat the 2019 module as frozen, document rather than fix (human).'}},
+
+ {id:'ask',name:'Questions',template:'quick-answers',knowledge:['erpagro-core','agro-domain','hispatec-ways'],
+  remote:null,verify:null,lastActivity:'26 min ago',run:null,
+  phases:[
+   {id:'answer',title:'Answer the question',agent:'answerer',status:'done',gate:'auto',repeatable:true,ended:'today 17:16'}],
+  doubts:[],state:{next:'Launch the phase again for the next question.',lastDecision:'—'}}
+];
+
+const HISTORY = [
+ {run:'01JZ8P',phase:'plan',agent:'planner',engine:'claude',status:'ok',started:'today 11:20',dur:'28m',cost:'$2.10',summary:'Plan written: 6 tasks, contracts for both directions of the sync.'},
+ {run:'01JZ8N',phase:'probe-contracts',agent:'contract-prober',engine:'codex',status:'ok',started:'today 08:31',dur:'34m',cost:'—',summary:'12 endpoints probed. Found the /orders 1-based pagination and a silent 200-with-error-body on POST.'},
+ {run:'01JZ8M',phase:'probe-contracts',agent:'contract-prober',engine:'codex',status:'doubt',started:'today 08:04',dur:'6m',cost:'—',summary:'Stopped: no test credential for the weather provider (D-5).'},
+ {run:'01JZ8K',phase:'shape-the-prompt',agent:'prompt-architect',engine:'claude',status:'ok',started:'yesterday 17:44',dur:'36m',cost:'$1.85',summary:'Prompt written after 4 questions. Flagged the two-way conflict resolution as the main risk.'},
+ {run:'01JZ8J',phase:'shape-the-prompt',agent:'prompt-architect',engine:'claude',status:'timeout',started:'yesterday 16:50',dur:'30m',cost:'$0.94',summary:'Hard timeout while waiting on an unanswered doubt. Re-run picked up the context.'}
+];
+
+const TIMELINE = [
+ ['17:41','file.edit','src/sync/orders.ts — patch applied'],
+ ['17:41','tool.call','read src/sync/contracts.ts'],
+ ['17:39','perm.verdict','project_write → allow (agent pack)'],
+ ['17:38','agent.message','Adding the 1-based page offset from the contract…'],
+ ['17:33','perm.verdict','deps_install → require_human (default pack) → D-7'],
+ ['17:31','git.commit','wip(lightsout): 01JZ8Q 17:31'],
+ ['17:29','run.state','running'],
+ ['17:29','phase.state','build → running (actor: mcp)']
+];
+
+/* ======================================================================
+   HELPERS
+   ====================================================================== */
+const $  = q=>document.querySelector(q);
+const view = $('#view'), dlg = $('#dlg');
+const agent = id=>AGENTS.find(a=>a.id===id)||{id,name:id,valid:false,error:'not found'};
+const project = id=>PROJECTS.find(p=>p.id===id);
+const template = id=>TEMPLATES.find(t=>t.id===id);
+const kb = id=>KNOWLEDGE.find(k=>k.id===id);
+const openDoubts = ()=>PROJECTS.flatMap(p=>p.doubts.map(d=>({...d,project:p})));
+const KINDPILL = {technical:'blue',functional:'violet',organisational:'green',market:'amber',other:''};
+const STATUSPILL = {ok:'green',done:'green',running:'amber',doubt:'amber',pending:'',failed:'red',verify_failed:'red',timeout:'red',error:'red',skipped:''};
+const MARK = {done:'✓',running:'●',failed:'!',skipped:'–',pending:''};
+
+function phaseBar(phases){
+  return `<div class="phasebar">${phases.map(p=>`<i class="${p.status}" title="${p.title}: ${p.status}"></i>`).join('')}</div>`;
+}
+function counts(phases){
+  const c={done:0,running:0,pending:0,failed:0,skipped:0};
+  phases.forEach(p=>c[p.status]++);
+  return c;
+}
+
+/* Every mutating control lands here. In the real panel this is a fetch to
+   §12.1b; here it shows what the confirmation looks like and stops. */
+function act(what,detail,destructive){
+  dlg.innerHTML = `
+    <div class="dlg-h">${destructive?'Confirm':'Action'}: ${what}</div>
+    <div class="dlg-b">
+      <div>${detail}</div>
+      <div class="note">Static prototype: nothing happens. In the real panel this posts to the
+      route in DESIGN §12.1b, which calls the same <code>actions.ts</code> function the MCP tool
+      calls, with <code>actor='panel'</code>.</div>
+    </div>
+    <div class="dlg-f">
+      <button class="btn" onclick="dlg.close()">Cancel</button>
+      <button class="btn ${destructive?'danger':'primary'}" onclick="dlg.close()">${destructive?'Yes, do it':'Confirm'}</button>
+    </div>`;
+  dlg.showModal();
+}
+
+/* ======================================================================
+   ROUTER
+   ====================================================================== */
+const ROUTES = [
+  [/^\/$/,                        ()=>vOverview()],
+  [/^\/projects$/,                ()=>vProjects()],
+  [/^\/p\/([\w-]+)$/,             id=>vProject(id,'phases')],
+  [/^\/p\/([\w-]+)\/history$/,    id=>vProject(id,'history')],
+  [/^\/p\/([\w-]+)\/knowledge$/,  id=>vProject(id,'knowledge')],
+  [/^\/p\/([\w-]+)\/doc$/,        id=>vProject(id,'doc')],
+  [/^\/agents$/,                  ()=>vAgents()],
+  [/^\/templates$/,               ()=>vTemplates()],
+  [/^\/knowledge$/,               ()=>vKnowledge()],
+  [/^\/vault$/,                   ()=>vVault()],
+  [/^\/health$/,                  ()=>vHealth()],
+  [/^\/setup$/,                   ()=>vSetup()]
+];
+
+function route(){
+  const path = (location.hash.slice(1) || '/');
+  let html = `<h1>Not found</h1><p class="sub">No view for <code>${path}</code>.</p>`;
+  for(const [re,fn] of ROUTES){ const m = path.match(re); if(m){ html = fn(m[1]); break; } }
+  view.innerHTML = html;
+  window.scrollTo(0,0);
+  const top = '/'+path.split('/').filter(Boolean)[0];
+  document.querySelectorAll('aside a').forEach(a=>{
+    const r=a.dataset.r;
+    a.classList.toggle('on', r===path || (r!=='/' && (path===r || top===r)) || (r==='/projects' && path.startsWith('/p/')));
+  });
+}
+addEventListener('hashchange',route);
+
+/* ======================================================================
+   VIEW: overview (WP-04, OB-03)
+   ====================================================================== */
+function vOverview(){
+  const ds = openDoubts();
+  const active = PROJECTS.filter(p=>p.run);
+  return `
+  <h1>Overview</h1>
+  <p class="sub">Everything that wants your attention, then everything that is running. Saturday 25 July 2026, 17:42.</p>
+
+  <div class="attn">
+    <h3>Needs you — 3 items</h3>
+    ${ds.map(d=>`
+      <div class="attnitem">
+        <div class="ic">${d.kind==='permission'?'🔒':'?'}</div>
+        <div style="flex:1">
+          <div class="between">
+            <div><b>${d.project.name}</b> · <span class="mono">${d.ref}</span>
+              <span class="pill ${d.kind==='permission'?'blue':'violet'}">${d.kind}</span></div>
+            <span class="tiny muted">open ${d.age}</span>
+          </div>
+          <div class="dim tiny" style="margin-top:3px">Blocks ${d.blocks}. ${d.context.slice(0,120)}…</div>
+        </div>
+        <button class="btn sm primary" onclick="answerDoubt('${d.project.id}','${d.ref}')">Answer</button>
+      </div>`).join('')}
+    <div class="attnitem">
+      <div class="ic">⚠</div>
+      <div style="flex:1">
+        <div class="between"><div><b>Codex</b> is not authenticated</div><span class="tiny muted">since 14:02</span></div>
+        <div class="dim tiny" style="margin-top:3px">Two phases in <b>ERPagro ⇄ Margaret sync</b> use it and will refuse to launch (BA-06).</div>
+      </div>
+      <a class="btn sm" href="#/setup">Reconnect</a>
+    </div>
+  </div>
+
+  <div class="grid g4">
+    <div class="card stat"><div class="n">${active.length}</div><div class="l">Active runs</div></div>
+    <div class="card stat"><div class="n" style="color:var(--amber)">${ds.length}</div><div class="l">Open doubts</div></div>
+    <div class="card stat"><div class="n">${PROJECTS.length}</div><div class="l">Projects</div></div>
+    <div class="card stat"><div class="n">$14.87</div><div class="l">Spent today</div></div>
+  </div>
+
+  <h2>Running now</h2>
+  ${active.map(p=>runCard(p)).join('') || '<div class="card empty">Nothing is running.</div>'}
+
+  <h2>Engines</h2>
+  <div class="grid g2">
+    ${Object.entries(ENGINES).map(([id,e])=>`
+      <div class="card pad">
+        <div class="between">
+          <div><b style="text-transform:capitalize">${id}</b> <span class="tiny muted">${e.models[0]}</span></div>
+          <span class="pill ${e.auth?'green':'red'}">${e.auth?'authenticated':'auth required'}</span>
+        </div>
+        <div class="tiny muted" style="margin-top:7px">Adapter present · ${e.models.length} models · reasoning ${e.reasoning.join(' / ')}</div>
+      </div>`).join('')}
+  </div>`;
+}
+
+function runCard(p){
+  const r=p.run;
+  const ph=p.phases.find(x=>x.id===r.phase)||{agent:'builder'};
+  return `
+  <div class="card pad" style="margin-bottom:12px">
+    <div class="between wrap">
+      <div>
+        <a href="#/p/${p.id}"><b>${p.name}</b></a>
+        <div class="tiny muted" style="margin-top:3px">
+          phase <b class="dim">${r.phase}</b> · ${agent(ph.agent).name}
+          · ${r.engine} ${r.model} · <span class="mono">${r.id}</span>
+        </div>
+      </div>
+      <div class="row">
+        <span class="pill amber">● running</span>
+        <button class="btn sm danger" onclick="act('Abort run','Abort <b>${r.id}</b> on <b>${p.name}</b>. The ACP session is cancelled and the chain pauses; work already committed stays.',true)">Abort</button>
+      </div>
+    </div>
+    <div class="grid g2" style="margin-top:14px">
+      <div>
+        <div class="between tiny muted"><span>Elapsed ${r.elapsed}</span><span>timeout ${r.timeout}</span></div>
+        <div class="bar" style="margin-top:5px"><i style="width:14%;background:var(--amber)"></i></div>
+      </div>
+      <div>
+        <div class="between tiny muted"><span>Inactive ${r.inactivity}</span><span>limit ${r.inactivityLimit}</span></div>
+        <div class="bar" style="margin-top:5px"><i style="width:4%;background:var(--green)"></i></div>
+      </div>
+    </div>
+    <div class="tiny muted" style="margin-top:12px">Last action · <span class="mono dim">${r.lastAction}</span></div>
+    <div style="margin-top:12px">${phaseBar(p.phases)}</div>
+  </div>`;
+}
+
+/* ======================================================================
+   VIEW: project list (WP-10)
+   ====================================================================== */
+function vProjects(){
+  return `
+  <div class="between">
+    <div><h1>Projects</h1><p class="sub">Every project, its template, and how far through its phases it is. The answer to
+    “what is the state of my work” without opening anything.</p></div>
+    <button class="btn primary" onclick="newProject()">New project</button>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Project</th><th>Template</th><th style="width:150px">Phases</th><th>State</th><th>Knowledge</th><th>Last activity</th></tr></thead>
+      <tbody>
+      ${PROJECTS.map(p=>{
+        const c=counts(p.phases);
+        const st = p.run ? '<span class="pill amber">● running</span>'
+                 : p.doubts.length ? `<span class="pill amber">? ${p.doubts.length} doubt${p.doubts.length>1?'s':''}</span>`
+                 : c.failed ? '<span class="pill red">paused — failed</span>'
+                 : c.pending ? '<span class="pill">idle</span>'
+                 : '<span class="pill green">✓ complete</span>';
+        return `<tr onclick="location.hash='#/p/${p.id}'" style="cursor:pointer">
+          <td><b>${p.name}</b><div class="tiny muted mono">${p.id}</div></td>
+          <td class="tiny dim">${template(p.template).name}</td>
+          <td>${phaseBar(p.phases)}<div class="tiny muted" style="margin-top:5px">${c.done}/${p.phases.length} done${c.pending?` · ${c.pending} pending`:''}</div></td>
+          <td>${st}</td>
+          <td>${p.knowledge.map(k=>`<span class="pill ${KINDPILL[kb(k).kind]}" style="margin:1px">${kb(k).name}</span>`).join(' ')||'<span class="tiny muted">none</span>'}</td>
+          <td class="tiny muted">${p.lastActivity}</td>
+        </tr>`;}).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+/* ======================================================================
+   VIEW: one project (WP-05, TP-06/07)
+   ====================================================================== */
+function vProject(id,tab){
+  const p = project(id); if(!p) return '<h1>No such project</h1>';
+  const c = counts(p.phases);
+  const body = {phases:pPhases,history:pHistory,knowledge:pKnowledge,doc:pDoc}[tab](p);
+  return `
+  <div class="tiny muted"><a href="#/projects">Projects</a> / ${p.id}</div>
+  <div class="between" style="margin-top:6px">
+    <div>
+      <h1>${p.name}</h1>
+      <p class="sub" style="margin-bottom:0">
+        ${template(p.template).name} · ${c.done}/${p.phases.length} phases done
+        ${p.remote?`· <span class="mono tiny">${p.remote}</span>`:'· no remote'}
+        ${p.verify?`· verify <code>${p.verify}</code>`:''}
+      </p>
+    </div>
+    <div class="row">
+      ${p.run
+        ? `<button class="btn danger" onclick="act('Abort run','Abort the run on <b>${p.name}</b>.',true)">Abort run</button>`
+        : `<button class="btn primary" onclick="launchPhase('${p.id}')">Launch next phase</button>`}
+    </div>
+  </div>
+  <div class="tabs" style="margin-top:18px">
+    <a href="#/p/${p.id}"          class="${tab==='phases'?'on':''}">Phases</a>
+    <a href="#/p/${p.id}/doc"      class="${tab==='doc'?'on':''}">Docs</a>
+    <a href="#/p/${p.id}/knowledge" class="${tab==='knowledge'?'on':''}">Knowledge <span class="pill">${p.knowledge.length}</span></a>
+    <a href="#/p/${p.id}/history"  class="${tab==='history'?'on':''}">History</a>
+  </div>
+  ${body}`;
+}
+
+function pPhases(p){
+  return `
+  ${p.doubts.length?`<div class="attn">
+    <h3>Waiting on you</h3>
+    ${p.doubts.map(d=>doubtBlock(p,d)).join('')}
+  </div>`:''}
+
+  ${p.run?runCard(p):''}
+
+  <div class="card pad">
+    <div class="between" style="margin-bottom:6px">
+      <b>Phases</b>
+      <button class="btn sm" onclick="act('Add ad-hoc phase','Insert a phase not in the template, bound to any enabled agent (TP-08).')">+ Ad-hoc phase</button>
+    </div>
+    ${p.phases.map((ph,i)=>{
+      const a = agent(ph.agent);
+      const can = ph.status==='pending' || (ph.repeatable && (ph.status==='done'||ph.status==='failed'));
+      return `<div class="phase ${ph.status}">
+        <div class="mark ${ph.status}">${MARK[ph.status]||i+1}</div>
+        <div>
+          <div class="ttl">${ph.title}</div>
+          <div class="phasemeta">
+            <span class="pill">${a.name}</span>
+            ${ph.gate==='human'?'<span class="pill violet">human gate</span>':''}
+            ${ph.optional?'<span class="pill">optional</span>':''}
+            ${ph.repeatable?'<span class="pill">repeatable</span>':''}
+            ${ph.deliverable?`<span class="pill blue">→ ${ph.deliverable}</span>`:''}
+            ${ph.verify?`<span class="pill">verify: ${ph.verify}</span>`:''}
+          </div>
+          ${ph.error?`<div class="tiny" style="color:var(--red);margin-top:7px">${ph.error}</div>`:''}
+          ${ph.ended?`<div class="tiny muted" style="margin-top:6px">finished ${ph.ended}</div>`
+            :ph.started?`<div class="tiny muted" style="margin-top:6px">started ${ph.started}</div>`:''}
+        </div>
+        <div class="row" style="align-items:flex-start">
+          <span class="pill ${STATUSPILL[ph.status]}">${ph.status}</span>
+          ${can?`<button class="btn sm" onclick="launchPhase('${p.id}','${ph.id}')">${ph.status==='pending'?'Launch':'Re-launch'}</button>`:''}
+          ${ph.optional&&ph.status==='pending'?`<button class="btn sm" onclick="act('Skip phase','Skip <b>${ph.title}</b>. It is marked optional, so the chain moves to the next one.',true)">Skip</button>`:''}
+        </div>
+      </div>`;}).join('')}
+  </div>
+
+  <div class="grid g2" style="margin-top:12px">
+    <div class="card pad">
+      <b>Where it stands</b>
+      <dl class="kv" style="margin-top:11px">
+        <dt>Next</dt><dd>${p.state.next}</dd>
+        <dt>Last decision</dt><dd class="dim">${p.state.lastDecision}</dd>
+      </dl>
+    </div>
+    <div class="card pad">
+      <b>Live timeline</b>
+      <div class="timeline" style="margin-top:10px">
+        ${(p.run?TIMELINE:TIMELINE.slice(4)).map(([t,k,v])=>`<div><span class="t">${t}</span><span class="k">${k}</span><span class="v">${v}</span></div>`).join('')}
+      </div>
+    </div>
+  </div>`;
+}
+
+function doubtBlock(p,d){
+  return `<div class="attnitem">
+    <div class="ic">${d.kind==='permission'?'🔒':'?'}</div>
+    <div style="flex:1">
+      <div class="between">
+        <div><span class="mono">${d.ref}</span> <span class="pill ${d.kind==='permission'?'blue':'violet'}">${d.kind}</span>
+          <span class="tiny muted">blocks ${d.blocks}</span></div>
+        <span class="tiny muted">open ${d.age}</span>
+      </div>
+      <div class="dim" style="margin-top:6px;font-size:13px">${d.context}</div>
+      ${d.secondOpinion?`<div class="note" style="margin-top:9px">
+        <b>Second opinion (${d.secondOpinion.engine}, confidence ${d.secondOpinion.confidence})</b> —
+        ${d.secondOpinion.reasoning}</div>`:''}
+    </div>
+    <button class="btn sm primary" onclick="answerDoubt('${p.id}','${d.ref}')">Answer</button>
+  </div>`;
+}
+
+function pHistory(p){
+  return `<div class="card">
+    <table>
+      <thead><tr><th>Run</th><th>Phase</th><th>Agent</th><th>Engine</th><th>State</th><th>Started</th><th>Duration</th><th>Cost</th></tr></thead>
+      <tbody>${HISTORY.map(r=>`<tr>
+        <td class="mono tiny">${r.run}</td><td class="tiny">${r.phase}</td><td class="tiny dim">${agent(r.agent).name}</td>
+        <td class="tiny dim">${r.engine}</td><td><span class="pill ${STATUSPILL[r.status]}">${r.status}</span></td>
+        <td class="tiny muted">${r.started}</td><td class="tiny">${r.dur}</td><td class="tiny">${r.cost}</td>
+      </tr><tr><td></td><td colspan="7" class="tiny muted" style="padding-top:0;border-bottom:1px solid var(--line)">${r.summary}</td></tr>`).join('')}
+      </tbody>
+    </table>
+  </div>
+  <p class="note" style="margin-top:14px">Read from SQLite, never from logs (OB-01). Cost is blank where the engine does not report it.</p>`;
+}
+
+function pKnowledge(p){
+  const attached = p.knowledge.map(kb);
+  const avail = KNOWLEDGE.filter(k=>!p.knowledge.includes(k.id));
+  return `
+  <div class="card pad">
+    <div class="between"><b>Attached — injected into every session of this project</b>
+      <span class="tiny muted">${attached.reduce((s,k)=>s+k.chars,0).toLocaleString()} chars of a 120,000 budget</span></div>
+    <div class="bar" style="margin-top:9px">
+      ${attached.map((k,i)=>`<i style="width:${Math.round(k.chars/1200)}%;background:var(--${['blue','violet','green','amber'][i%4]})"></i>`).join('')}
+    </div>
+    <div style="margin-top:16px">
+      ${attached.map(k=>`<div class="phase">
+        <div class="mark done">✓</div>
+        <div><div class="ttl">${k.name} ${p.writable===k.id?'<span class="pill amber">writable</span>':''}</div>
+          <div class="phasemeta"><span class="pill ${KINDPILL[k.kind]}">${k.kind}</span>
+            <span class="pill">${k.docs} docs</span><span class="pill">updated ${k.updated}</span></div>
+          <div class="tiny muted" style="margin-top:6px">${k.description}</div></div>
+        <button class="btn sm danger" onclick="act('Detach knowledge','Detach <b>${k.name}</b> from <b>${p.name}</b>. Future sessions stop seeing it; nothing already written changes.',true)">Detach</button>
+      </div>`).join('')}
+    </div>
+  </div>
+  <h2>Available</h2>
+  <div class="card">
+    <table><tbody>
+      ${avail.map(k=>`<tr>
+        <td><b>${k.name}</b><div class="tiny muted">${k.description}</div></td>
+        <td style="width:130px"><span class="pill ${KINDPILL[k.kind]}">${k.kind}</span></td>
+        <td style="width:110px" class="tiny muted">${k.docs} docs</td>
+        <td style="width:90px"><button class="btn sm" onclick="act('Attach knowledge','Attach <b>${k.name}</b> to <b>${p.name}</b>, read-only.')">Attach</button></td>
+      </tr>`).join('')||'<tr><td class="empty">Everything is already attached.</td></tr>'}
+    </tbody></table>
+  </div>`;
+}
+
+function pDoc(p){
+  const STATE = `## Phase in progress\n\n**build** — implementing the plan, task 4 of 6.\n\n## Last completed milestone\n\n**plan** (D-6 recorded): contracts for both directions of the sync,\nwith the 1-based pagination the probe found.\n\n## Exact next step\n\nFinish task 4 (order line mapping), then run the verify gate.\n`;
+  return `
+  <div class="grid g2">
+    ${[['STATE.md','managed by LightsOut (PM-02)',STATE],
+       ['PLAN.md','6 tasks, 3 checked',`- [x] Contract types\n- [x] Auth and retry\n- [x] Order pull\n- [ ] Order line mapping\n- [ ] Two-way conflict rules\n- [ ] Backfill script\n`],
+       ['QUESTIONS.md','2 open, 5 closed',`### D-7 (open) — install zod@3?\n### D-3 (closed) — forecast band vs line → B\n`],
+       ['DECISIONS.md','9 entries',`- D-6 provisional: paginate from 1 (both engines agreed, tag lightsout/cp/…)\n- D-2 human: staging tenant for all probes\n`]]
+      .map(([f,note,body])=>`
+      <div class="card pad">
+        <div class="between"><b class="mono">doc/${f}</b><span class="tiny muted">${note}</span></div>
+        <textarea rows="9" style="margin-top:10px">${body}</textarea>
+        <div class="row" style="margin-top:9px;justify-content:flex-end">
+          <button class="btn sm" ${p.run?'disabled title="A run is active — write_doc is refused (MC-04)"':`onclick="act('Save doc','Write <b>doc/${f}</b>.')"`}>Save</button>
+        </div>
+      </div>`).join('')}
+  </div>
+  ${p.run?'<p class="note" style="margin-top:14px">Saving is disabled while a run is active: the agent is writing in the same repository, so the write is refused rather than raced (MC-04).</p>':''}`;
+}
+
+/* ======================================================================
+   VIEW: agents (AP-06..08, BA-01)
+   ====================================================================== */
+function vAgents(){
+  return `
+  <div class="between">
+    <div><h1>Agents</h1><p class="sub">Ten profiles ship inside the image and work out of the box. Editing a builtin clones it
+    into your workspace, where the copy shadows the original by id — so a <code>docker pull</code> updates what you have
+    not touched and leaves what you have.</p></div>
+    <button class="btn primary" onclick="editAgent()">New agent</button>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Agent</th><th>Engine / model</th><th>Reasoning</th><th>Policy</th><th>Deliverable</th><th>Source</th><th></th></tr></thead>
+      <tbody>
+      ${AGENTS.map(a=>`<tr>
+        <td>
+          <div class="row"><b style="${a.enabled?'':'color:var(--fg-3)'}">${a.name}</b>
+            ${a.enabled?'':'<span class="pill">disabled</span>'}
+            ${a.valid?'':'<span class="pill red">invalid</span>'}</div>
+          <div class="tiny muted mono">${a.id}</div>
+          ${a.error?`<div class="tiny" style="color:var(--red);margin-top:4px">${a.error}</div>`:''}
+        </td>
+        <td class="tiny">${a.engine} ${ENGINES[a.engine]&&!ENGINES[a.engine].auth?'<span class="pill red">no auth</span>':''}
+          <div class="muted mono">${a.model}</div></td>
+        <td class="tiny dim">${a.reasoning}</td>
+        <td><span class="pill">${a.policy}</span></td>
+        <td class="tiny muted mono">${a.deliverable}</td>
+        <td class="tiny ${a.source==='builtin'?'muted':''}">${a.source}</td>
+        <td style="white-space:nowrap">
+          <button class="btn sm" onclick="editAgent('${a.id}')">${a.source==='builtin'?'Clone & edit':'Edit'}</button>
+          <button class="btn sm" onclick="act('${a.enabled?'Disable':'Enable'} agent','${a.enabled?`Disable <b>${a.name}</b>. It cannot be launched and no template will offer it (AP-07).`:`Enable <b>${a.name}</b>.`}',${a.enabled})">${a.enabled?'Disable':'Enable'}</button>
+        </td>
+      </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Policy packs</h2>
+  <p class="sub">What an agent may do is enforced here, not in its instructions. <code>planner</code> cannot edit source because
+  the engine denies the write, whatever the prompt says.</p>
+  <div class="card">
+    <table><tbody>
+      ${POLICIES.map(p=>{
+        const users=AGENTS.filter(a=>a.policy===p.id);
+        return `<tr>
+          <td style="width:120px"><span class="pill">${p.id}</span></td>
+          <td class="tiny dim">${p.summary}</td>
+          <td style="width:230px" class="tiny muted">${users.length?users.map(u=>u.name).join(', '):'second-opinion sessions'}</td>
+        </tr>`;}).join('')}
+    </tbody></table>
+  </div>`;
+}
+
+function editAgent(id){
+  const a = id?AGENTS.find(x=>x.id===id):{id:'',name:'',engine:'claude',model:'claude-sonnet-5',reasoning:'medium',policy:'default',deliverable:'',instructions:'',tags:[],enabled:true,source:'workspace'};
+  const cloning = a.source==='builtin';
+  dlg.innerHTML = `
+    <div class="dlg-h">${id?(cloning?`Clone ${a.name}`:`Edit ${a.name}`):'New agent'}</div>
+    <div class="dlg-b">
+      ${cloning?`<div class="note">This is a builtin. Saving writes <code>agents/${a.id}.yaml</code> into your workspace, which
+      shadows the builtin from then on. The builtin itself is never modified (BA-01).</div>`:''}
+      <div class="grid g2">
+        <div><label>Id</label><input value="${a.id}" ${id?'readonly':''} placeholder="lowercase-with-dashes"></div>
+        <div><label>Display name</label><input value="${a.name}" placeholder="What you will call it"></div>
+      </div>
+      <div class="grid g3">
+        <div><label>Engine</label><select onchange="dlgModels(this.value)">
+          ${Object.keys(ENGINES).map(e=>`<option ${e===a.engine?'selected':''}>${e}</option>`).join('')}</select></div>
+        <div><label>Model</label><select id="mdl">
+          ${ENGINES[a.engine].models.map(m=>`<option ${m===a.model?'selected':''}>${m}</option>`).join('')}</select></div>
+        <div><label>Reasoning</label><select>
+          ${ENGINES[a.engine].reasoning.map(r=>`<option ${r===a.reasoning?'selected':''}>${r}</option>`).join('')}</select></div>
+      </div>
+      <div class="tiny muted">Only the models the engine actually accepts are listed; an unknown one is rejected on save, not at launch (AP-08).</div>
+      <div class="grid g2">
+        <div><label>Policy pack</label><select>${POLICIES.map(p=>`<option ${p.id===a.policy?'selected':''}>${p.id}</option>`).join('')}</select></div>
+        <div><label>Expected deliverable</label><input value="${a.deliverable||''}" placeholder="doc/SOMETHING.md, or a description"></div>
+      </div>
+      <div>
+        <label>Instructions</label>
+        <textarea rows="11">${a.instructions||''}</textarea>
+        <div class="tiny muted" style="margin-top:5px">Prepended to every run of this agent. The LightsOut protocol block, the project
+        docs and the phase instructions are added after it (DESIGN §6.2).</div>
+      </div>
+      <div class="grid g2">
+        <div><label>Tags</label><input value="${(a.tags||[]).join(', ')}"></div>
+        <div><label>Enabled</label><select><option ${a.enabled?'selected':''}>yes</option><option ${a.enabled?'':'selected'}>no</option></select></div>
+      </div>
+    </div>
+    <div class="dlg-f">
+      <button class="btn" onclick="dlg.close()">Cancel</button>
+      <button class="btn primary" onclick="dlg.close();act('Save agent','Writes the YAML and reloads it — no restart (AP-03/AP-06).')">Save</button>
+    </div>`;
+  dlg.showModal();
+}
+function dlgModels(engine){
+  document.getElementById('mdl').innerHTML = ENGINES[engine].models.map(m=>`<option>${m}</option>`).join('');
+}
+
+/* ======================================================================
+   VIEW: templates (TP-01..04)
+   ====================================================================== */
+function vTemplates(){
+  return `
+  <div class="between">
+    <div><h1>Project templates</h1><p class="sub">A template is the recipe for a kind of work: ordered phases, each bound to an agent,
+    each with its own instructions, deliverable and gate. Creating a project freezes a copy of the recipe, so editing a
+    template never rewrites a project already running.</p></div>
+    <button class="btn primary" onclick="editTemplate()">New template</button>
+  </div>
+  ${TEMPLATES.map(t=>`
+    <div class="card pad" style="margin-bottom:12px">
+      <div class="between wrap">
+        <div>
+          <div class="row"><b>${t.name}</b>
+            <span class="pill ${t.source==='workspace'?'blue':''}">${t.source}</span>
+            ${t.valid?'':'<span class="pill red">invalid</span>'}</div>
+          <div class="tiny muted mono">${t.id} · ${t.phases.length} phases</div>
+        </div>
+        <div class="row">
+          <button class="btn sm" onclick="editTemplate('${t.id}')">${t.source==='builtin'?'Clone & edit':'Edit phases'}</button>
+          <button class="btn sm primary" onclick="newProject('${t.id}')" ${t.valid?'':'disabled'}>Start a project</button>
+          ${t.source==='workspace'?`<button class="btn sm danger" onclick="act('Delete template','Delete <b>${t.name}</b>. Projects created from it keep their frozen phases and are unaffected.',true)">Delete</button>`:''}
+        </div>
+      </div>
+      <div class="tiny dim" style="margin-top:9px;max-width:80ch">${t.description}</div>
+      ${t.error?`<div class="tiny" style="color:var(--red);margin-top:9px">${t.error}</div>`:''}
+      <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        ${t.phases.map((ph,i)=>{
+          const a=agent(ph.agent);
+          return `${i?'<span class="muted">→</span>':''}
+          <span class="pill ${a.valid?'':'red'}" title="${ph.title}">
+            <b>${ph.id}</b> ${a.name}${ph.gate==='human'?' ⏸':''}${ph.optional?' ?':''}${ph.repeatable?' ↻':''}
+          </span>`;}).join('')}
+      </div>
+      <div class="tiny muted" style="margin-top:8px">⏸ human gate · ? optional · ↻ repeatable</div>
+    </div>`).join('')}`;
+}
+
+function editTemplate(id){
+  const t = id?template(id):{id:'',name:'',description:'',phases:[],source:'workspace'};
+  const cloning = t.source==='builtin';
+  dlg.innerHTML = `
+    <div class="dlg-h">${id?(cloning?`Clone ${t.name}`:`Edit ${t.name}`):'New template'}</div>
+    <div class="dlg-b">
+      ${cloning?`<div class="note">Builtins are read-only. Saving writes <code>templates/${t.id}.yaml</code> into your workspace,
+      which shadows the builtin by id (TP-04).</div>`:''}
+      <div class="grid g2">
+        <div><label>Id</label><input value="${t.id}" ${id?'readonly':''}></div>
+        <div><label>Display name</label><input value="${t.name}"></div>
+      </div>
+      <div><label>Description</label><textarea rows="2">${t.description}</textarea></div>
+      <div>
+        <label>Phases — drag to reorder</label>
+        <div class="card" style="background:var(--bg)">
+          ${t.phases.map((ph,i)=>`
+            <div class="phase" style="padding:11px 13px">
+              <div class="row"><span class="drag">⠿</span><span class="muted tiny">${i+1}</span></div>
+              <div class="grid" style="gap:8px">
+                <div class="grid g2" style="gap:8px">
+                  <input value="${ph.title}" placeholder="Phase title">
+                  <select>${AGENTS.filter(a=>a.enabled&&a.valid).map(a=>`<option ${a.id===ph.agent?'selected':''}>${a.id}</option>`).join('')}
+                    ${agent(ph.agent).valid?'':`<option selected>${ph.agent} (invalid)</option>`}</select>
+                </div>
+                <div class="grid g3" style="gap:8px">
+                  <select><option ${ph.gate==='auto'?'selected':''}>auto</option><option ${ph.gate==='human'?'selected':''}>human gate</option></select>
+                  <input value="${ph.deliverable||''}" placeholder="deliverable">
+                  <input value="${ph.verify||''}" placeholder="verify command">
+                </div>
+                <div class="row tiny">
+                  <label style="margin:0"><input type="checkbox" ${ph.optional?'checked':''}> optional</label>
+                  <label style="margin:0"><input type="checkbox" ${ph.repeatable?'checked':''}> repeatable</label>
+                </div>
+                <textarea rows="2" placeholder="Phase instructions, appended to the agent's own…"></textarea>
+              </div>
+              <button class="btn sm danger" onclick="event.stopPropagation()">×</button>
+            </div>`).join('')||'<div class="empty">No phases yet.</div>'}
+        </div>
+        <button class="btn sm" style="margin-top:9px">+ Add phase</button>
+      </div>
+    </div>
+    <div class="dlg-f">
+      <button class="btn" onclick="dlg.close()">Cancel</button>
+      <button class="btn primary" onclick="dlg.close();act('Save template','Validates every phase — agents must exist and be enabled — then writes the YAML (TP-03/TP-04).')">Save</button>
+    </div>`;
+  dlg.showModal();
+}
+
+/* ======================================================================
+   VIEW: knowledge (KB-01..07)
+   ====================================================================== */
+function vKnowledge(){
+  const byKind = {};
+  KNOWLEDGE.forEach(k=>(byKind[k.kind]=byKind[k.kind]||[]).push(k));
+  return `
+  <div class="between">
+    <div><h1>Curated knowledge</h1><p class="sub">What earlier work established and later work should not have to rediscover.
+    A base is a folder of Markdown written for an AI to read, with a manifest saying what kind of knowledge it is —
+    so an agent can tell “we prefer X” from “the database enforces X”.</p></div>
+    <button class="btn primary" onclick="act('New knowledge base','Creates <code>knowledge/&lt;id&gt;/</code> with its manifest and an empty index.md.')">New base</button>
+  </div>
+  ${Object.entries(byKind).map(([kind,list])=>`
+    <h2 style="text-transform:capitalize">${kind}</h2>
+    <div class="grid g2">
+      ${list.map(k=>`
+        <div class="card pad">
+          <div class="between">
+            <div><b>${k.name}</b><div class="tiny muted mono">knowledge/${k.id}</div></div>
+            <span class="pill ${KINDPILL[k.kind]}">${k.kind}</span>
+          </div>
+          <div class="tiny dim" style="margin-top:9px">${k.description}</div>
+          <div class="phasemeta" style="margin-top:11px">
+            <span class="pill">${k.docs} docs</span>
+            <span class="pill">${(k.chars/1000).toFixed(0)}k chars</span>
+            <span class="pill">updated ${k.updated}</span>
+            <span class="pill">${k.owner}</span>
+          </div>
+          <div class="tiny muted" style="margin-top:10px">
+            ${k.attachedTo.length?`Attached to ${k.attachedTo.map(p=>`<a href="#/p/${p}" class="dim">${project(p).name}</a>`).join(', ')}`:'Not attached to any project'}
+          </div>
+          <div class="row" style="margin-top:12px;justify-content:flex-end">
+            <button class="btn sm" onclick="browseKb('${k.id}')">Browse</button>
+            <button class="btn sm" onclick="act('Edit manifest','Edit name, kind, description, tags and owner of <b>${k.name}</b>.')">Manifest</button>
+            <button class="btn sm danger" ${k.attachedTo.length?'disabled title="Attached to a project — detach first"':`onclick="act('Delete base','Delete <b>${k.name}</b> and its ${k.docs} documents.',true)"`}>Delete</button>
+          </div>
+        </div>`).join('')}
+    </div>`).join('')}
+  <p class="note" style="margin-top:22px">Bases are mounted read-only for every project except a knowledge-curation project working on
+  its declared target — nothing else can rewrite shared knowledge (KB-05).</p>`;
+}
+
+function browseKb(id){
+  const k = kb(id);
+  const docs = ['index.md','architecture.md','data-model.md','business-rules.md','integrations.md','gotchas.md','glossary.md'].slice(0,k.docs);
+  dlg.innerHTML = `
+    <div class="dlg-h">${k.name} <span class="pill ${KINDPILL[k.kind]}">${k.kind}</span></div>
+    <div class="dlg-b">
+      <div class="note">index.md is always injected in full, whatever the budget: it is what lets an agent ask for the right document.</div>
+      <div class="card">
+        <table><tbody>
+          ${docs.map((d,i)=>`<tr>
+            <td class="mono">${d}</td>
+            <td class="tiny muted" style="width:110px">${[3.1,18.4,22.0,19.7,14.2,11.8,7.2][i]}k chars</td>
+            <td style="width:150px">${i<3?'<span class="pill green">injected in full</span>':'<span class="pill">on request</span>'}</td>
+            <td style="width:70px"><button class="btn sm">Edit</button></td>
+          </tr>`).join('')}
+        </tbody></table>
+      </div>
+      <div class="tiny muted">Beyond the budget, documents are listed to the agent with the <code>read_knowledge</code> call that fetches them (KB-06).</div>
+    </div>
+    <div class="dlg-f"><button class="btn" onclick="dlg.close()">Close</button></div>`;
+  dlg.showModal();
+}
+
+/* ======================================================================
+   VIEW: vault (VT-01..06)
+   ====================================================================== */
+function vVault(){
+  return `
+  <div class="between">
+    <div><h1>Credentials vault</h1><p class="sub">URLs and test credentials the probing agent needs. Stored in one git-ignored file,
+    never in the database, never in a log, never in an event. Values reach an agent as environment variables of its process and
+    come back to this page only as “present”.</p></div>
+    <button class="btn primary" onclick="editVault()">New entry</button>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Entry</th><th>Base URL</th><th>Auth</th><th>Fields</th><th>Scope</th><th></th></tr></thead>
+      <tbody>
+      ${VAULT.map(v=>`<tr>
+        <td>
+          <div class="row"><b>${v.label}</b>${v.test_only?'<span class="pill green">test only</span>':'<span class="pill red">production</span>'}</div>
+          <div class="tiny muted mono">${v.id}</div>
+          <div class="tiny muted" style="margin-top:4px;max-width:44ch">${v.notes}</div>
+        </td>
+        <td class="tiny mono dim">${v.base_url}</td>
+        <td class="tiny"><span class="pill">${v.auth}</span></td>
+        <td>${v.fields.map(f=>`<div class="tiny"><span class="mono">${f.name}</span>
+          ${f.present?`<span class="pill green">set ${f.updated}</span>`:'<span class="pill red">empty</span>'}</div>`).join('')}</td>
+        <td class="tiny muted">${v.scope.length?(v.scope[0]==='*'?'all projects':v.scope.join(', ')):'none'}</td>
+        <td style="white-space:nowrap">
+          <button class="btn sm" onclick="editVault('${v.id}')">Edit</button>
+          <button class="btn sm danger" onclick="act('Delete entry','Delete <b>${v.label}</b> from the vault.',true)">Delete</button>
+        </td>
+      </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>
+  <div class="grid g2" style="margin-top:14px">
+    <p class="note">A production entry is not offered to the probing agent at all: its pack requires <code>test only</code>, and the
+    refusal is recorded rather than surfacing later as a confusing 401 (VT-06).</p>
+    <p class="note">An agent that needs a credential you have not filled in opens a doubt naming the entry, instead of guessing a URL
+    or hardcoding a token (VT-04).</p>
+  </div>`;
+}
+
+function editVault(id){
+  const v = id?VAULT.find(x=>x.id===id):{id:'',label:'',base_url:'',auth:'bearer',test_only:true,scope:['*'],notes:'',fields:[{name:'token',present:false}]};
+  dlg.innerHTML = `
+    <div class="dlg-h">${id?`Edit ${v.label}`:'New vault entry'}</div>
+    <div class="dlg-b">
+      <div class="grid g2">
+        <div><label>Id</label><input value="${v.id}" ${id?'readonly':''}></div>
+        <div><label>Label</label><input value="${v.label}"></div>
+      </div>
+      <div><label>Base URL</label><input value="${v.base_url}"></div>
+      <div class="grid g3">
+        <div><label>Auth</label><select>${['none','basic','bearer','api_key','oauth2_client_credentials'].map(a=>`<option ${a===v.auth?'selected':''}>${a}</option>`).join('')}</select></div>
+        <div><label>Test only</label><select><option ${v.test_only?'selected':''}>yes</option><option ${v.test_only?'':'selected'}>no</option></select></div>
+        <div><label>Scope</label><input value="${v.scope.join(', ')}" placeholder="* or project ids"></div>
+      </div>
+      <div><label>Notes for the agent</label><textarea rows="2" placeholder="Quirks worth knowing before the first call…">${v.notes}</textarea></div>
+      <div>
+        <label>Values — write only</label>
+        <div class="card" style="background:var(--bg);padding:12px;display:grid;gap:9px">
+          ${v.fields.map(f=>`
+            <div class="grid g2" style="gap:9px;align-items:center">
+              <input value="${f.name}" placeholder="field name">
+              <input type="password" placeholder="${f.present?'•••••••• stored — type to replace':'not set'}">
+            </div>`).join('')}
+          <button class="btn sm" style="justify-self:start">+ Add field</button>
+        </div>
+        <div class="tiny muted" style="margin-top:6px">A stored value is never sent back to the browser. Leaving a field blank keeps
+        what is stored; clearing it explicitly removes it (VT-03).</div>
+      </div>
+    </div>
+    <div class="dlg-f">
+      <button class="btn" onclick="dlg.close()">Cancel</button>
+      <button class="btn primary" onclick="dlg.close();act('Save vault entry','Writes <code>vault.yaml</code>. The file is git-ignored and mode 600.')">Save</button>
+    </div>`;
+  dlg.showModal();
+}
+
+/* ======================================================================
+   VIEW: health (WP-07) and setup (SU-03)
+   ====================================================================== */
+function vHealth(){
+  return `
+  <h1>Health</h1>
+  <p class="sub">What the container can see about itself. Same shape as the <code>health</code> MCP tool.</p>
+  <div class="grid g3">
+    <div class="card pad"><div class="between"><b>Orchestrator</b><span class="pill green">up</span></div>
+      <div class="tiny muted" style="margin-top:8px">v0.8.0 · uptime 3 d 4 h · 1 active run of 3 allowed</div></div>
+    <div class="card pad"><div class="between"><b>Database</b><span class="pill green">ok</span></div>
+      <div class="tiny muted" style="margin-top:8px">WAL · 18.4 MB · 41,208 events · migration 4</div></div>
+    <div class="card pad"><div class="between"><b>Network</b><span class="pill amber">unrestricted</span></div>
+      <div class="tiny muted" style="margin-top:8px">Egress allowlist not enabled. Honest signal, not a silent default (RT-05).</div></div>
+  </div>
+  <h2>Engines</h2>
+  <div class="grid g2">
+    ${Object.entries(ENGINES).map(([id,e])=>`
+      <div class="card pad">
+        <div class="between"><b style="text-transform:capitalize">${id}</b>
+          <span class="pill ${e.auth?'green':'red'}">${e.auth?'authenticated':'auth required'}</span></div>
+        <dl class="kv tiny" style="margin-top:11px">
+          <dt>Adapter</dt><dd class="mono">${id==='claude'?'claude-agent-acp':'codex-acp'}</dd>
+          <dt>Auth</dt><dd>${e.auth?'subscription, checked 4 min ago':'<span style="color:var(--red)">expired at 14:02 — 2 phases blocked</span>'}</dd>
+          <dt>Models</dt><dd class="mono">${e.models.join(', ')}</dd>
+        </dl>
+        ${e.auth?'':`<button class="btn primary sm" style="margin-top:12px" onclick="loginFlow('${id}')">Reconnect ${id}</button>`}
+      </div>`).join('')}
+  </div>
+  <h2>Storage</h2>
+  <div class="card pad">
+    <dl class="kv">
+      <dt>Workspace</dt><dd class="mono">C:\\Users\\fcg102006\\Documents\\LightsOut <span class="pill green">host folder</span></dd>
+      <dt>Projects</dt><dd>4 · 312 MB</dd>
+      <dt>Knowledge</dt><dd>5 bases · 30 documents · 318k chars</dd>
+      <dt>Database</dt><dd class="mono">docker volume lightsout-db</dd>
+      <dt>Credentials</dt><dd class="mono">docker volumes claude-auth, codex-auth</dd>
+    </dl>
+    <p class="note" style="margin-top:14px">The workspace is a folder on your machine, so the projects are already where you can open
+    them. Do not hand-edit a project while it has a run active — the agent is writing in the same repository.</p>
+  </div>`;
+}
+
+function vSetup(){
+  return `
+  <h1>Setup</h1>
+  <p class="sub">Shown automatically on a fresh install, and repeatable from here afterwards. Each step is independent.</p>
+  <div class="card pad">
+    <div class="wizstep">
+      <div class="wizn ok">✓</div>
+      <div>
+        <b>1 · Workspace</b>
+        <div class="tiny dim" style="margin-top:5px">Your projects live in a folder on this machine, openable in your editor.</div>
+        <div class="copy" style="margin-top:10px"><span>C:\\Users\\fcg102006\\Documents\\LightsOut</span><button class="btn sm">Copy</button></div>
+        <div class="tiny muted" style="margin-top:7px">To move it, change one line at the top of <code>Start-LightsOut.ps1</code> and restart —
+        the container cannot remount itself from inside.</div>
+      </div>
+    </div>
+    <div class="wizstep">
+      <div class="wizn now">2</div>
+      <div>
+        <b>2 · Connect the engines</b>
+        <div class="grid g2" style="margin-top:11px">
+          <div class="card pad" style="background:var(--bg)">
+            <div class="between"><b>Claude</b><span class="pill green">authenticated</span></div>
+            <button class="btn sm" style="margin-top:10px" onclick="loginFlow('claude')">Reconnect</button>
+          </div>
+          <div class="card pad" style="background:var(--bg)">
+            <div class="between"><b>Codex</b><span class="pill red">auth required</span></div>
+            <button class="btn sm primary" style="margin-top:10px" onclick="loginFlow('codex')">Connect</button>
+          </div>
+        </div>
+        <div class="tiny muted" style="margin-top:9px">The login runs inside the container; its URL and code appear on screen. Pasting an
+        API key is offered as an alternative.</div>
+      </div>
+    </div>
+    <div class="wizstep">
+      <div class="wizn ok">✓</div>
+      <div>
+        <b>3 · Connect Claude Desktop</b>
+        <div class="tiny dim" style="margin-top:5px">Paste this into the custom-connector dialog. One URL, no file to edit.</div>
+        <div class="copy" style="margin-top:10px"><span>http://127.0.0.1:8484/mcp</span><button class="btn sm">Copy</button></div>
+        <div class="tiny" style="margin-top:8px;color:var(--green)">✓ First MCP call received 3 days ago.</div>
+      </div>
+    </div>
+    <div class="wizstep">
+      <div class="wizn ok">✓</div>
+      <div>
+        <b>4 · First project</b>
+        <div class="tiny dim" style="margin-top:5px">The ten agents, seven policy packs and four templates ship inside the image —
+        nothing to install.</div>
+        <button class="btn sm" style="margin-top:10px" onclick="newProject()">Create another project</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function loginFlow(engine){
+  dlg.innerHTML = `
+    <div class="dlg-h">Connect ${engine}</div>
+    <div class="dlg-b">
+      <div class="tiny dim">The login is running inside the container. Open the URL, enter the code, and this page turns green by itself.</div>
+      <div><label>Open this</label><div class="copy"><span>https://${engine==='claude'?'claude.ai/oauth/authorize?code=1':'auth.openai.com/device'}</span><button class="btn sm">Copy</button></div></div>
+      <div><label>Enter this code</label><div class="copy"><span style="letter-spacing:.22em;font-size:16px">HXTM-4Q9P</span><button class="btn sm">Copy</button></div></div>
+      <div class="row"><span class="pill amber">● waiting for the callback…</span></div>
+      <div class="note">The callback reaches the container through the published port and a small TCP forwarder — no host networking,
+      no second container (DESIGN §14.4).</div>
+      <div><label>Or paste an API key instead</label><input type="password" placeholder="sk-…"></div>
+    </div>
+    <div class="dlg-f"><button class="btn" onclick="dlg.close()">Close</button>
+      <button class="btn primary" onclick="dlg.close()">Save key</button></div>`;
+  dlg.showModal();
+}
+
+/* ======================================================================
+   DIALOGS: launch a phase, answer a doubt, create a project
+   ====================================================================== */
+function launchPhase(pid,phid){
+  const p = project(pid);
+  const ph = phid ? p.phases.find(x=>x.id===phid) : p.phases.find(x=>x.status==='pending');
+  if(!ph) return act('Nothing to launch','Every phase is done or skipped.');
+  const a = agent(ph.agent);
+  const blocked = !ENGINES[a.engine].auth;
+  dlg.innerHTML = `
+    <div class="dlg-h">${ph.status==='pending'?'Launch':'Re-launch'} phase — ${ph.title}</div>
+    <div class="dlg-b">
+      ${blocked?`<div class="note" style="border-color:var(--red);color:var(--red)">
+        <b>${a.name}</b> runs on <b>${a.engine}</b>, which is not authenticated. The launch is refused rather than started and
+        failed mid-run (BA-06). Connect the engine first.</div>`:''}
+      <dl class="kv">
+        <dt>Agent</dt><dd>${a.name} <span class="tiny muted">${a.engine} · ${a.model} · reasoning ${a.reasoning}</span></dd>
+        <dt>Policy pack</dt><dd><span class="pill">${a.policy}</span> <span class="tiny muted">${POLICIES.find(x=>x.id===a.policy).summary}</span></dd>
+        <dt>Deliverable</dt><dd class="mono">${ph.deliverable||a.deliverable}</dd>
+        <dt>Gate</dt><dd>${ph.gate==='human'?'human — the next phase waits for you to confirm':'auto — the chain continues on success'}</dd>
+        ${ph.verify?`<dt>Verify</dt><dd class="mono">${ph.verify}</dd>`:''}
+        <dt>Knowledge</dt><dd>${p.knowledge.map(k=>`<span class="pill ${KINDPILL[kb(k).kind]}">${kb(k).name}</span>`).join(' ')}</dd>
+      </dl>
+      <div><label>Task spec — what this run has to achieve</label>
+        <textarea rows="4">${ph.status==='pending'
+          ?'Implement task 4 of doc/PLAN.md: the order line mapping, including the 1-based pagination recorded in doc/CONTRACTS.md.'
+          :'Re-run after the verify failure: 3 of 41 tests are red in the chart renderer. Fix the cause, not the assertion.'}</textarea></div>
+      <div class="grid g2">
+        <div><label>Level</label><select><option>full — 90 min</option><option>quick — 30 min</option></select></div>
+        <div><label>Override model</label><select><option>use the agent's (${a.model})</option>${ENGINES[a.engine].models.filter(m=>m!==a.model).map(m=>`<option>${m}</option>`).join('')}</select></div>
+      </div>
+      ${p.run?'<div class="note">A run is already active on this project. This one queues behind it rather than being rejected (OR-08).</div>':''}
+    </div>
+    <div class="dlg-f">
+      <button class="btn" onclick="dlg.close()">Cancel</button>
+      <button class="btn primary" ${blocked?'disabled':`onclick="dlg.close();act('Launch phase','The run starts in the background and this page follows it live. Returns a run id in about a second (MC-06).')"`}>Launch</button>
+    </div>`;
+  dlg.showModal();
+}
+
+function answerDoubt(pid,ref){
+  const p = project(pid), d = p.doubts.find(x=>x.ref===ref);
+  dlg.innerHTML = `
+    <div class="dlg-h">${d.ref} · ${p.name} <span class="pill ${d.kind==='permission'?'blue':'violet'}">${d.kind}</span></div>
+    <div class="dlg-b">
+      <div>${d.context}</div>
+      <div class="tiny muted">Blocks ${d.blocks} · open ${d.age}</div>
+      ${d.secondOpinion?`<div class="note">
+        <b>Second opinion — ${d.secondOpinion.engine}, confidence ${d.secondOpinion.confidence}</b><br>${d.secondOpinion.reasoning}</div>`:''}
+      <div class="grid" style="gap:9px">
+        ${d.options.map(o=>`<label class="opt">
+          <input type="radio" name="opt" ${o.id===d.recommendation?'checked':''}>
+          <div><b>${o.id}</b> — ${o.text}
+          ${o.id===d.recommendation?' <span class="pill amber">recommended</span>':''}</div>
+        </label>`).join('')}
+      </div>
+      <div><label>Note for the record (optional)</label><textarea rows="2" placeholder="Why, in one line — this ends up in DECISIONS.md"></textarea></div>
+    </div>
+    <div class="dlg-f">
+      <button class="btn" onclick="dlg.close()">Later</button>
+      <button class="btn primary" onclick="dlg.close();act('Answer doubt','Records the decision in DECISIONS.md, closes the mirror in QUESTIONS.md and resumes the task (DO-04).')">Answer and resume</button>
+    </div>`;
+  dlg.showModal();
+}
+
+function newProject(tid){
+  const t = tid?template(tid):TEMPLATES[1];
+  dlg.innerHTML = `
+    <div class="dlg-h">New project</div>
+    <div class="dlg-b">
+      <div class="grid g2">
+        <div><label>Name</label><input placeholder="What it is called"></div>
+        <div><label>Template</label><select onchange="newProjectTpl(this.value)">
+          ${TEMPLATES.filter(x=>x.valid).map(x=>`<option value="${x.id}" ${x.id===t.id?'selected':''}>${x.name}</option>`).join('')}</select></div>
+      </div>
+      <div id="tplinfo">${tplInfo(t)}</div>
+      <div>
+        <label>Knowledge to load</label>
+        <div class="grid" style="gap:7px">
+          ${KNOWLEDGE.map(k=>`<label class="opt" style="padding:8px 11px">
+            <input type="checkbox" ${['erpagro-core','agro-domain'].includes(k.id)?'checked':''}>
+            <div style="flex:1"><b>${k.name}</b> <span class="pill ${KINDPILL[k.kind]}">${k.kind}</span>
+              <div class="tiny muted">${k.description}</div></div>
+          </label>`).join('')}
+        </div>
+      </div>
+      <div class="grid g2">
+        <div><label>Git remote (optional)</label><input placeholder="git@github.com:…"></div>
+        <div><label>Verify command (optional)</label><input placeholder="npm test"></div>
+      </div>
+    </div>
+    <div class="dlg-f">
+      <button class="btn" onclick="dlg.close()">Cancel</button>
+      <button class="btn primary" onclick="dlg.close();act('Create project','Scaffolds the folder, inits git, and freezes the template phases into the project (TP-05). Same code path as create_project over MCP.')">Create</button>
+    </div>`;
+  dlg.showModal();
+}
+function tplInfo(t){
+  return `<div class="note">${t.description}
+    <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+      ${t.phases.map((ph,i)=>`${i?'<span>→</span>':''}<span class="pill">${agent(ph.agent).name}${ph.gate==='human'?' ⏸':''}</span>`).join('')}
+    </div>
+    ${t.id==='knowledge-curation'?'<div style="margin-top:9px;color:var(--amber)">This template writes into a knowledge base, so one attached base must be marked writable.</div>':''}
+  </div>`;
+}
+function newProjectTpl(id){ document.getElementById('tplinfo').innerHTML = tplInfo(template(id)); }
+
+route();
+</script>
+</body>
+</html>

@@ -29,6 +29,9 @@ Thumbs.db
 coverage/
 .vitest/
 
+# Extracted by doc/prototype/check.mjs
+doc/prototype/check.js
+
 # The packed desktop extension is a deliverable, unlike the compiled dist/
 !dist/
 dist/*

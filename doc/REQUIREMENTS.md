@@ -207,4 +207,4 @@ existing codebase is put together, how an API behaves, how the organisation does
 - ST-03. Key libraries: `@modelcontextprotocol/sdk` (MCP), ACP TypeScript SDK, `better-sqlite3` (synchronous, WAL), Fastify or Hono (HTTP + SSE), `simple-git`, `zod` (YAML/profile validation), `js-yaml`.
 - ST-04. Web panel: static HTML/CSS/JS served by the same process, consuming JSON endpoints plus one SSE stream. No frontend build step in the pilot; a framework build (React/Vite) only if the panel outgrows this.
 - ST-05. Base image: `node:22-slim` plus `git`. Engine CLIs installed globally in the image; their credential dirs mounted as volumes (RT-03).
-- ST-06. `contract-prober` (BA-02) probes APIs with Python, so the image adds `python3`, `pip` and `httpx` in a virtualenv at a fixed path. Nothing else in the system needs Python; this is the only reason it is there. Pending user approval as an image dependency.
+- ST-06. `contract-prober` (BA-02) probes APIs with Python, so the image adds `python3`, `pip` and `httpx` in a virtualenv at `/opt/probe-venv`. Nothing else in the system needs Python; this is the only reason it is there. Approved 2026-07-25.

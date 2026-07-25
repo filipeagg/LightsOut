@@ -182,6 +182,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Engine CLIs and ACP adapters. Pin exact versions at implementation time.
 RUN npm install -g @anthropic-ai/claude-code @openai/codex \
       <claude-acp-adapter-pkg> <codex-acp-adapter-pkg>
+# Python for contract-prober only (ST-06). Pinned; nothing else in the system uses it.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv \
+      && rm -rf /var/lib/apt/lists/* \
+      && python3 -m venv /opt/probe-venv \
+      && /opt/probe-venv/bin/pip install --no-cache-dir 'httpx==<pin>'
 RUN useradd -m -u 1000 app
 WORKDIR /opt/lightsout
 COPY package*.json ./
@@ -1026,7 +1031,6 @@ All of it is localhost-bound (WP-09), and the pilot builds no auth.
 - Whether `session/load` resume is exposed by both adapters at pin time; if not, functional-doubt resume falls back to "new run with decision context" (already specified) with no design change.
 - tinyproxy vs squid for the egress sidecar (feature-equivalent for this allowlist use).
 - GHCR organisation/namespace for the published image (phase 8).
-- Adding `python3` + `httpx` to the image for `contract-prober` (ST-06). It is the only new image dependency the phase 9 scope needs, and nothing else in the system uses it. Pending the user's approval; without it, `contract-prober` probes with Node instead, which works but is a worse fit for throwaway API exploration.
 - Whether the egress allowlist (RT-05) can stay meaningful once `contract-prober` legitimately needs to reach arbitrary customer APIs. Likely answer: the vault entry's `base_url` host is added to the allowlist for the duration of that run, which keeps the allowlist a real boundary instead of quietly disabling it. To be settled when phase 9 reaches the prober.
 
 Settled during implementation: ACP adapter packages and versions are pinned in the

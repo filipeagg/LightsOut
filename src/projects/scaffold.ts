@@ -11,6 +11,9 @@ import type { ProjectRow, PushPolicy } from "../db/types.js";
 import { slugify } from "../ids.js";
 import { ProjectGit } from "./git.js";
 import { CONFIG_FILE, readProjectConfig } from "./config.js";
+import type { TemplatesLoader } from "../templates/loader.js";
+import type { KnowledgeLoader } from "../knowledge/loader.js";
+import type { PhaseService } from "../orchestrator/phases.js";
 
 export type CreateProjectInput = {
   name: string;
@@ -20,11 +23,29 @@ export type CreateProjectInput = {
   verify?: string;
   push?: PushPolicy;
   defaultAgent?: string;
+  /** Project template to materialise phases from (TP-05). */
+  template?: string;
+  /** Knowledge bases attached read-only (KB-03). */
+  knowledge?: string[];
+  /** The single base this project may write into; curation templates require it (KB-05). */
+  writableKnowledge?: string;
+};
+
+/**
+ * What the phase 9 material needs to be created alongside the project. Optional so the phase 4
+ * scaffolding path, and its gate, keep working untouched.
+ */
+export type CreateProjectDeps = {
+  templates?: TemplatesLoader;
+  knowledge?: KnowledgeLoader;
+  phases?: PhaseService;
 };
 
 export type CreateProjectResult = {
   project: ProjectRow;
   created: boolean;
+  phases: number;
+  knowledge: string[];
 };
 
 /**
@@ -67,24 +88,56 @@ export async function createProject(
   repos: Repos,
   workspace: string,
   input: CreateProjectInput,
+  deps: CreateProjectDeps = {},
 ): Promise<CreateProjectResult> {
   const id = slugify(input.id ?? input.name);
   const projectPath = path.join(workspace, "projects", id);
 
+  // Everything a template or a knowledge attachment can get wrong is checked before a single
+  // directory is created, so a rejected request leaves nothing behind (TP-03, KB-05).
+  const template = input.template ? deps.templates?.getOrThrow(input.template) : undefined;
+  if (input.template && !template) {
+    throw new Error("templates are not loaded in this process");
+  }
+  if (template?.requires_writable_knowledge && !input.writableKnowledge) {
+    throw new Error(
+      `template ${template.id} needs a writable knowledge base (KB-05): pass writableKnowledge`,
+    );
+  }
+  const attachments = [
+    ...(input.knowledge ?? []).map((baseId) => ({ baseId, writable: false })),
+    ...(input.writableKnowledge
+      ? [{ baseId: input.writableKnowledge, writable: true }]
+      : []),
+  ];
+  if (attachments.length > 0 && !deps.knowledge) {
+    throw new Error("knowledge is not loaded in this process");
+  }
+  for (const attachment of attachments) deps.knowledge?.getOrThrow(attachment.baseId);
+
   const existing = repos.projects.get(id);
   if (existing && (await exists(projectPath))) {
-    return { project: existing, created: false };
+    return {
+      project: existing,
+      created: false,
+      phases: repos.phases.list(existing.id).length,
+      knowledge: repos.projectKnowledge.list(existing.id).map((row) => row.base_id),
+    };
   }
 
   await mkdir(path.dirname(projectPath), { recursive: true });
-  const template = templateDir();
-  if (await exists(template)) {
-    await cp(template, projectPath, { recursive: true, force: false, errorOnExist: false });
+  const scaffoldSource = templateDir();
+  if (await exists(scaffoldSource)) {
+    await cp(scaffoldSource, projectPath, {
+      recursive: true,
+      force: false,
+      errorOnExist: false,
+    });
   } else {
     await mkdir(path.join(projectPath, "doc"), { recursive: true });
   }
 
-  // The template ships a placeholder config; overwrite it with the real values.
+  // The scaffold ships a placeholder config; overwrite it with the real values.
   await writeFile(path.join(projectPath, CONFIG_FILE), renderConfig(input, id), "utf8");
 
   // Personalise the doc headers the template left generic.
@@ -111,12 +164,50 @@ export async function createProject(
       repoRemote: input.remote ?? null,
       pushPolicy: input.push ?? "manual",
       verifyCmd: config.verify || null,
+      templateId: template?.id ?? null,
     });
+
+  // One chain per project, created now so every phase task has somewhere to go (§16.2).
+  if (template && !repos.chains.activeForProject(project.id)) {
+    repos.chains.create({ projectId: project.id, title: input.name });
+  }
+
+  for (const attachment of attachments) {
+    const base = deps.knowledge!.getOrThrow(attachment.baseId);
+    repos.projectKnowledge.attach({
+      projectId: project.id,
+      baseId: base.manifest.id,
+      kind: base.manifest.kind,
+      writable: attachment.writable,
+    });
+    repos.events.append({
+      type: "knowledge.attached",
+      payload: {
+        projectId: project.id,
+        baseId: base.manifest.id,
+        kind: base.manifest.kind,
+        writable: attachment.writable,
+        actor: "system",
+      },
+    });
+  }
+
+  const phases = template && deps.phases ? deps.phases.materialise(project.id, template) : [];
 
   repos.events.append({
     type: "system",
-    payload: { reason: "project created", projectId: id, path: projectPath },
+    payload: {
+      reason: "project created",
+      projectId: id,
+      path: projectPath,
+      ...(template ? { template: template.id } : {}),
+    },
   });
 
-  return { project, created: true };
+  return {
+    project,
+    created: true,
+    phases: phases.length,
+    knowledge: attachments.map((a) => a.baseId),
+  };
 }

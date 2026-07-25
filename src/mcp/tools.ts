@@ -15,6 +15,10 @@ import type { AgentsLoader } from "../agents/loader.js";
 import type { HealthProbe } from "../health.js";
 import type { Orchestrator } from "../orchestrator/orchestrator.js";
 import type { DoubtService } from "../orchestrator/doubts.js";
+import type { PhaseService } from "../orchestrator/phases.js";
+import type { TemplatesLoader } from "../templates/loader.js";
+import type { KnowledgeLoader } from "../knowledge/loader.js";
+import type { Vault } from "../vault/vault.js";
 import type { ProjectRow } from "../db/types.js";
 import { createProject } from "../projects/scaffold.js";
 import { askEngine } from "../acp/advisor.js";
@@ -29,6 +33,11 @@ export type McpDeps = {
   health: HealthProbe;
   orchestrator: Orchestrator;
   doubts: DoubtService;
+  /** Phase 9 material. Optional so a process without it still serves the phase 6 tools. */
+  templates?: TemplatesLoader;
+  knowledge?: KnowledgeLoader;
+  vault?: Vault;
+  phases?: PhaseService;
   version: string;
 };
 
@@ -99,25 +108,45 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
 
   tool(
     "create_project",
-    "Scaffold a project: doc/ templates, lightsout.yaml, git init and the initial commit (PM-01).",
+    "Scaffold a project: doc/ scaffold, lightsout.yaml, git init and the initial commit (PM-01). " +
+      "With a template it also materialises the phases and attaches the knowledge bases (TP-05, KB-03).",
     {
       name: z.string().min(1),
       remote: z.string().optional(),
       verify: z.string().optional(),
       push: z.enum(["auto", "manual", "never"]).optional(),
       defaultAgent: z.string().optional(),
+      template: z.string().optional(),
+      knowledge: z.array(z.string().min(1)).optional(),
+      writableKnowledge: z.string().optional(),
     },
     async (args) => {
-      const result = await createProject(repos, deps.config.workspace, {
-        name: args.name,
-        ...(args.remote !== undefined ? { remote: args.remote } : {}),
-        ...(args.verify !== undefined ? { verify: args.verify } : {}),
-        ...(args.push !== undefined ? { push: args.push } : {}),
-        ...(args.defaultAgent !== undefined ? { defaultAgent: args.defaultAgent } : {}),
-      });
+      const result = await createProject(
+        repos,
+        deps.config.workspace,
+        {
+          name: args.name,
+          ...(args.remote !== undefined ? { remote: args.remote } : {}),
+          ...(args.verify !== undefined ? { verify: args.verify } : {}),
+          ...(args.push !== undefined ? { push: args.push } : {}),
+          ...(args.defaultAgent !== undefined ? { defaultAgent: args.defaultAgent } : {}),
+          ...(args.template !== undefined ? { template: args.template } : {}),
+          ...(args.knowledge !== undefined ? { knowledge: args.knowledge } : {}),
+          ...(args.writableKnowledge !== undefined
+            ? { writableKnowledge: args.writableKnowledge }
+            : {}),
+        },
+        {
+          ...(deps.templates ? { templates: deps.templates } : {}),
+          ...(deps.knowledge ? { knowledge: deps.knowledge } : {}),
+          ...(deps.phases ? { phases: deps.phases } : {}),
+        },
+      );
       return {
         project: { id: result.project.id, path: result.project.path },
         created: result.created,
+        phases: result.phases,
+        knowledge: result.knowledge,
       };
     },
   );
@@ -385,6 +414,162 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
         durationS: Math.round((Date.now() - startedAt) / 1000),
       };
     },
+  );
+
+  // --- Phase 9: templates, phases, knowledge and the vault (TP, KB, VT) ---
+
+  /** Every phase 9 tool needs its subsystem loaded; say so once, clearly. */
+  const need = <T>(value: T | undefined, what: string): T => {
+    if (!value) throw new Error(`${what} is not available in this process`);
+    return value;
+  };
+
+  tool(
+    "list_templates",
+    "Project templates, usable and rejected with their reason (TP-01, TP-03).",
+    {},
+    async () => {
+      const loader = need(deps.templates, "templates");
+      const snapshot = loader.current();
+      return {
+        templates: loader.list().map((t) => ({
+          id: t.id,
+          name: t.name,
+          description: t.description,
+          requiresWritableKnowledge: t.requires_writable_knowledge,
+          phases: t.phases.map((p) => ({
+            id: p.id,
+            title: p.title,
+            agent: p.agent,
+            gate: p.gate,
+            optional: p.optional,
+            repeatable: p.repeatable,
+            deliverable: p.deliverable ?? null,
+          })),
+        })),
+        rejected: snapshot.rejected,
+      };
+    },
+  );
+
+  tool(
+    "list_phases",
+    "The phases of a project: what is done, running, pending, failed or skipped (TP-06).",
+    { projectId: z.string().min(1) },
+    async ({ projectId }) => ({
+      phases: need(deps.phases, "phases")
+        .list(project(projectId).id)
+        .map((p) => ({
+          id: p.id,
+          ref: p.phase_id,
+          position: p.position,
+          title: p.title,
+          agent: p.agent_id,
+          gate: p.gate,
+          status: p.status,
+          optional: Boolean(p.optional),
+          repeatable: Boolean(p.repeatable),
+          deliverable: p.deliverable,
+          taskId: p.task_id,
+          startedAt: p.started_at,
+          endedAt: p.ended_at,
+        })),
+    }),
+  );
+
+  tool(
+    "launch_phase",
+    "Run a phase: creates its task and queues it on the project's chain (TP-07).",
+    { projectId: z.string().min(1), phase: z.string().min(1) },
+    async ({ projectId, phase }) =>
+      need(deps.phases, "phases").launchPhase("mcp", project(projectId).id, phase),
+  );
+
+  tool(
+    "skip_phase",
+    "Skip an optional phase and start the next pending one (TP-07).",
+    { projectId: z.string().min(1), phase: z.string().min(1) },
+    async ({ projectId, phase }) => {
+      const skipped = await need(deps.phases, "phases").skipPhase(
+        "mcp",
+        project(projectId).id,
+        phase,
+      );
+      return { phaseId: skipped.id, ref: skipped.phase_id, status: skipped.status };
+    },
+  );
+
+  tool(
+    "add_phase",
+    "Insert an ad-hoc phase at a position, shifting the rest down (TP-08).",
+    {
+      projectId: z.string().min(1),
+      title: z.string().min(1),
+      agentId: z.string().min(1),
+      instructions: z.string().min(1),
+      position: z.number().int().min(0).optional(),
+      deliverable: z.string().optional(),
+      verifyCmd: z.string().optional(),
+      gate: z.enum(["auto", "human"]).optional(),
+    },
+    async (args) => {
+      const added = need(deps.phases, "phases").addAdhoc("mcp", project(args.projectId).id, {
+        title: args.title,
+        agentId: args.agentId,
+        instructions: args.instructions,
+        ...(args.position !== undefined ? { position: args.position } : {}),
+        ...(args.deliverable !== undefined ? { deliverable: args.deliverable } : {}),
+        ...(args.verifyCmd !== undefined ? { verifyCmd: args.verifyCmd } : {}),
+        ...(args.gate !== undefined ? { gate: args.gate } : {}),
+      });
+      return { phaseId: added.id, ref: added.phase_id, position: added.position };
+    },
+  );
+
+  tool(
+    "list_knowledge",
+    "Curated knowledge bases, and which ones a project has attached (KB-01, KB-03).",
+    { projectId: z.string().optional() },
+    async ({ projectId }) => {
+      const loader = need(deps.knowledge, "knowledge");
+      const attached = projectId
+        ? repos.projectKnowledge.list(project(projectId).id)
+        : [];
+      return {
+        bases: loader.list().map((base) => ({
+          id: base.manifest.id,
+          name: base.manifest.name,
+          kind: base.manifest.kind,
+          description: base.manifest.description,
+          tags: base.manifest.tags,
+          updated: base.manifest.updated ?? null,
+          documents: base.documents.map((d) => d.file),
+          attached: attached.some((row) => row.base_id === base.manifest.id),
+          writable: attached.some(
+            (row) => row.base_id === base.manifest.id && row.writable === 1,
+          ),
+        })),
+        rejected: loader.rejections(),
+      };
+    },
+  );
+
+  tool(
+    "read_knowledge",
+    "Read one document of a knowledge base, the call the injection block points at (KB-04).",
+    { baseId: z.string().min(1), file: z.string().min(1) },
+    async ({ baseId, file }) => ({
+      baseId,
+      file,
+      content: await need(deps.knowledge, "knowledge").readDocument(baseId, file),
+    }),
+  );
+
+  tool(
+    "list_vault",
+    "Vault entries: labels, URLs, notes and field names. Never a value (VT-03).",
+    {},
+    async () => ({ entries: await need(deps.vault, "vault").listViews() }),
   );
 
   // Keep the doubt service reachable for future tools without an unused-import warning.

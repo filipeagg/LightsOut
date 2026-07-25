@@ -10,7 +10,7 @@ import type { Config } from "../config.js";
 import type { Bus } from "../bus.js";
 import type { Repos } from "../db/repos/index.js";
 import type { AgentsLoader } from "../agents/loader.js";
-import type { ChainRow, ProjectRow, TaskLevel, TaskRow } from "../db/types.js";
+import type { ChainRow, DoubtRow, ProjectRow, TaskLevel, TaskRow } from "../db/types.js";
 import { TaskRunner, type HealthInvalidator } from "../acp/runner.js";
 import { ProjectGit } from "../projects/git.js";
 import { ProjectDocs } from "../projects/docs.js";
@@ -69,6 +69,23 @@ export class Orchestrator {
     this.doubts = doubts ?? new DoubtService(config, repos, bus, agents);
     this.runner =
       runner ?? new TaskRunner(config, repos, bus, agents, this.doubts, health);
+  }
+
+  /**
+   * What the phase layer registers so a closed task can advance its phase (§16.2). It is a
+   * hook rather than a constructor dependency because the phase service launches tasks
+   * through this orchestrator, and the two cannot both be built first.
+   */
+  private phaseHook: ((taskId: string) => Promise<void>) | undefined;
+  /** Answers a `gate` doubt; registered by the phase service alongside the hook. */
+  private gateHook: ((doubt: DoubtRow, choice: string) => Promise<boolean>) | undefined;
+
+  setPhaseHooks(hooks: {
+    onTaskClosed: (taskId: string) => Promise<void>;
+    onGateAnswered: (doubt: DoubtRow, choice: string) => Promise<boolean>;
+  }): void {
+    this.phaseHook = hooks.onTaskClosed;
+    this.gateHook = hooks.onGateAnswered;
   }
 
   get activeRuns(): { projectId: string; runId: string }[] {
@@ -238,6 +255,8 @@ export class Orchestrator {
       }
       await docs.syncPlan(chain);
       await docs.updateState(this.repos.chains.getOrThrow(chain.id));
+      // A doubt is not terminal: the task is waiting, not finished, so the phase stays running.
+      if (outcome.status !== "doubt") await this.closePhase(task.id);
       this.bus.emit("overview");
       return false;
     }
@@ -287,6 +306,7 @@ export class Orchestrator {
       });
       await docs.syncPlan(chain);
       await docs.updateState(this.repos.chains.getOrThrow(chain.id));
+      await this.closePhase(task.id);
       this.bus.emit("overview");
       return false;
     }
@@ -319,8 +339,29 @@ export class Orchestrator {
 
     await docs.syncPlan(chain);
     await docs.updateState(chain);
+    await this.closePhase(task.id);
     this.bus.emit("overview");
     return true;
+  }
+
+  /**
+   * Tell the phase layer that a task reached a terminal state. A failure in the phase layer
+   * must not take the chain loop down with it, so it is reported and swallowed.
+   */
+  private async closePhase(taskId: string): Promise<void> {
+    if (!this.phaseHook) return;
+    try {
+      await this.phaseHook(taskId);
+    } catch (err) {
+      this.repos.events.append({
+        type: "system",
+        payload: {
+          reason: "phase transition failed",
+          taskId,
+          detail: err instanceof Error ? err.message : String(err),
+        },
+      });
+    }
   }
 
   /**
@@ -343,6 +384,14 @@ export class Orchestrator {
     if (doubt.kind === "permission") {
       // The run is holding the ACP response; nothing to requeue here.
       return { ref: doubt.ref, resumed: false };
+    }
+
+    if (doubt.kind === "gate") {
+      // A gate blocks the next phase, not the task that produced it: the task is done and
+      // must not run again (§16.2).
+      const advanced = this.gateHook ? await this.gateHook(doubt, input.choice) : false;
+      this.bus.emit("overview");
+      return { ref: doubt.ref, resumed: advanced };
     }
 
     this.repos.tasks.setStatus(task.id, "queued");

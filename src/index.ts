@@ -19,6 +19,10 @@ import { ensureWorkspaceLayout } from "./workspace/layout.js";
 import { recoverInterrupted } from "./orchestrator/recovery.js";
 import { Orchestrator } from "./orchestrator/orchestrator.js";
 import { DoubtService } from "./orchestrator/doubts.js";
+import { PhaseService } from "./orchestrator/phases.js";
+import { TemplatesLoader } from "./templates/loader.js";
+import { KnowledgeLoader } from "./knowledge/loader.js";
+import { Vault } from "./vault/vault.js";
 import { LoginFlows } from "./setup/login-flows.js";
 
 async function readVersion(): Promise<string> {
@@ -105,6 +109,43 @@ async function main(): Promise<void> {
   // Phase 6 exposes it over MCP; nothing resumes on its own after a restart (RT-07).
   const orchestrator = new Orchestrator(config, repos, bus, agents, undefined, undefined, health);
 
+  // 5b-bis. Templates, curated knowledge, the vault and the phase layer (TP, KB, VT, §16-§18).
+  const templates = new TemplatesLoader(
+    config.workspace,
+    (id) => agents.profile(id) !== undefined,
+    (report) => {
+      console.log(`[templates] reloaded: ${report.loaded}`);
+      for (const bad of report.rejected) {
+        console.warn(`[templates] rejected ${bad.file}: ${bad.error}`);
+      }
+      repos.events.append({
+        type: "config.changed",
+        payload: { kind: "template", id: "*", actor: "system" },
+      });
+      bus.emit("overview");
+    },
+  );
+  const templatesReport = await templates.load();
+  console.log(`[boot] templates: ${templatesReport.loaded} usable`);
+  for (const bad of templatesReport.rejected) {
+    console.warn(`[boot] rejected template ${bad.file}: ${bad.error}`);
+  }
+  templates.startWatching(config.watchPollMs);
+
+  const knowledge = new KnowledgeLoader(config.workspace);
+  const knowledgeReport = await knowledge.load();
+  console.log(`[boot] knowledge: ${knowledgeReport.loaded} base(s)`);
+  for (const bad of knowledgeReport.rejected) {
+    console.warn(`[boot] rejected knowledge base ${bad.dir}: ${bad.error}`);
+  }
+
+  const vault = new Vault(config.workspace);
+  const phases = new PhaseService(config, repos, bus, agents, orchestrator);
+  orchestrator.setPhaseHooks({
+    onTaskClosed: (taskId) => phases.onTaskClosed(taskId),
+    onGateAnswered: (doubt, choice) => phases.onGateAnswered(doubt, choice),
+  });
+
   // 5c. Interactive engine logins driven from the browser (SU-04).
   const loginFlows = new LoginFlows(health);
 
@@ -124,6 +165,10 @@ async function main(): Promise<void> {
       health,
       orchestrator,
       doubts: new DoubtService(config, repos, bus, agents),
+      templates,
+      knowledge,
+      vault,
+      phases,
       version,
     },
   });

@@ -50,7 +50,10 @@ export type ComposeInput = {
   verifyCmd?: string | null;
   /** Number of trailing DECISIONS.md entries to include (DESIGN §6.2, N=10). */
   decisionsLimit?: number;
+  /** The curated knowledge block built by src/knowledge/inject.ts (KB-04). */
   knowledgeBase?: string | undefined;
+  /** The vault index: labels, URLs and variable names, never a value (VT-02). */
+  vaultIndex?: string | undefined;
   /**
    * Decisions already settled for this task, prepended when a task is re-run after a doubt
    * was resolved (DESIGN §8.2, §8.4). Binding: the agent must not reopen them.
@@ -147,6 +150,10 @@ export function composePrompt(input: ComposeInput, docs: DocContext): string {
 
   if (input.knowledgeBase?.trim()) {
     blocks.push(`# Knowledge base\n\n${input.knowledgeBase.trim()}`);
+  }
+
+  if (input.vaultIndex?.trim()) {
+    blocks.push(`# Credentials\n\n${input.vaultIndex.trim()}`);
   }
 
   return blocks.join("\n\n---\n\n");

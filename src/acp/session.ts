@@ -56,6 +56,15 @@ export type RunSessionDeps = {
   limits: SessionLimits;
   /** Settled decisions prepended to the prompt when a task is re-run (DESIGN §8.2). */
   decisionContext?: string;
+  /** Curated knowledge for this run, already budgeted (KB-04). */
+  knowledgeBlock?: string;
+  /** The vault index for the prompt, and the variables the adapter process gets (VT-02). */
+  vaultIndex?: string;
+  vaultEnv?: Record<string, string>;
+  /** Workspace root, so shared material classifies as §7.1 says rather than as an escape. */
+  workspacePath?: string;
+  /** The one base this project may write into, if any (KB-05). */
+  writableKnowledgeBase?: string;
   /** Defaults to rejecting with an explanation, which is honest for phase 3. */
   humanGate?: HumanGate;
   onStderr?: (line: string) => void;
@@ -285,6 +294,12 @@ export class RunSession {
 
     const decision = this.deps.policy.evaluate({
       projectPath: this.deps.project.path,
+      // Without these two the workspace-aware rules of §7.1 cannot fire and every path
+      // outside the project stays `outside_workspace`, which is the safe reading.
+      ...(this.deps.workspacePath ? { workspacePath: this.deps.workspacePath } : {}),
+      ...(this.deps.writableKnowledgeBase
+        ? { writableKnowledgeBase: this.deps.writableKnowledgeBase }
+        : {}),
       ...(toolCall.kind ? { kind: toolCall.kind } : {}),
       ...(toolCall.title ? { title: toolCall.title } : {}),
       ...(paths.length ? { paths } : {}),
@@ -385,6 +400,8 @@ export class RunSession {
         taskSpec: task.spec,
         verifyCmd: task.verify_cmd ?? project.verify_cmd,
         decisionContext: this.deps.decisionContext,
+        knowledgeBase: this.deps.knowledgeBlock,
+        vaultIndex: this.deps.vaultIndex,
       },
       docs,
     );
@@ -396,6 +413,11 @@ export class RunSession {
     const adapter = spawnAdapter({
       command: this.deps.adapterCommand,
       cwd: project.path,
+      // Vault values reach the agent only here: they are excluded from every other run's
+      // environment, so an agent with no network grant cannot see them at all (§18).
+      ...(this.deps.vaultEnv && Object.keys(this.deps.vaultEnv).length > 0
+        ? { env: this.deps.vaultEnv }
+        : {}),
       ...(this.deps.onStderr ? { onStderr: this.deps.onStderr } : {}),
     });
     this.adapter = adapter;

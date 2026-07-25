@@ -12,6 +12,9 @@ import type { PolicyPack } from "../policy/schema.js";
 import type { ProjectRow, TaskRow } from "../db/types.js";
 import { RunSession, type HumanGate, type RunOutcome } from "./session.js";
 import { DoubtService } from "../orchestrator/doubts.js";
+import type { KnowledgeLoader } from "../knowledge/loader.js";
+import { buildKnowledgeBlock } from "../knowledge/inject.js";
+import { renderVaultIndex, type Vault } from "../vault/vault.js";
 
 export type RunTaskInput = {
   project: ProjectRow;
@@ -49,8 +52,72 @@ export class TaskRunner {
     doubts?: DoubtService,
     /** Optional: when present, an auth failure mid-run flips engine health (§11.3). */
     private readonly health?: HealthInvalidator,
+    /** Phase 9 material; absent in the phase 3 CLI, which runs a task with neither. */
+    private readonly context?: {
+      knowledge?: KnowledgeLoader;
+      vault?: Vault;
+    },
   ) {
     this.doubts = doubts ?? new DoubtService(config, repos, bus, agents);
+  }
+
+  /**
+   * Curated knowledge and credentials for this run (KB-04, §18). The vault is resolved only
+   * when the run's pack grants network access: a run that cannot reach anything has no use for
+   * a token, and not putting it in the environment is cheaper than trusting it not to look.
+   */
+  private async runContext(
+    project: ProjectRow,
+    task: TaskRow,
+    pack: PolicyPack | undefined,
+  ): Promise<{
+    knowledgeBlock?: string;
+    vaultIndex?: string;
+    vaultEnv?: Record<string, string>;
+    vaultReads: { entryId: string; fields: string[] }[];
+    writableKnowledgeBase?: string;
+  }> {
+    const attachments = this.repos.projectKnowledge.list(project.id);
+    const writable = attachments.find((row) => row.writable === 1)?.base_id;
+
+    let knowledgeBlock: string | undefined;
+    if (this.context?.knowledge && attachments.length > 0) {
+      const phase = this.repos.phases.getByTask(task.id);
+      const block = await buildKnowledgeBlock(
+        this.context.knowledge,
+        attachments.map((row) => row.base_id),
+        {
+          budgetChars: this.config.knowledgeBudgetChars,
+          tags: attachments.map((row) => row.kind),
+          phaseTitle: phase?.title ?? task.title,
+        },
+      );
+      if (block.text) knowledgeBlock = block.text;
+    }
+
+    const grantsNetwork = pack?.rules.some(
+      (rule) => rule.class === "network" && rule.verdict !== "deny",
+    );
+    if (!this.context?.vault || !grantsNetwork) {
+      return {
+        ...(knowledgeBlock ? { knowledgeBlock } : {}),
+        vaultReads: [],
+        ...(writable ? { writableKnowledgeBase: writable } : {}),
+      };
+    }
+
+    const resolved = await this.context.vault.resolveForRun({
+      projectId: project.id,
+      testOnlyRequired: pack?.vault?.test_only_required ?? false,
+    });
+    const index = renderVaultIndex(resolved);
+    return {
+      ...(knowledgeBlock ? { knowledgeBlock } : {}),
+      ...(index ? { vaultIndex: index } : {}),
+      ...(Object.keys(resolved.env).length > 0 ? { vaultEnv: resolved.env } : {}),
+      vaultReads: resolved.reads,
+      ...(writable ? { writableKnowledgeBase: writable } : {}),
+    };
   }
 
   private adapterCommand(engine: "claude" | "codex"): string {
@@ -68,7 +135,11 @@ export class TaskRunner {
       default: this.agents.pack("default"),
     });
 
+
     const decisionContext = this.doubts.decisionContext(task.id);
+
+    const agentPack = this.agents.pack(profile.policy);
+    const context = await this.runContext(project, task, input.projectPack ?? agentPack);
 
     const run = this.repos.runs.start({
       taskId: task.id,
@@ -76,6 +147,16 @@ export class TaskRunner {
       model: profile.model ?? null,
     });
     this.repos.tasks.setStatus(task.id, "running");
+
+    // Field names only, never values (VT-05).
+    for (const read of context.vaultReads) {
+      this.repos.vaultAudit.record(run.id, read.entryId, read.fields);
+      this.repos.events.append({
+        runId: run.id,
+        type: "vault.read",
+        payload: { entryId: read.entryId, fields: read.fields },
+      });
+    }
     this.bus.emit("overview");
 
     const session = new RunSession({
@@ -93,8 +174,15 @@ export class TaskRunner {
           task.level === "quick" ? this.config.timeoutQuickMin : this.config.timeoutFullMin,
         inactivityMin: this.config.inactivityMin,
       },
+      workspacePath: this.config.workspace,
       // On a re-run after a resolved doubt the agent must see what was settled (§8.2, §8.4).
       ...(decisionContext ? { decisionContext } : {}),
+      ...(context.knowledgeBlock ? { knowledgeBlock: context.knowledgeBlock } : {}),
+      ...(context.vaultIndex ? { vaultIndex: context.vaultIndex } : {}),
+      ...(context.vaultEnv ? { vaultEnv: context.vaultEnv } : {}),
+      ...(context.writableKnowledgeBase
+        ? { writableKnowledgeBase: context.writableKnowledgeBase }
+        : {}),
       // require_human opens a permission doubt and holds the ACP response until it is
       // answered or the slow clock runs out (DESIGN §6.5, §8.4).
       humanGate:

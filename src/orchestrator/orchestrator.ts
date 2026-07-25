@@ -19,6 +19,8 @@ import { runVerify } from "./verify.js";
 import { RunLocks } from "./locks.js";
 import type { RunTaskInput, RunTaskResult } from "../acp/runner.js";
 import { DoubtService } from "./doubts.js";
+import type { KnowledgeLoader } from "../knowledge/loader.js";
+import type { Vault } from "../vault/vault.js";
 
 /** The one seam the chain loop needs from the ACP layer; injectable for tests. */
 export type TaskRunnerLike = { run: (input: RunTaskInput) => Promise<RunTaskResult> };
@@ -64,11 +66,13 @@ export class Orchestrator {
     doubts?: DoubtService,
     /** Passed through so an auth failure mid-run flips engine health (§11.3). */
     health?: HealthInvalidator,
+    /** Curated knowledge and the vault, when this process has them (KB-04, §18). */
+    context?: { knowledge?: KnowledgeLoader; vault?: Vault },
   ) {
     this.locks = new RunLocks(config.maxParallel);
     this.doubts = doubts ?? new DoubtService(config, repos, bus, agents);
     this.runner =
-      runner ?? new TaskRunner(config, repos, bus, agents, this.doubts, health);
+      runner ?? new TaskRunner(config, repos, bus, agents, this.doubts, health, context);
   }
 
   /**

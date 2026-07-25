@@ -105,11 +105,24 @@ async function main(): Promise<void> {
     console.warn("[boot] network: unrestricted (egress allowlist disabled, RT-05)");
   }
 
-  // 5b. Orchestrator: owns chains, project locks and the concurrency cap (OR-*, SR-07).
-  // Phase 6 exposes it over MCP; nothing resumes on its own after a restart (RT-07).
-  const orchestrator = new Orchestrator(config, repos, bus, agents, undefined, undefined, health);
+  // 5b. Curated knowledge and the vault, before the orchestrator: a run's prompt and its
+  // environment are built from them (KB-04, §18).
+  const knowledge = new KnowledgeLoader(config.workspace);
+  const knowledgeReport = await knowledge.load();
+  console.log(`[boot] knowledge: ${knowledgeReport.loaded} base(s)`);
+  for (const bad of knowledgeReport.rejected) {
+    console.warn(`[boot] rejected knowledge base ${bad.dir}: ${bad.error}`);
+  }
+  const vault = new Vault(config.workspace);
 
-  // 5b-bis. Templates, curated knowledge, the vault and the phase layer (TP, KB, VT, §16-§18).
+  // 5c. Orchestrator: owns chains, project locks and the concurrency cap (OR-*, SR-07).
+  // Nothing resumes on its own after a restart (RT-07).
+  const orchestrator = new Orchestrator(config, repos, bus, agents, undefined, undefined, health, {
+    knowledge,
+    vault,
+  });
+
+  // 5d. Templates and the phase layer (TP, §16).
   const templates = new TemplatesLoader(
     config.workspace,
     (id) => agents.profile(id) !== undefined,
@@ -132,14 +145,6 @@ async function main(): Promise<void> {
   }
   templates.startWatching(config.watchPollMs);
 
-  const knowledge = new KnowledgeLoader(config.workspace);
-  const knowledgeReport = await knowledge.load();
-  console.log(`[boot] knowledge: ${knowledgeReport.loaded} base(s)`);
-  for (const bad of knowledgeReport.rejected) {
-    console.warn(`[boot] rejected knowledge base ${bad.dir}: ${bad.error}`);
-  }
-
-  const vault = new Vault(config.workspace);
   const phases = new PhaseService(config, repos, bus, agents, orchestrator);
   orchestrator.setPhaseHooks({
     onTaskClosed: (taskId) => phases.onTaskClosed(taskId),

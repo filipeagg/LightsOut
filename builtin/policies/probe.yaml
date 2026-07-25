@@ -1,0 +1,25 @@
+# probe: find out how an external API actually behaves (§19, contract-prober).
+# Network and execution are granted; writes are confined to probes/ and doc/, so a probing
+# session cannot start implementing what it was only supposed to describe (BA-05).
+# Only test credentials are resolvable (VT-06).
+id: probe
+write_scopes: [probes, doc]
+vault:
+  test_only_required: true
+rules:
+  - { class: project_read, verdict: allow }
+  - { class: project_write, verdict: allow, reason: "confined to probes/ and doc/" }
+  - { class: exec_check, verdict: allow }
+  - { class: network, verdict: allow, reason: "probing is the point of this agent" }
+  - { class: git_local, verdict: deny }
+  - { class: deps_install, verdict: require_human }
+  - { class: delete, verdict: deny }
+  - { class: git_push, verdict: deny }
+  - { class: knowledge_write, verdict: deny }
+  - { class: outside_workspace, verdict: deny }
+  - { class: credentials, verdict: require_human }
+  - { class: publish_external, verdict: deny }
+  - { class: other, verdict: require_human }
+matchers:
+  exec_check:
+    - "^python3?\\s+probes/"

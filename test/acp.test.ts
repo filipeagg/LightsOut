@@ -1,6 +1,6 @@
 /** Phase 3 gate: result sentinel, prompt composition and agent profile loading. */
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseResult, SENTINEL_CLOSE, SENTINEL_OPEN } from "../src/acp/result.js";
@@ -193,7 +193,8 @@ describe("agents loader", () => {
 
     const loader = new AgentsLoader(workspace);
     const report = await loader.load();
-    expect(report).toMatchObject({ loaded: 1, packs: 1, rejected: [] });
+    // 10 builtin profiles and 7 builtin packs, with builder and default shadowed (§2).
+    expect(report).toMatchObject({ loaded: 10, packs: 7, fromWorkspace: 1, rejected: [] });
     expect(loader.profileOrThrow("builder").engine).toBe("claude");
     expect(loader.profile("builder")?.policy).toBe("default");
     expect(loader.pack("default")?.rules[0]?.verdict).toBe("allow");
@@ -207,7 +208,7 @@ describe("agents loader", () => {
 
     const loader = new AgentsLoader(workspace);
     const report = await loader.load();
-    expect(report.loaded).toBe(1);
+    expect(report.loaded).toBe(11); // 10 builtin + good.yaml
     expect(report.rejected.map((r) => r.file).sort()).toEqual([
       "bad-engine.yaml",
       "bad-extra.yaml",
@@ -231,28 +232,48 @@ describe("agents loader", () => {
     const loader = new AgentsLoader(workspace);
     const report = await loader.load();
     expect(report.rejected.map((r) => r.file)).toEqual(["broken.yaml"]);
+    expect(report.loaded).toBe(10); // builder shadowed, broken rejected
     expect(loader.instructionsFor(loader.profileOrThrow("builder"))).toBe(
       "HOUSE RULES\n\nOWN RULES",
     );
   });
 
-  it("seeds the bundled examples when the workspace has no profiles", async () => {
+  it("serves the builtin library when the workspace has no profiles (BA-01)", async () => {
     const loader = new AgentsLoader(workspace);
     const report = await loader.load();
-    expect(report.seeded).toBe(true);
-    expect(report.loaded).toBeGreaterThan(0);
-    expect(loader.pack("default")).toBeDefined();
+    expect(report.loaded).toBe(10);
+    expect(report.fromWorkspace).toBe(0);
+    expect(report.packs).toBe(7);
     expect(report.rejected).toEqual([]);
+    for (const id of ["prompt-architect", "planner", "builder", "answerer"]) {
+      expect(loader.profile(id)).toBeDefined();
+    }
+    for (const id of ["default", "read-only", "no-write", "probe", "test", "curate", "advisor"]) {
+      expect(loader.pack(id)).toBeDefined();
+    }
+    // Nothing is copied into the workspace: the library is read where it ships (DESIGN §2).
+    expect((await readdir(path.join(workspace, "agents"))).sort()).toEqual([
+      "fragments",
+      "policies",
+    ]);
+  });
 
-    // A second load must not seed again.
-    const again = await new AgentsLoader(workspace).load();
-    expect(again.seeded).toBe(false);
+  it("lets a workspace file shadow a builtin of the same id (AP-01, §2)", async () => {
+    await writeAgent("builder.yaml", "name: Mine\nengine: codex\ninstructions: LOCAL\n");
+    const loader = new AgentsLoader(workspace);
+    const report = await loader.load();
+    expect(report.loaded).toBe(10);
+    expect(report.fromWorkspace).toBe(1);
+    const builder = loader.profileOrThrow("builder");
+    expect(builder.name).toBe("Mine");
+    expect(builder.engine).toBe("codex");
   });
 
   it("names the available profiles when one is missing", async () => {
     await writeAgent("builder.yaml", "name: Builder\nengine: claude\n");
     const loader = new AgentsLoader(workspace);
     await loader.load();
-    expect(() => loader.profileOrThrow("ghost")).toThrow(/available: builder/);
+    expect(() => loader.profileOrThrow("ghost")).toThrow(/unknown agent profile: ghost/);
+    expect(() => loader.profileOrThrow("ghost")).toThrow(/builder/);
   });
 });

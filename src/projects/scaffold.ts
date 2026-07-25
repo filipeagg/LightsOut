@@ -1,6 +1,6 @@
 /**
  * Project scaffolding (PM-01, DESIGN §9.1).
- * Copies `templates/project/`, fills `lightsout.yaml`, initialises git with the scaffold
+ * Copies `scaffold/`, fills `lightsout.yaml`, initialises git with the scaffold
  * commit, and inserts the project row. Idempotent: an existing project is returned as is.
  */
 import { cp, mkdir, readFile, writeFile, stat } from "node:fs/promises";
@@ -27,9 +27,13 @@ export type CreateProjectResult = {
   created: boolean;
 };
 
+/**
+ * The project scaffold. It moved out of `templates/project/` in phase 9 because
+ * `templates/` now means project templates (TP-01) everywhere else (DESIGN §2).
+ */
 function templateDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(here, "..", "..", "templates", "project");
+  return path.resolve(here, "..", "..", "scaffold");
 }
 
 async function exists(target: string): Promise<boolean> {

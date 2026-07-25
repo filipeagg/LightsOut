@@ -65,7 +65,8 @@ async function main(): Promise<void> {
       (layout.gitignoreUpdated ? " (.gitignore updated)" : ""),
   );
 
-  // 4b. Agent profiles and policy packs (AP-01..03), seeded from examples on first boot.
+  // 4b. Agent profiles and policy packs: the builtin library layered under the workspace
+  // (AP-01..03, BA-01, DESIGN §2).
   const agents = new AgentsLoader(config.workspace, (report) => {
     console.log(`[agents] reloaded: ${report.loaded} profile(s), ${report.packs} pack(s)`);
     for (const bad of report.rejected) console.warn(`[agents] rejected ${bad.file}: ${bad.error}`);
@@ -78,7 +79,7 @@ async function main(): Promise<void> {
   const agentsReport = await agents.load();
   console.log(
     `[boot] agents: ${agentsReport.loaded} profile(s), ${agentsReport.packs} pack(s)` +
-      (agentsReport.seeded ? " (examples seeded)" : ""),
+      (agentsReport.fromWorkspace > 0 ? ` (${agentsReport.fromWorkspace} from the workspace)` : ""),
   );
   for (const bad of agentsReport.rejected) {
     console.warn(`[boot] rejected agent file ${bad.file}: ${bad.error}`);

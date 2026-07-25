@@ -1,0 +1,18 @@
+# advisor: the ephemeral second-opinion sessions of §8.2. Everything read-only, terminal denied.
+# An advisor exists to have an opinion, so it needs no way to act on one.
+id: advisor
+rules:
+  - { class: project_read, verdict: allow }
+  - { class: project_write, verdict: deny }
+  - { class: exec_check, verdict: deny, reason: "an advisory session runs nothing" }
+  - { class: git_local, verdict: deny }
+  - { class: deps_install, verdict: deny }
+  - { class: delete, verdict: deny }
+  - { class: git_push, verdict: deny }
+  - { class: network, verdict: deny }
+  - { class: knowledge_write, verdict: deny }
+  - { class: outside_workspace, verdict: deny }
+  - { class: credentials, verdict: deny }
+  - { class: publish_external, verdict: deny }
+  - { class: other, verdict: deny }
+matchers: {}

@@ -1,0 +1,20 @@
+# curate: the codebase analyst (§17.3, KB-05). The only pack whose knowledge_write verdict is
+# allow. The runner narrows the grant to the single base recorded writable=1 for the project;
+# writes into any other base classify as outside_workspace and are denied (§7.1).
+id: curate
+write_scopes: [doc]
+rules:
+  - { class: project_read, verdict: allow }
+  - { class: project_write, verdict: allow, reason: "confined to doc/; the base itself is knowledge_write" }
+  - { class: knowledge_write, verdict: allow, reason: "this project owns one writable base (KB-05)" }
+  - { class: exec_check, verdict: allow }
+  - { class: git_local, verdict: deny }
+  - { class: deps_install, verdict: deny }
+  - { class: delete, verdict: require_human }
+  - { class: git_push, verdict: deny }
+  - { class: network, verdict: deny }
+  - { class: outside_workspace, verdict: deny }
+  - { class: credentials, verdict: require_human }
+  - { class: publish_external, verdict: deny }
+  - { class: other, verdict: require_human }
+matchers: {}

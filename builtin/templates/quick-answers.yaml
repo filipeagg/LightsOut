@@ -1,0 +1,16 @@
+# Builtin template (TP-02, DESIGN §16.3). One phase, launched again for each question. It
+# exists so that asking something does not require creating a whole project ceremony.
+id: quick-answers
+name: Quick answers
+description: >
+  Questions against curated knowledge, or generic ones. No gate, no verify, nothing to commit.
+phases:
+  - id: answer
+    title: Answer the question
+    agent: answerer
+    repeatable: true
+    instructions: |
+      Answer the question in the task spec, briefly and without preamble. Use the
+      curated knowledge attached to this project and the code you can read, and say
+      which base or file each answer came from. If the answer is not there, say so in
+      one line and say what would settle it.

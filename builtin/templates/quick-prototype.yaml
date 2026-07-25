@@ -1,0 +1,36 @@
+# Builtin template (TP-02, DESIGN §16.3). No planning phase and no audit: speed over
+# durability, and the code is expected to be thrown away.
+id: quick-prototype
+name: Quick prototype
+description: >
+  Proving an idea works. One shaping pass, then build, with an optional smoke test.
+phases:
+  - id: shape-the-prompt
+    title: Turn the idea into a workable prompt
+    agent: prompt-architect
+    gate: human
+    deliverable: doc/PROMPT.md
+    instructions: |
+      The user's raw request is in the task spec. State what the prototype has to
+      demonstrate and what it explicitly will not do. Keep it short: this is a
+      prototype, so the non-goals matter more than the details. Produce
+      doc/PROMPT.md with the demonstration criteria and the shortcuts you are taking
+      on purpose.
+  - id: build
+    title: Build the prototype
+    agent: builder
+    repeatable: true
+    instructions: |
+      Build the smallest thing that demonstrates what doc/PROMPT.md asks for. Take the
+      shortcuts it lists and no others. Do not generalise, do not add configuration
+      and do not build for a second use case. Say in your summary which shortcuts
+      would have to be undone to make this real.
+  - id: qa-smoke
+    title: Smoke-test the prototype
+    agent: qa-engineer
+    optional: true
+    deliverable: doc/QA-REPORT.md
+    instructions: |
+      Check that the demonstration criteria of doc/PROMPT.md actually hold when the
+      thing runs. One pass, happy path plus the two most likely failures. Report in
+      doc/QA-REPORT.md.

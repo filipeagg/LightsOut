@@ -38,8 +38,7 @@ async function main(): Promise<void> {
   const agents = new AgentsLoader(config.workspace);
   const report = await agents.load();
   console.log(
-    `[cli] agents loaded: ${report.loaded} profile(s), ${report.packs} pack(s)` +
-      (report.seeded ? " (examples seeded)" : ""),
+    `[cli] agents loaded: ${report.loaded} profile(s), ${report.packs} pack(s)`,
   );
   for (const bad of report.rejected) console.warn(`[cli] rejected ${bad.file}: ${bad.error}`);
 

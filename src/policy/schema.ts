@@ -13,6 +13,7 @@ export const ACTION_CLASSES = [
   "outside_workspace",
   "credentials",
   "publish_external",
+  "knowledge_write",
   "other",
 ] as const;
 
@@ -36,6 +37,21 @@ export const policyPackSchema = z
     id: z.string().min(1),
     /** First match wins, evaluated top-down (DESIGN §7.2). */
     rules: z.array(policyRuleSchema).default([]),
+    /**
+     * Project-relative path prefixes a write may touch (§19: `read-only` writes only under
+     * `doc/`, `probe` only under `probes/`, `test` only in the test directories). Empty means
+     * unconfined. A write outside every prefix is denied whatever the class rule says, which is
+     * how BA-05 is enforced by the engine instead of by instructions.
+     */
+    write_scopes: z.array(z.string().min(1)).default([]),
+    /** Vault behaviour for runs on this pack (VT-06, DESIGN §18). */
+    vault: z
+      .object({
+        /** Only entries flagged test_only may be resolved; the rest are refused and audited. */
+        test_only_required: z.boolean().default(false),
+      })
+      .strict()
+      .default({ test_only_required: false }),
     /**
      * Extra regexes per class, merged on top of the built-in matcher table.
      * Keys are action classes; unknown keys are rejected explicitly so a typo in a pack

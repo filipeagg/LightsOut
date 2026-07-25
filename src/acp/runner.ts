@@ -32,6 +32,12 @@ export type RunTaskResult = {
   checkpointTag?: string;
 };
 
+/** Only the part of the health probe the runner needs, so a test can pass a stub (§11.3). */
+export type HealthInvalidator = {
+  noteAuthFailure: (engine: "claude" | "codex", detail: string) => void;
+  clearAuthFailure: (engine: "claude" | "codex") => void;
+};
+
 export class TaskRunner {
   private readonly doubts: DoubtService;
 
@@ -41,6 +47,8 @@ export class TaskRunner {
     private readonly bus: Bus,
     private readonly agents: AgentsLoader,
     doubts?: DoubtService,
+    /** Optional: when present, an auth failure mid-run flips engine health (§11.3). */
+    private readonly health?: HealthInvalidator,
   ) {
     this.doubts = doubts ?? new DoubtService(config, repos, bus, agents);
   }
@@ -121,6 +129,22 @@ export class TaskRunner {
       type: "run.state",
       payload: { status: outcome.status, reason: outcome.exitReason },
     });
+
+    // Credentials died mid-run (§11.3): drop the cached probe so the next read reports the
+    // engine as unauthenticated, and record it as a system.auth event so the panel's attention
+    // strip and the history both say "reconnect the engine" instead of "the task failed".
+    if (outcome.authRequired) {
+      this.health?.noteAuthFailure(profile.engine, outcome.exitReason);
+      this.repos.events.append({
+        runId: run.id,
+        type: "system.auth",
+        payload: { engine: profile.engine, reason: "AUTH_REQUIRED", detail: outcome.exitReason },
+      });
+      this.bus.emit("health");
+    } else if (outcome.status === "ok") {
+      // The engine demonstrably works; clear any failure remembered from an earlier run.
+      this.health?.clearAuthFailure(profile.engine);
+    }
 
     const result: RunTaskResult = { runId: run.id, outcome };
 

@@ -102,7 +102,7 @@ async function main(): Promise<void> {
 
   // 5b. Orchestrator: owns chains, project locks and the concurrency cap (OR-*, SR-07).
   // Phase 6 exposes it over MCP; nothing resumes on its own after a restart (RT-07).
-  const orchestrator = new Orchestrator(config, repos, bus, agents);
+  const orchestrator = new Orchestrator(config, repos, bus, agents, undefined, undefined, health);
 
   // 5c. Interactive engine logins driven from the browser (SU-04).
   const loginFlows = new LoginFlows(health);
@@ -114,6 +114,7 @@ async function main(): Promise<void> {
     health,
     repos,
     loginFlows,
+    agents,
     checkDatabase: () => checkDatabase(db),
     mcp: {
       config,

@@ -1,0 +1,242 @@
+/**
+ * Read-only JSON API (WP-01, DESIGN §12.1).
+ *
+ * Every handler is SELECT-only against SQLite, or a read of the workspace for the config
+ * resources (OB-01). The shapes come from `src/views.ts`, which the MCP tools use too, so the
+ * panel and Claude Desktop can never disagree about what a run or a doubt looks like (§12.0).
+ *
+ * The resources phase 9 fills — templates, knowledge, the vault, per-project phases — answer
+ * now with their empty shape rather than 404, so the panel can render them without branching on
+ * "does this endpoint exist yet".
+ */
+import { z } from "zod";
+import type { FastifyInstance, FastifyReply } from "fastify";
+import type { Config } from "../config.js";
+import type { Repos } from "../db/repos/index.js";
+import type { AgentsLoader } from "../agents/loader.js";
+import type { HealthProbe } from "../health.js";
+import { failure, notFound, success, type Envelope } from "../mcp/envelope.js";
+import { doubtView, overviewView, projectStatusView } from "../views.js";
+
+export type ApiDeps = {
+  config: Config;
+  repos: Repos;
+  agents: AgentsLoader;
+  health: HealthProbe;
+};
+
+/** Accepted model and reasoning values per engine (AP-08). Static until the engines publish one. */
+const ENGINE_MODELS = {
+  claude: {
+    models: ["opus", "sonnet", "haiku"],
+    reasoning: ["none", "low", "medium", "high"],
+  },
+  codex: {
+    models: ["gpt-5-codex", "gpt-5", "o4-mini"],
+    reasoning: ["minimal", "low", "medium", "high"],
+  },
+} as const;
+
+async function envelope(
+  reply: FastifyReply,
+  handler: () => Promise<Record<string, unknown>>,
+): Promise<Envelope> {
+  try {
+    return success(await handler());
+  } catch (err) {
+    const body = failure(err);
+    const code = !body.ok ? body.error.code : "INTERNAL";
+    reply.code(code === "NOT_FOUND" ? 404 : code === "INVALID_INPUT" ? 400 : 409);
+    return body;
+  }
+}
+
+export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
+  const { config, repos, agents, health } = deps;
+  const views = { config, repos };
+
+  const project = (id: string) => {
+    const row = repos.projects.get(id);
+    if (!row) throw notFound(`project not found: ${id}`);
+    return row;
+  };
+
+  app.get("/api/overview", async (_request, reply) =>
+    envelope(reply, async () => overviewView(views, await health.engines())),
+  );
+
+  app.get("/api/projects", async (request, reply) =>
+    envelope(reply, async () => {
+      const query = z
+        .object({ archived: z.enum(["true", "false"]).optional() })
+        .parse(request.query ?? {});
+      const overview = overviewView(views, await health.engines());
+      return {
+        projects:
+          query.archived === "true"
+            ? repos.projects
+                .list({ includeArchived: true })
+                .map((p) => ({ id: p.id, name: p.name, path: p.path, archived: p.archived === 1 }))
+            : overview.projects,
+      };
+    }),
+  );
+
+  app.get("/api/projects/:id", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = z.object({ id: z.string().min(1) }).parse(request.params);
+      return projectStatusView(views, project(id));
+    }),
+  );
+
+  app.get("/api/projects/:id/history", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = z.object({ id: z.string().min(1) }).parse(request.params);
+      const query = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(200).optional(),
+          before: z.string().optional(),
+        })
+        .parse(request.query ?? {});
+      const row = project(id);
+      const runs = repos.runs.history({
+        projectId: row.id,
+        ...(query.limit ? { limit: query.limit } : {}),
+        ...(query.before ? { before: query.before } : {}),
+      });
+      const byStatus: Record<string, number> = {};
+      let costUsd = 0;
+      for (const run of runs) {
+        byStatus[run.status] = (byStatus[run.status] ?? 0) + 1;
+        costUsd += run.cost_usd ?? 0;
+      }
+      return {
+        runs: runs.map((r) => ({
+          id: r.id,
+          task: repos.tasks.get(r.task_id)?.title ?? "",
+          engine: r.engine,
+          model: r.model,
+          status: r.status,
+          startedAt: r.started_at,
+          durationS: r.ended_at
+            ? Math.round((new Date(r.ended_at).getTime() - new Date(r.started_at).getTime()) / 1000)
+            : null,
+          costUsd: r.cost_usd,
+          summary: r.summary,
+          exitReason: r.exit_reason,
+        })),
+        totals: { byStatus, costUsd: costUsd || null, runs: runs.length },
+      };
+    }),
+  );
+
+  /** The run timeline the project view tails; `after` is the same cursor the SSE stream uses. */
+  app.get("/api/runs/:id/events", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = z.object({ id: z.string().min(1) }).parse(request.params);
+      const query = z
+        .object({
+          after: z.coerce.number().int().min(0).optional(),
+          limit: z.coerce.number().int().min(1).max(1000).optional(),
+        })
+        .parse(request.query ?? {});
+      const run = repos.runs.get(id);
+      if (!run) throw notFound(`run not found: ${id}`);
+      const rows = repos.events.listByRun(id, {
+        ...(query.after !== undefined ? { after: query.after } : {}),
+        ...(query.limit ? { limit: query.limit } : {}),
+      });
+      return {
+        runId: id,
+        events: rows.map((row) => ({
+          id: row.id,
+          ts: row.ts,
+          type: row.type,
+          payload: JSON.parse(row.payload) as unknown,
+        })),
+        cursor: rows.at(-1)?.id ?? query.after ?? 0,
+      };
+    }),
+  );
+
+  app.get("/api/doubts", async (request, reply) =>
+    envelope(reply, async () => {
+      const query = z
+        .object({
+          projectId: z.string().optional(),
+          status: z.enum(["open", "answered", "closed"]).optional(),
+        })
+        .parse(request.query ?? {});
+      return {
+        doubts: repos.doubts
+          .list({
+            ...(query.projectId ? { projectId: query.projectId } : {}),
+            status: query.status ?? "open",
+          })
+          .map((d) => doubtView(views, d)),
+      };
+    }),
+  );
+
+  app.get("/api/agents", async (_request, reply) =>
+    envelope(reply, async () => {
+      const snapshot = agents.current();
+      return {
+        agents: [
+          ...[...snapshot.profiles.values()].map((p) => ({
+            id: p.id,
+            name: p.name,
+            engine: p.engine,
+            model: p.model ?? null,
+            policy: p.policy,
+            advisor: p.advisor,
+            // Everything is a workspace profile until the builtin library lands (BA-01, phase 9).
+            source: "workspace" as const,
+            enabled: true,
+            valid: true,
+            error: null as string | null,
+          })),
+          ...snapshot.rejected.map((r) => ({
+            id: r.file.replace(/\.(ya?ml)$/i, ""),
+            name: r.file,
+            engine: null,
+            model: null,
+            policy: null,
+            advisor: null,
+            source: "workspace" as const,
+            enabled: false,
+            valid: false,
+            error: r.error,
+          })),
+        ],
+        packs: [...snapshot.packs.keys()],
+      };
+    }),
+  );
+
+  app.get("/api/agents/models", async (_request, reply) =>
+    envelope(reply, async () => ({ engines: ENGINE_MODELS })),
+  );
+
+  // Phase 9 resources (TP, KB, VT). Empty and honest rather than absent, so the panel's
+  // renderers are written once.
+  app.get("/api/projects/:id/phases", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = z.object({ id: z.string().min(1) }).parse(request.params);
+      project(id);
+      return { phases: [], available: false, note: "Phases arrive with the templates (TP-06)." };
+    }),
+  );
+
+  app.get("/api/templates", async (_request, reply) =>
+    envelope(reply, async () => ({ templates: [], available: false })),
+  );
+
+  app.get("/api/knowledge", async (_request, reply) =>
+    envelope(reply, async () => ({ bases: [], available: false })),
+  );
+
+  app.get("/api/vault", async (_request, reply) =>
+    envelope(reply, async () => ({ entries: [], available: false })),
+  );
+}

@@ -54,6 +54,8 @@ const KEY_COMMAND: Record<EngineName, string[]> = {
 export type AuthProbe = {
   invalidate: () => void;
   engines: (force?: boolean) => Promise<EngineHealth[]>;
+  /** Forget a failure observed mid-run once the engine is connected again (§11.3). */
+  clearAuthFailure?: (engine: EngineName) => void;
 };
 
 export type LoginCommands = {
@@ -215,6 +217,8 @@ export class LoginFlows {
       });
       child.on("close", (code) => {
         void (async () => {
+          // A completed login supersedes any failure remembered from a run (§11.3).
+          this.health.clearAuthFailure?.(engine);
           this.health.invalidate();
           const probe = (await this.health.engines(true)).find((e) => e.engine === engine);
           resolve({
@@ -240,8 +244,9 @@ export class LoginFlows {
   private async finish(id: string, exitCode: number, forwarder: Forwarder | null): Promise<void> {
     this.children.delete(id);
     if (forwarder) await forwarder.close();
-    this.health.invalidate();
     const flow = this.flows.get(id);
+    if (flow) this.health.clearAuthFailure?.(flow.engine);
+    this.health.invalidate();
     const probe = flow
       ? (await this.health.engines(true)).find((e) => e.engine === flow.engine)
       : undefined;

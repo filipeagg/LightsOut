@@ -11,7 +11,7 @@ import type { Bus } from "../bus.js";
 import type { Repos } from "../db/repos/index.js";
 import type { AgentsLoader } from "../agents/loader.js";
 import type { ChainRow, ProjectRow, TaskLevel, TaskRow } from "../db/types.js";
-import { TaskRunner } from "../acp/runner.js";
+import { TaskRunner, type HealthInvalidator } from "../acp/runner.js";
 import { ProjectGit } from "../projects/git.js";
 import { ProjectDocs } from "../projects/docs.js";
 import { readProjectConfig } from "../projects/config.js";
@@ -62,10 +62,13 @@ export class Orchestrator {
     /** Defaults to the real ACP runner; tests inject a deterministic one. */
     runner?: TaskRunnerLike,
     doubts?: DoubtService,
+    /** Passed through so an auth failure mid-run flips engine health (§11.3). */
+    health?: HealthInvalidator,
   ) {
     this.locks = new RunLocks(config.maxParallel);
     this.doubts = doubts ?? new DoubtService(config, repos, bus, agents);
-    this.runner = runner ?? new TaskRunner(config, repos, bus, agents, this.doubts);
+    this.runner =
+      runner ?? new TaskRunner(config, repos, bus, agents, this.doubts, health);
   }
 
   get activeRuns(): { projectId: string; runId: string }[] {

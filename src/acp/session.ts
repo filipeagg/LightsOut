@@ -71,10 +71,32 @@ export type RunOutcome = {
   costUsd?: number | undefined;
   acpSession?: string | undefined;
   sentinelMissing: boolean;
+  /** The run died because the engine's credentials are gone or expired (§11.3). */
+  authRequired?: boolean;
 };
 
 const MESSAGE_FLUSH_MS = 2000;
 const CANCEL_GRACE_MS = 10_000;
+
+/**
+ * Recognise an authentication failure in whatever shape the adapter passed it through (§11.3).
+ * Both CLIs surface the provider's own words, so this matches on the words rather than a code:
+ * a 401, an expired OAuth token, or a plain "not logged in".
+ */
+const AUTH_PATTERNS = [
+  /\b401\b/,
+  /oauth[^.]*token[^.]*(expired|invalid|revoked)/i,
+  /failed to authenticate/i,
+  /authentication[_ -]?(error|failed|required)/i,
+  /\bunauthorized\b/i,
+  /not logged in/i,
+  /invalid[_ -]api[_ -]key/i,
+  /re-?authenticate/i,
+];
+
+export function isAuthFailure(message: string): boolean {
+  return AUTH_PATTERNS.some((pattern) => pattern.test(message));
+}
 
 /** Pick the option whose kind matches the verdict; adapters name them differently. */
 function chooseOption(
@@ -465,10 +487,15 @@ export class RunSession {
       };
     }
     if (failure) {
+      // Expired or missing credentials are not a task failure: nothing the agent did caused
+      // them and retrying the task will not fix them. Tagging the reason is what lets the
+      // panel's attention strip and the health tool say "reconnect the engine" (§11.3, OB-03).
+      const auth = isAuthFailure(failure);
       return {
         status: "error",
         summary: "",
-        exitReason: failure.slice(0, 300),
+        exitReason: auth ? `AUTH_REQUIRED: ${failure.slice(0, 260)}` : failure.slice(0, 300),
+        authRequired: auth,
         sentinelMissing: true,
         ...base,
       };

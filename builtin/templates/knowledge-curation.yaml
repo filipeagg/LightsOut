@@ -1,0 +1,41 @@
+# Builtin template (TP-02, KB-07, DESIGN §16.3). The only template that runs with a writable
+# knowledge base attached (KB-05): create_project rejects it without writableKnowledge.
+id: knowledge-curation
+name: Knowledge curation
+description: >
+  Turning an existing system into a curated knowledge base the next project can read.
+requires_writable_knowledge: true
+phases:
+  - id: analyse
+    title: Read the system until you understand it
+    agent: codebase-analyst
+    repeatable: true
+    deliverable: doc/ANALYSIS.md
+    instructions: |
+      Read the system named in the task spec: code first, then schema, then
+      configuration. Produce doc/ANALYSIS.md describing what it does, how it is
+      structured, what its invariants are and where its complexity actually lives.
+      Label every statement by what makes it true — a constraint, an invariant in the
+      code, a convention, or a historical accident. Relaunch this phase per subsystem
+      when one pass is not enough.
+  - id: interrogate
+    title: Ask what the code cannot answer
+    agent: codebase-analyst
+    gate: human
+    deliverable: doc/OPEN-QUESTIONS.md
+    instructions: |
+      List in doc/OPEN-QUESTIONS.md everything you could not determine from the source:
+      business rules, intent, why a workaround exists, which behaviours are load-bearing.
+      For each question you actually need answered in order to write the base, raise one
+      functional doubt with concrete options. Do not put the questions in the gate: the
+      gate only means a person has read the deliverable.
+  - id: write-base
+    title: Write the knowledge base
+    agent: codebase-analyst
+    deliverable: "workspace:knowledge/*/index.md"
+    instructions: |
+      Write the base into the knowledge directory this project owns: knowledge.yaml as
+      the manifest (id, name, kind, description, tags, owner, updated), index.md as a
+      table of contents with one line per document saying what is in it, and one
+      Markdown document per coherent subject. Fold in the answers you received. Write
+      for an agent that will read the index and then choose what to open.

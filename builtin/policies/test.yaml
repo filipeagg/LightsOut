@@ -1,0 +1,23 @@
+# test: the QA engineer (§19). Execution plus loopback network so it can drive a locally
+# running application, with writes confined to the test directories and its report.
+id: test
+write_scopes: [test, tests, e2e, spec, __tests__, doc]
+rules:
+  - { class: project_read, verdict: allow }
+  - { class: project_write, verdict: allow, reason: "confined to the test directories and doc/" }
+  - { class: exec_check, verdict: allow }
+  - { class: network, verdict: allow, reason: "loopback only; egress is allowlisted (RT-05)" }
+  - { class: git_local, verdict: allow }
+  - { class: deps_install, verdict: require_human }
+  - { class: delete, verdict: require_human }
+  - { class: git_push, verdict: deny }
+  - { class: knowledge_write, verdict: deny }
+  - { class: outside_workspace, verdict: deny }
+  - { class: credentials, verdict: require_human }
+  - { class: publish_external, verdict: deny }
+  - { class: other, verdict: require_human }
+# Reaching anything beyond loopback is stopped by the egress allowlist of RT-05, not here:
+# a matcher that tried to read hostnames out of a command string would be trivially evaded.
+matchers:
+  exec_check:
+    - "^(npx\\s+)?(playwright|cypress|vitest|jest)\\b"

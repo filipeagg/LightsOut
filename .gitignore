@@ -36,3 +36,6 @@ doc/prototype/check.js
 !dist/
 dist/*
 !dist/lightsout.mcpb
+
+# Junk a mis-resolved DOCKER_CONFIG once created inside the repo
+C*Usersfcg102006/

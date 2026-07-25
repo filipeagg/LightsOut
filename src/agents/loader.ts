@@ -1,12 +1,18 @@
 /**
  * Agent profile loading (AP-01..04) and policy pack loading (PE-05).
  *
- * Profiles live in `$WORKSPACE/agents/*.yaml`, packs in `$WORKSPACE/agents/policies/*.yaml`.
- * On first boot, when `agents/` has no profile, the bundled examples are copied so a fresh
- * machine starts usable (DESIGN §11.1 step 4). Invalid files are rejected with a reason and
- * kept in the report; a bad file never takes the loader down (AP-02).
+ * Two layers (DESIGN §2, BA-01). `builtin/agents/` and `builtin/policies/` ship inside the
+ * image and are read first; `$WORKSPACE/agents/*.yaml` and `$WORKSPACE/agents/policies/*.yaml`
+ * are read second and replace a builtin of the same id wholesale — no field merge, because a
+ * shadowing file is a complete definition, so what the panel wrote is what runs.
+ *
+ * `builtin/` is never written to at runtime, so pulling a new image updates the library
+ * without touching anything the user changed. Nothing is seeded into the workspace any more:
+ * the library is present without copying it, and a copy would silently shadow future updates.
+ * Invalid files are rejected with a reason and kept in the report; a bad file never takes the
+ * loader down (AP-02).
  */
-import { cp, mkdir, readFile, readdir, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 // js-yaml 5 is ESM with named exports only: there is no default export.
@@ -25,16 +31,17 @@ export type AgentsSnapshot = {
 export type LoadReport = {
   loaded: number;
   packs: number;
+  /** How many of the loaded profiles came from the workspace, shadowing or adding (AP-01). */
+  fromWorkspace: number;
   rejected: RejectedProfile[];
-  seeded: boolean;
 };
 
 const YAML_EXT = new Set([".yaml", ".yml"]);
 
-function bundledExamplesDir(): string {
+/** `builtin/` sits next to `dist/` in the image and next to `src/` in the repo. */
+export function builtinDir(kind: "agents" | "policies" | "templates"): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  // dist/agents/loader.js -> dist/../examples/agents (image layout) or repo layout.
-  return path.resolve(here, "..", "..", "examples", "agents");
+  return path.resolve(here, "..", "..", "builtin", kind);
 }
 
 async function listYaml(dir: string): Promise<string[]> {
@@ -108,18 +115,8 @@ export class AgentsLoader {
     return this.snapshot.packs.get(id);
   }
 
-  /** Copy the bundled examples when the workspace has no profiles yet. */
-  async seedIfEmpty(): Promise<boolean> {
-    await mkdir(this.policiesDir, { recursive: true });
-    if ((await listYaml(this.agentsDir)).length > 0) return false;
-    const source = bundledExamplesDir();
-    if (!(await exists(source))) return false;
-    await cp(source, this.agentsDir, { recursive: true });
-    return true;
-  }
-
   async load(): Promise<LoadReport> {
-    const seeded = await this.seedIfEmpty();
+    await mkdir(this.policiesDir, { recursive: true });
 
     const rejected: RejectedProfile[] = [];
     const fragments = new Map<string, string>();
@@ -141,36 +138,45 @@ export class AgentsLoader {
     }
 
     const profiles = new Map<string, AgentProfile>();
-    for (const file of await listYaml(this.agentsDir)) {
-      try {
-        const raw = loadYaml(await readFile(file, "utf8"));
-        if (raw === null || typeof raw !== "object") {
-          throw new Error("file is empty or not a YAML mapping");
-        }
-        const withDefaults = {
-          id: path.basename(file).replace(/\.(ya?ml)$/i, ""),
-          ...(raw as Record<string, unknown>),
-        };
-        const parsed = agentProfileSchema.parse(withDefaults);
-        if (profiles.has(parsed.id)) {
-          throw new Error(`duplicate agent id: ${parsed.id}`);
-        }
-        for (const fragment of parsed.include) {
-          if (!fragments.has(fragment)) {
-            throw new Error(`missing instruction fragment: ${fragment}`);
+    let fromWorkspace = 0;
+    // builtin first, workspace second: same id replaces, new id adds (DESIGN §2).
+    for (const [layer, dir] of [
+      ["builtin", builtinDir("agents")],
+      ["workspace", this.agentsDir],
+    ] as const) {
+      for (const file of await listYaml(dir)) {
+        try {
+          const raw = loadYaml(await readFile(file, "utf8"));
+          if (raw === null || typeof raw !== "object") {
+            throw new Error("file is empty or not a YAML mapping");
           }
+          const withDefaults = {
+            id: path.basename(file).replace(/\.(ya?ml)$/i, ""),
+            ...(raw as Record<string, unknown>),
+          };
+          const parsed = agentProfileSchema.parse(withDefaults);
+          for (const fragment of parsed.include) {
+            if (!fragments.has(fragment)) {
+              throw new Error(`missing instruction fragment: ${fragment}`);
+            }
+          }
+          if (layer === "workspace") fromWorkspace += 1;
+          profiles.set(parsed.id, parsed);
+        } catch (err) {
+          rejected.push({
+            file: layer === "builtin" ? path.join("builtin", path.basename(file)) : path.basename(file),
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
-        profiles.set(parsed.id, parsed);
-      } catch (err) {
-        rejected.push({
-          file: path.basename(file),
-          error: err instanceof Error ? err.message : String(err),
-        });
       }
     }
 
     const packs = new Map<string, PolicyPack>();
-    for (const file of await listYaml(this.policiesDir)) {
+    for (const [layer, dir] of [
+      ["builtin", builtinDir("policies")],
+      ["workspace", this.policiesDir],
+    ] as const) {
+      for (const file of await listYaml(dir)) {
       try {
         const raw = loadYaml(await readFile(file, "utf8"));
         const withDefaults = {
@@ -181,15 +187,21 @@ export class AgentsLoader {
         packs.set(parsed.id, parsed);
       } catch (err) {
         rejected.push({
-          file: path.join("policies", path.basename(file)),
+          file: path.join(layer === "builtin" ? "builtin/policies" : "policies", path.basename(file)),
           error: err instanceof Error ? err.message : String(err),
         });
+      }
       }
     }
 
     this.snapshot = { profiles, packs, rejected, fragments };
     this.fingerprint = await this.treeFingerprint();
-    return { loaded: profiles.size, packs: packs.size, rejected, seeded };
+    return {
+      loaded: profiles.size,
+      packs: packs.size,
+      fromWorkspace,
+      rejected,
+    };
   }
 
   /**

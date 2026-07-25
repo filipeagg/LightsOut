@@ -6,7 +6,8 @@
  * afterwards and cannot be overridden by any pack. Pure in-memory work; the caller writes the
  * audit row so the latency measured includes only the decision (PE-04).
  */
-import { Classifier, type ClassifyInput } from "./classify.js";
+import path from "node:path";
+import { Classifier, pathsInCommand, type ClassifyInput } from "./classify.js";
 import {
   NEVER_ALLOW,
   NEVER_BELOW_HUMAN,
@@ -81,10 +82,62 @@ export class PolicyEngine {
     return verdict;
   }
 
+  /**
+   * The first pack in the layer order that confines writes, and the paths it allows
+   * (§19, BA-05). A pack with no `write_scopes` leaves writes unconfined.
+   */
+  private writeScopes(): { scopes: string[]; source: RuleSource } | undefined {
+    const order: [RuleSource, PolicyPack | undefined][] = [
+      ["project", this.layers.project],
+      ["agent", this.layers.agent],
+      ["default", this.layers.default],
+    ];
+    for (const [source, pack] of order) {
+      if (pack?.write_scopes?.length) return { scopes: pack.write_scopes, source };
+    }
+    return undefined;
+  }
+
+  /** Reject a write that lands outside the pack's scopes; undefined means it is allowed. */
+  private outOfScopeWrite(input: EvaluateInput, cls: ActionClass): string | undefined {
+    if (cls !== "project_write" && cls !== "delete") return undefined;
+    const confined = this.writeScopes();
+    if (!confined) return undefined;
+    const targets = [
+      ...(input.paths ?? []),
+      ...[input.command, ...(input.commands ?? [])]
+        .filter((c): c is string => Boolean(c))
+        .flatMap((c) => pathsInCommand(c)),
+    ];
+    // A confined pack cannot approve a write whose target it cannot see.
+    if (targets.length === 0) return "(the request declares no path)";
+    for (const target of targets) {
+      const resolved = path.resolve(input.projectPath, target);
+      const allowed = confined.scopes.some((scope) =>
+        Classifier.isInside(path.resolve(input.projectPath, scope), resolved),
+      );
+      if (!allowed) return target;
+    }
+    return undefined;
+  }
+
   evaluate(input: EvaluateInput): Decision {
     const startedAt = performance.now();
     const classification = this.classifier.classify(input);
     const hit = this.lookup(classification.class);
+
+    const outOfScope = this.outOfScopeWrite(input, classification.class);
+    if (outOfScope) {
+      const confined = this.writeScopes()!;
+      return {
+        class: classification.class,
+        verdict: "deny",
+        ruleSource: confined.source,
+        reason: `${classification.reason}; write outside this pack's scopes (${confined.scopes.join(", ")}): ${outOfScope}`,
+        floored: true,
+        latencyMs: performance.now() - startedAt,
+      };
+    }
 
     const rawVerdict = hit?.verdict ?? FALLBACK_VERDICT;
     const verdict = PolicyEngine.floor(classification.class, rawVerdict);

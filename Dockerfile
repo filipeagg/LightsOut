@@ -23,6 +23,8 @@ RUN npm install --no-audit --no-fund
 COPY src/ ./src/
 COPY test/ ./test/
 COPY examples/ ./examples/
+COPY builtin/ ./builtin/
+COPY scaffold/ ./scaffold/
 CMD ["npm", "test"]
 
 # Runtime stage. Named so the release workflow can target it explicitly (SU-01).
@@ -50,8 +52,11 @@ RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 
 COPY --from=builder /build/dist/ ./dist/
 COPY panel/ ./panel/
-COPY templates/ ./templates/
+COPY scaffold/ ./scaffold/
 COPY examples/ ./examples/
+# The builtin library: never written to at runtime, so `docker pull` updates it without
+# touching anything the user changed in the workspace (BA-01, TP-02, DESIGN §2).
+COPY builtin/ ./builtin/
 
 # The credential directories must exist in the image and belong to app: Docker
 # initialises a named volume from the image path, so an absent path would be

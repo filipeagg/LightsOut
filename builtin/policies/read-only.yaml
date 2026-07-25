@@ -1,0 +1,19 @@
+# read-only: thinking agents. They may write their deliverable under doc/ and nothing else,
+# so a planner physically cannot edit source (BA-05, DESIGN §19).
+id: read-only
+write_scopes: [doc]
+rules:
+  - { class: project_read, verdict: allow }
+  - { class: project_write, verdict: allow, reason: "confined to doc/ by write_scopes" }
+  - { class: exec_check, verdict: allow }
+  - { class: git_local, verdict: deny, reason: "this agent does not change history" }
+  - { class: deps_install, verdict: deny }
+  - { class: delete, verdict: deny }
+  - { class: git_push, verdict: deny }
+  - { class: network, verdict: deny }
+  - { class: knowledge_write, verdict: deny }
+  - { class: outside_workspace, verdict: deny }
+  - { class: credentials, verdict: require_human }
+  - { class: publish_external, verdict: require_human }
+  - { class: other, verdict: require_human }
+matchers: {}

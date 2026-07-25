@@ -26,6 +26,14 @@ export type ClassifyInput = {
   commands?: string[];
   /** Absolute path of the active project. */
   projectPath: string;
+  /**
+   * Absolute path of the workspace root (`/workspace`). Without it the workspace-aware rules
+   * of §7.1 are skipped and every path outside the project is `outside_workspace`, which is
+   * the phase 3 behaviour and remains the safe default.
+   */
+  workspacePath?: string;
+  /** Base id this project may write into, if any (KB-05). */
+  writableKnowledgeBase?: string | undefined;
 };
 
 export type Classification = {
@@ -141,11 +149,72 @@ export class Classifier {
     this.table = compile(merged);
   }
 
+  /**
+   * Whether a request modifies what it touches. Used only to tell a read of a knowledge base
+   * from a write into one; a request whose intent is unclear counts as writing, so the
+   * cautious branch is the default.
+   */
+  private looksLikeWriting(input: ClassifyInput, candidates: string[]): boolean {
+    const kind = (input.kind ?? "").toLowerCase();
+    if (["read", "search", "fetch_file"].includes(kind)) return false;
+    if (["edit", "write", "move", "delete"].includes(kind)) return true;
+    if (candidates.length === 0) return kind.length > 0;
+    return candidates.some((candidate) => {
+      if (/>>?\s*\S/.test(candidate)) return true;
+      for (const cls of ["project_write", "delete"] as ActionClass[]) {
+        if ((this.table.get(cls) ?? []).some((re) => re.test(candidate))) return true;
+      }
+      return !/^(cat|less|more|head|tail|grep|rg|ls|find|wc|diff)\b/i.test(candidate);
+    });
+  }
+
   /** True when `target` resolves inside `root`. Relative paths resolve against root. */
   static isInside(root: string, target: string): boolean {
     const base = path.resolve(root);
     const resolved = path.resolve(base, target);
     return resolved === base || resolved.startsWith(base + path.sep);
+  }
+
+  /**
+   * What an escaping path means (§7.1). Shared material in the workspace is not simply
+   * "outside": the system's own configuration is `credentials` whatever the pack says, and a
+   * knowledge base is readable by everyone but writable only by its curation project.
+   */
+  private classifyEscape(input: ClassifyInput, target: string, writing: boolean): Classification {
+    const workspace = input.workspacePath;
+    if (!workspace) {
+      return { class: "outside_workspace", reason: `path outside the project: ${target}` };
+    }
+    const resolved = path.resolve(input.projectPath, target);
+
+    for (const configured of ["agents", "templates"]) {
+      if (Classifier.isInside(path.join(workspace, configured), resolved)) {
+        return {
+          class: "credentials",
+          reason: `path reconfigures the system: ${target}`,
+        };
+      }
+    }
+    if (resolved === path.join(workspace, "vault.yaml")) {
+      return { class: "credentials", reason: `path is the credentials vault: ${target}` };
+    }
+
+    const knowledgeRoot = path.join(workspace, "knowledge");
+    if (Classifier.isInside(knowledgeRoot, resolved)) {
+      if (!writing) {
+        return { class: "project_read", reason: `read of curated knowledge: ${target}` };
+      }
+      const writable = input.writableKnowledgeBase;
+      if (writable && Classifier.isInside(path.join(knowledgeRoot, writable), resolved)) {
+        return { class: "knowledge_write", reason: `write into the project's base: ${target}` };
+      }
+      return {
+        class: "outside_workspace",
+        reason: `write into a knowledge base this project does not own: ${target}`,
+      };
+    }
+
+    return { class: "outside_workspace", reason: `path outside the project: ${target}` };
   }
 
   classify(input: ClassifyInput): Classification {
@@ -160,10 +229,7 @@ export class Classifier {
     ];
     const escaping = declaredPaths.find((p) => !Classifier.isInside(input.projectPath, p));
     if (escaping) {
-      return {
-        class: "outside_workspace",
-        reason: `path outside the project: ${escaping}`,
-      };
+      return this.classifyEscape(input, escaping, this.looksLikeWriting(input, candidates));
     }
 
     if (candidates.length > 0) {

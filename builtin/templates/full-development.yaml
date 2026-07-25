@@ -1,0 +1,67 @@
+# Builtin template (TP-02, DESIGN §16.3). Two human gates, on the prompt and on the plan,
+# because those are the two places where a wrong turn is cheapest to fix.
+id: full-development
+name: Full development
+description: >
+  End-to-end delivery of a feature or a system, from a rough idea to audited and
+  tested code. Use it when the result has to be maintainable.
+phases:
+  - id: shape-the-prompt
+    title: Turn the idea into a workable prompt
+    agent: prompt-architect
+    gate: human
+    deliverable: doc/PROMPT.md
+    instructions: |
+      The user's raw request is in the task spec. Interrogate it. Name every risk you
+      see, in plain words, without softening them. List what you cannot decide alone
+      and raise a doubt for each. Produce doc/PROMPT.md covering scope, non-goals,
+      actors, data, integrations, constraints, acceptance criteria and failure modes.
+  - id: probe-contracts
+    title: Probe the external contracts
+    agent: contract-prober
+    optional: true
+    repeatable: true
+    deliverable: doc/CONTRACTS.md
+    instructions: |
+      For every API or integration doc/PROMPT.md depends on, write real Python probes
+      under probes/ against the test credentials in the vault and record what actually
+      happens in doc/CONTRACTS.md: status codes, pagination, rate limits, auth
+      behaviour and error shapes, with real examples. Mark as unverified anything you
+      could not call. Raise a doubt when an entry you need is missing from the vault.
+  - id: plan
+    title: Write the development plan
+    agent: planner
+    gate: human
+    deliverable: doc/PLAN.md
+    instructions: |
+      Turn doc/PROMPT.md, and doc/CONTRACTS.md when it exists, into doc/PLAN.md: an
+      ordered list of tasks, each stating what it changes, which files, the interface,
+      the edge cases and how it is verified. Name the order dependencies. Keep each
+      task reviewable in one sitting. Raise a doubt rather than deciding quietly.
+  - id: build
+    title: Implement the plan
+    agent: builder
+    repeatable: true
+    verify: npm test
+    instructions: |
+      Implement the next unfinished task of doc/PLAN.md, and only that task. Keep the
+      tests that cover the behaviour you change up to date. Tick the task in
+      doc/PLAN.md when it is done. Stop and raise a doubt if the task is ambiguous or
+      contradicts the code.
+  - id: qa
+    title: Regression and integration tests
+    agent: qa-engineer
+    deliverable: doc/QA-REPORT.md
+    instructions: |
+      Cover the acceptance criteria of doc/PROMPT.md and the edge cases of
+      doc/PLAN.md. Run what you write. Report in doc/QA-REPORT.md what passed, what
+      failed and the exact command to reproduce each failure. Do not fix the product.
+  - id: audit
+    title: Audit the delivered code
+    agent: software-auditor
+    deliverable: doc/AUDIT.md
+    instructions: |
+      Audit the delivered code against doc/PLAN.md. Report correctness defects,
+      security and data-integrity risks, missing or misleading tests, and engineering
+      practice, in that order, ranked by what each costs if ignored. Produce
+      doc/AUDIT.md. Change nothing.

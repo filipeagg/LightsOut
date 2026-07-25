@@ -18,6 +18,7 @@ import { readProjectConfig } from "../projects/config.js";
 import { runVerify } from "./verify.js";
 import { RunLocks } from "./locks.js";
 import type { RunTaskInput, RunTaskResult } from "../acp/runner.js";
+import { DoubtService } from "./doubts.js";
 
 /** The one seam the chain loop needs from the ACP layer; injectable for tests. */
 export type TaskRunnerLike = { run: (input: RunTaskInput) => Promise<RunTaskResult> };
@@ -49,6 +50,7 @@ export type LaunchResult = {
 export class Orchestrator {
   private readonly locks: RunLocks;
   private readonly runner: TaskRunnerLike;
+  private readonly doubts: DoubtService;
   /** In-flight chain drivers, so shutdown can wait for them. */
   private readonly driving = new Map<string, Promise<void>>();
 
@@ -59,9 +61,11 @@ export class Orchestrator {
     agents: AgentsLoader,
     /** Defaults to the real ACP runner; tests inject a deterministic one. */
     runner?: TaskRunnerLike,
+    doubts?: DoubtService,
   ) {
     this.locks = new RunLocks(config.maxParallel);
-    this.runner = runner ?? new TaskRunner(config, repos, bus, agents);
+    this.doubts = doubts ?? new DoubtService(config, repos, bus, agents);
+    this.runner = runner ?? new TaskRunner(config, repos, bus, agents, this.doubts);
   }
 
   get activeRuns(): { projectId: string; runId: string }[] {
@@ -190,18 +194,35 @@ export class Orchestrator {
     await docs.syncPlan(chain);
     await docs.updateState(chain);
 
-    const { runId, outcome } = await this.runner.run({
+    const result = await this.runner.run({
       project,
       task,
       projectPack: pack,
       onStderr: (line) => console.error(`[adapter:${task.id}] ${line}`),
     });
+    const { runId, outcome } = result;
 
     this.repos.events.append({
       runId,
       type: "task.state",
       payload: { taskId: task.id, status: outcome.status },
     });
+
+    // The advisor settled the doubt: the task is queued again and will run with the decision
+    // in its context (DO-02). No commit and no gate for a turn that did not finish the work.
+    if (result.autoContinued) {
+      this.repos.events.append({
+        type: "chain.state",
+        payload: {
+          chainId: chain.id,
+          status: "active",
+          reason: `auto-continue on ${result.autoContinued.choice}`,
+        },
+      });
+      await docs.updateState(chain);
+      this.bus.emit("overview");
+      return true;
+    }
 
     if (outcome.status !== "ok") {
       // doubt keeps the chain active but waiting (§8); everything else pauses it (OR-05).
@@ -297,6 +318,44 @@ export class Orchestrator {
     await docs.updateState(chain);
     this.bus.emit("overview");
     return true;
+  }
+
+  /**
+   * Answer an open doubt and resume the task that raised it (DO-04). Functional doubts requeue
+   * the task, which then runs with the decision prepended to its prompt; permission doubts are
+   * resolved by the held ACP request, which phase 6 exposes through MCP.
+   */
+  async answerDoubt(input: {
+    doubtId: string;
+    choice: string;
+    note?: string;
+    projectId?: string;
+  }): Promise<{ ref: string; resumed: boolean; runId?: string }> {
+    const answered = await this.doubts.answer(input);
+    const doubt = answered.doubt;
+    const task = this.repos.tasks.getOrThrow(doubt.task_id);
+    const chain = this.repos.chains.getOrThrow(task.chain_id);
+    const project = this.repos.projects.getOrThrow(task.project_id);
+
+    if (doubt.kind === "permission") {
+      // The run is holding the ACP response; nothing to requeue here.
+      return { ref: doubt.ref, resumed: false };
+    }
+
+    this.repos.tasks.setStatus(task.id, "queued");
+    if (chain.status !== "active") this.repos.chains.setStatus(chain.id, "active");
+    this.repos.events.append({
+      type: "chain.state",
+      payload: { chainId: chain.id, status: "active", reason: `doubt ${doubt.ref} answered` },
+    });
+    const started = this.tryDrive(project, this.repos.chains.getOrThrow(chain.id));
+    this.bus.emit("overview");
+    return { ref: doubt.ref, resumed: started };
+  }
+
+  /** Open doubts across all projects or one of them (DO-05). */
+  listDoubts(projectId?: string) {
+    return this.repos.doubts.listOpen(projectId);
   }
 
   /** Retry a blocked task: requeue it and resume the chain (OR-05). */

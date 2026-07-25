@@ -51,6 +51,11 @@ export type ComposeInput = {
   /** Number of trailing DECISIONS.md entries to include (DESIGN §6.2, N=10). */
   decisionsLimit?: number;
   knowledgeBase?: string | undefined;
+  /**
+   * Decisions already settled for this task, prepended when a task is re-run after a doubt
+   * was resolved (DESIGN §8.2, §8.4). Binding: the agent must not reopen them.
+   */
+  decisionContext?: string | undefined;
 };
 
 const MANAGED_BEGIN = "<!-- lightsout:begin -->";
@@ -128,6 +133,8 @@ export function composePrompt(input: ComposeInput, docs: DocContext): string {
   if (contextParts.length > 0) {
     blocks.push(`# Project context\n\n${contextParts.join("\n\n")}`);
   }
+
+  if (input.decisionContext?.trim()) blocks.push(input.decisionContext.trim());
 
   const taskParts = [`# Task: ${input.taskTitle}`, input.taskSpec.trim()];
   if (input.verifyCmd) {

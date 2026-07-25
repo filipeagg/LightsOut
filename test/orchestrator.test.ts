@@ -204,8 +204,9 @@ describe("managed docs", () => {
         recommendation: "A",
       });
       const questions = await readFile(path.join(dir, "doc", "QUESTIONS.md"), "utf8");
-      expect(questions).toContain("## D-1 — open");
-      expect(questions).toContain("- A: one way");
+      expect(questions).toContain("### D-1 — open");
+      expect(questions).toContain("- Option A: one way");
+      expect(questions).toContain("@DOUBT-OPEN D-1");
     });
   });
 });

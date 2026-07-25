@@ -54,6 +54,8 @@ export type RunSessionDeps = {
   instructions: string;
   adapterCommand: string;
   limits: SessionLimits;
+  /** Settled decisions prepended to the prompt when a task is re-run (DESIGN §8.2). */
+  decisionContext?: string;
   /** Defaults to rejecting with an explanation, which is honest for phase 3. */
   humanGate?: HumanGate;
   onStderr?: (line: string) => void;
@@ -360,6 +362,7 @@ export class RunSession {
         taskTitle: task.title,
         taskSpec: task.spec,
         verifyCmd: task.verify_cmd ?? project.verify_cmd,
+        decisionContext: this.deps.decisionContext,
       },
       docs,
     );

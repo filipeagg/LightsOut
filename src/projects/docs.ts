@@ -144,28 +144,54 @@ export class ProjectDocs {
     await writeFile(file, `${current.trimEnd()}\n\n${header}\n\n${body}\n`, "utf8");
   }
 
-  /** Append-only open question mirror of a doubt (DO-01). */
+  /**
+   * Mirror of a doubt in QUESTIONS.md (DO-01, DESIGN §8.3). The database is the source of
+   * truth: this block is regenerated on every transition and never parsed back. A block for
+   * the same ref is replaced, so answering a doubt updates its entry instead of duplicating it.
+   */
   async appendQuestion(input: {
     ref: string;
     context: string;
     blocks: string;
     options: { id: string; text: string }[];
     recommendation?: string | null;
+    secondOpinion?: string;
+    status?: string;
+    answer?: string | null;
   }): Promise<void> {
     const file = this.file("QUESTIONS.md");
     await mkdir(path.dirname(file), { recursive: true });
     const current = (await readOrEmpty(file)) || "# QUESTIONS\n";
-    const options = input.options.map((o) => `- ${o.id}: ${o.text}`).join("\n");
+    const status = input.status ?? "open";
+    const marker = status === "open" ? "@DOUBT-OPEN" : "@DOUBT-CLOSED";
+
     const block = [
-      `## ${input.ref} — open`,
+      `${marker} ${input.ref}`,
+      `### ${input.ref} — ${status}`,
       "",
       input.context,
       "",
-      `Blocks: ${input.blocks}`,
-      "",
-      options,
-      input.recommendation ? `\nRecommendation: ${input.recommendation}` : "",
-    ].join("\n");
+      `- Blocks: ${input.blocks}`,
+      ...input.options.map((o) => `- Option ${o.id}: ${o.text}`),
+      input.recommendation ? `- Recommendation: ${input.recommendation}` : "",
+      input.secondOpinion ? `- Second opinion: ${input.secondOpinion}` : "",
+      `- Answer: ${input.answer ?? "(pending)"}`,
+      `@DOUBT-END ${input.ref}`,
+    ]
+      .filter((line) => line !== "")
+      .join("\n");
+
+    // Replace an existing block for this ref, otherwise append.
+    const startMarker = new RegExp(`^@DOUBT-(?:OPEN|CLOSED) ${input.ref}$`, "m");
+    const endMarker = `@DOUBT-END ${input.ref}`;
+    const start = current.search(startMarker);
+    const end = current.indexOf(endMarker);
+    if (start !== -1 && end > start) {
+      const updated =
+        current.slice(0, start) + block + current.slice(end + endMarker.length);
+      await writeFile(file, updated, "utf8");
+      return;
+    }
     await writeFile(file, `${current.trimEnd()}\n\n${block}\n`, "utf8");
   }
 }

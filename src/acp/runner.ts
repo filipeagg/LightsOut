@@ -11,6 +11,7 @@ import { PolicyEngine } from "../policy/engine.js";
 import type { PolicyPack } from "../policy/schema.js";
 import type { ProjectRow, TaskRow } from "../db/types.js";
 import { RunSession, type HumanGate, type RunOutcome } from "./session.js";
+import { DoubtService } from "../orchestrator/doubts.js";
 
 export type RunTaskInput = {
   project: ProjectRow;
@@ -26,15 +27,23 @@ export type RunTaskResult = {
   outcome: RunOutcome;
   /** Human-friendly ref of the doubt opened, when the agent raised one. */
   doubtRef?: string;
+  /** Set when the advisor settled the doubt and the task should run again (DO-02). */
+  autoContinued?: { choice: string; decisionId: string };
+  checkpointTag?: string;
 };
 
 export class TaskRunner {
+  private readonly doubts: DoubtService;
+
   constructor(
     private readonly config: Config,
     private readonly repos: Repos,
     private readonly bus: Bus,
     private readonly agents: AgentsLoader,
-  ) {}
+    doubts?: DoubtService,
+  ) {
+    this.doubts = doubts ?? new DoubtService(config, repos, bus, agents);
+  }
 
   private adapterCommand(engine: "claude" | "codex"): string {
     return engine === "claude" ? this.config.adapterClaude : this.config.adapterCodex;
@@ -50,6 +59,8 @@ export class TaskRunner {
       agent: this.agents.pack(profile.policy),
       default: this.agents.pack("default"),
     });
+
+    const decisionContext = this.doubts.decisionContext(task.id);
 
     const run = this.repos.runs.start({
       taskId: task.id,
@@ -74,7 +85,23 @@ export class TaskRunner {
           task.level === "quick" ? this.config.timeoutQuickMin : this.config.timeoutFullMin,
         inactivityMin: this.config.inactivityMin,
       },
-      ...(input.humanGate ? { humanGate: input.humanGate } : {}),
+      // On a re-run after a resolved doubt the agent must see what was settled (§8.2, §8.4).
+      ...(decisionContext ? { decisionContext } : {}),
+      // require_human opens a permission doubt and holds the ACP response until it is
+      // answered or the slow clock runs out (DESIGN §6.5, §8.4).
+      humanGate:
+        input.humanGate ??
+        ((request) =>
+          this.doubts.gatePermission({
+            project,
+            task,
+            runId: run.id,
+            engine: profile.engine,
+            actionClass: request.actionClass,
+            title: request.title,
+            reason: request.reason,
+            options: request.options,
+          })),
       ...(input.onStderr ? { onStderr: input.onStderr } : {}),
     });
 
@@ -98,23 +125,29 @@ export class TaskRunner {
     const result: RunTaskResult = { runId: run.id, outcome };
 
     if (outcome.status === "doubt" && outcome.doubt) {
-      const doubt = this.repos.doubts.open({
-        projectId: project.id,
-        taskId: task.id,
+      // A second opinion may settle it and let the chain continue (DO-02); otherwise the
+      // doubt opens with both positions attached (DO-03).
+      const raised = await this.doubts.raise({
+        project,
+        task,
         runId: run.id,
         kind: "functional",
+        engine: profile.engine,
         context: outcome.doubt.context,
         blocks: outcome.doubt.blocks,
         options: outcome.doubt.options,
         recommendation: outcome.doubt.recommendation ?? null,
       });
-      this.repos.events.append({
-        runId: run.id,
-        type: "doubt.opened",
-        payload: { doubtId: doubt.id, ref: doubt.ref },
-      });
-      result.doubtRef = doubt.ref;
-      // The advisor second opinion and auto-continue are phase 5 (DO-02).
+
+      if (raised.outcome === "auto_continue") {
+        result.autoContinued = { choice: raised.choice, decisionId: raised.decisionId };
+        if (raised.checkpointTag) result.checkpointTag = raised.checkpointTag;
+        // The caller re-runs the task with the decision in its context (DESIGN §8.2).
+        this.repos.tasks.setStatus(task.id, "queued");
+        this.bus.emit("overview");
+        return result;
+      }
+      result.doubtRef = raised.doubt.ref;
     }
 
     this.repos.tasks.setStatus(task.id, outcome.status);

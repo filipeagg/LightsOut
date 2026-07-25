@@ -24,7 +24,7 @@ One container, one Node.js process, four internal subsystems sharing an in-proce
 │                    │        SQLite (/data, WAL)       │──────────┘        │
 │                    └──────────────────────────────────┘                   │
 │                                                                           │
-│  /workspace (bind mount, WSL2 ext4)      /home/app/.claude  .codex (vols)│
+│  /workspace (managed volume)             /home/app/.claude  .codex (vols)│
 │    ├── agents/    (profiles + policies)                                   │
 │    └── projects/  (one dir per project, own git repo)                     │
 └───────────────────────────────────────────────────────────────────────────┘
@@ -103,7 +103,7 @@ lightsout/
 Runtime workspace on the host (not in the repo; bind-mounted):
 
 ```
-$LIGHTSOUT_WORKSPACE/            # e.g. /home/<user>/lightsout-data (WSL2 ext4)
+$LIGHTSOUT_WORKSPACE/            # advanced: a host folder instead of the volume
 ├── agents/
 │   ├── policies/                # policy packs (default.yaml, strict.yaml, …)
 │   └── *.yaml                   # agent profiles
@@ -709,10 +709,11 @@ each independently repeatable later from `#/health` and `#/settings`:
 ### 14.3b Windows entry points (SU-07, SU-09, SU-10)
 
 Windows users get Docker Desktop and four numbered files under `scripts/windows/`, each a
-double-click: start, connect Claude, connect Codex, connect Claude Desktop. WSL never appears —
-Docker Desktop's virtual machine is an implementation detail the user does not manage. The
-scripts locate `docker.exe` themselves, start Docker Desktop when it is not running, and report
-state by reading `/health` instead of asking the user to interpret anything.
+double-click: start, connect Claude, connect Codex, build the extension. No shell and no Linux
+distribution appear — the virtual machine Docker Desktop manages for itself is an implementation
+detail the user never sees. The scripts locate `docker.exe` themselves, start Docker Desktop when
+it is not running, and report state by reading `/health` instead of asking the user to interpret
+anything.
 
 Connecting Claude Desktop is a URL, not a file. Recent builds manage MCP servers through
 connectors and extensions and never read `claude_desktop_config.json`, so the documented path is
@@ -725,7 +726,7 @@ rewrites that file with its own preferences on exit and an edit made while it ru
 lost — verified the hard way on this machine.
 
 Maintainer verification runs the same bash gates against Docker Desktop through Git Bash, with
-`MSYS_NO_PATHCONV=1` so container paths survive `docker exec` verbatim. No WSL, no integration.
+`MSYS_NO_PATHCONV=1` so container paths survive `docker exec` verbatim.
 
 ### 14.4 Login without a terminal (SU-04)
 

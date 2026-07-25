@@ -123,7 +123,7 @@ stays a maintainer task.
 - SU-04 MUST. Engine login completes from the panel: the flow runs inside the container, its URL and code are shown on screen, the OAuth loopback callback reaches the container, and the panel reports live progress until auth is green. Pasting an API key is offered as an alternative (NF-03).
 - SU-05 MUST. The mutating surface of the panel is narrow, explicitly enumerated in the design, bound to localhost, and limited to setup and export actions. Operational control stays in MCP.
 - SU-06 SHOULD. A project can be taken out of the managed volume from the panel: download as a zip, or sync to a host folder when one is mounted for that purpose.
-- SU-07 MUST. On Windows the only supported runtime is Docker Desktop and the user never touches WSL: no Linux distribution to install, no shell to open, no integration to enable. Docker Desktop's own virtual machine is an implementation detail. Larger organisations need a paid Docker Desktop subscription; that is a licensing decision, not a technical one.
+- SU-07 MUST. On Windows the only supported runtime is Docker Desktop: no Linux distribution to install, no shell to open, no integration to enable. The virtual machine Docker Desktop manages for itself is an implementation detail the user never sees. Larger organisations need a paid Docker Desktop subscription; that is a licensing decision, not a technical one.
 - SU-08 SHOULD. Updating is `docker pull` plus restart: migrations apply automatically and no manual step is required.
 - SU-09 MUST. Registering LightsOut in Claude Desktop takes one paste of a URL: the panel shows `http://127.0.0.1:8484/mcp` ready to copy into the app's custom-connector dialog. Recent builds manage MCP servers through connectors and extensions and ignore `claude_desktop_config.json`, so the file must never be the documented path. For builds that still read it, a script patches it while the app is closed (it rewrites that file on exit, so an edit made while it runs is lost) and keeps a backup.
 - SU-10 SHOULD. Every user-facing step on Windows is a double-clickable file. Terminals, execution policies and the difference between `cmd` and PowerShell are never part of the instructions.
@@ -132,7 +132,7 @@ stays a maintainer task.
 
 ## Non-functional
 
-- NF-01 MUST. Fresh install to first run in under 10 minutes on a machine with Docker and WSL2.
+- NF-01 MUST. Fresh install to first run in under 10 minutes on a machine with Docker Desktop.
 - NF-02 MUST. Secrets never stored in the database, logs or git. Env vars and mounted credential volumes only.
 - NF-03 MUST. Works with subscription auth (Claude Pro/Max, ChatGPT plans) as well as API keys.
 - NF-04 SHOULD. License decided before first public commit (Apache-2.0 suggested).

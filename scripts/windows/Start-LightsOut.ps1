@@ -12,7 +12,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-if (-not $Image) { $Image = "lightsout:local" }   # replaced by the published image in SU-01
+# The published multi-arch image (SU-01). Set LO_IMAGE, or pass -Image lightsout:local, to run
+# a build made on this machine instead.
+if (-not $Image) { $Image = "ghcr.io/fcg102006/lightsout:latest" }
 $container = "lightsout"
 
 # RT-02: the workspace is a folder on this machine, so projects open in the user's own editor.
@@ -114,8 +116,18 @@ Write-Host ("  Claude: " + $(if ($claude.auth) { "connected" } else { "NOT conne
 Write-Host ("  Codex:  " + $(if ($codex.auth) { "connected" } else { "NOT connected" }))
 if (-not ($claude.auth -and $codex.auth)) {
   Write-Host ""
-  Write-Host "Connect the engines from the panel, or run:" -ForegroundColor Yellow
+  Write-Host "Connect the engines from the setup page, or run:" -ForegroundColor Yellow
   Write-Host "  .\Connect-Engine.ps1 claude"
   Write-Host "  .\Connect-Engine.ps1 codex"
 }
-Start-Process "http://127.0.0.1:$Port"
+
+# First run opens the wizard instead of the panel (SU-03): nothing is set up yet, so the panel
+# would have nothing to show.
+$landing = "http://127.0.0.1:$Port"
+try {
+  $setup = Invoke-RestMethod "$landing/api/setup/state" -TimeoutSec 5
+  $ready = $setup.workspace.confirmedAt -and $setup.projects.Count -gt 0 -and
+           ($setup.engines | Where-Object { $_.auth }).Count -gt 0
+  if (-not $ready) { $landing = "$landing/setup.html" }
+} catch { $landing = "$landing/setup.html" }
+Start-Process $landing

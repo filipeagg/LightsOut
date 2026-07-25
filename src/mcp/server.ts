@@ -30,11 +30,17 @@ export function createMcpServer(deps: McpDeps): McpServer {
  * Mount POST/GET/DELETE /mcp on the existing Fastify server. A fresh server and transport per
  * request keeps the stateless promise literal and avoids cross-request bleed.
  */
-export async function mountMcp(app: FastifyInstance, deps: McpDeps): Promise<void> {
+export async function mountMcp(
+  app: FastifyInstance,
+  deps: McpDeps,
+  /** Called on every request; the wizard uses it to know Claude Desktop arrived (SU-03). */
+  onRequest?: () => void,
+): Promise<void> {
   const handler = async (
     request: FastifyRequest,
     reply: FastifyReply,
   ): Promise<void> => {
+    onRequest?.();
     const server = createMcpServer(deps);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     reply.hijack(); // the transport owns the raw response from here on

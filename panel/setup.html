@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LightsOut — setup</title>
+<!--
+  First-run wizard (SU-03, DESIGN §14.3). Four steps, each repeatable later.
+  Standalone page for phase 8: phase 7 builds the hash-routed panel and folds this in at #/setup.
+  Design tokens are the ones settled in doc/prototype/README.md — not re-decided here.
+-->
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist/index.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist-mono/index.css">
+<style>
+:root{
+  --sans:'Geist Variable','Geist',-apple-system,system-ui,'Segoe UI',sans-serif;
+  --mono:'Geist Mono Variable','Geist Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  --bg:#111113; --surface:#18191b; --surface-2:#212225; --hover:#272a2d; --active:#2e3135;
+  --line:#ffffff14; --line-2:#ffffff24; --line-3:#ffffff3d;
+  --fg:#edeef0; --fg-2:#b0b4ba; --fg-3:#777b84;
+  --accent:#5b5bd6; --accent-hover:#6e6ade; --accent-fg:#b1a9ff; --accent-bg:#1c1c3c;
+  --green:#30a46c; --green-fg:#3dd68c; --green-bg:#132d21; --green-line:#20573e;
+  --amber:#ffc53d; --amber-fg:#ffca16; --amber-bg:#302008; --amber-line:#5c3d05;
+  --red:#e5484d;   --red-fg:#ff9592;   --red-bg:#3b1219;   --red-line:#72232d;
+  --r-sm:6px; --r-md:12px;
+  --shadow-card:0 1px 2px rgba(0,0,0,.16);
+  --ease:cubic-bezier(.175,.885,.32,1.1);
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:20px;
+  font-weight:400;font-feature-settings:'calt' 1,'liga' 1;-webkit-font-smoothing:antialiased}
+.num,.mono,code{font-variant-numeric:tabular-nums slashed-zero}
+:focus-visible{outline:none;box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--accent-fg)}
+a{color:var(--accent-fg)}
+button{font:inherit;color:inherit;cursor:pointer}
+input,select{font:400 14px/20px var(--sans);color:var(--fg);background:var(--surface-2);
+  border:1px solid var(--line-2);border-radius:var(--r-sm);padding:9px 12px;width:100%;height:40px;
+  transition:border-color .15s var(--ease)}
+select{padding:0 32px 0 12px;appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23777b84' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 11px center}
+input:hover,select:hover{border-color:var(--line-3)}
+input::placeholder{color:var(--fg-3)}
+input:disabled,select:disabled{color:var(--fg-3);cursor:not-allowed}
+code,.mono{font-family:var(--mono);font-size:13px;color:var(--fg-2)}
+main{max-width:780px;margin:0 auto;padding:56px 24px 120px}
+.brand{display:flex;align-items:center;gap:9px;font-weight:600;font-size:15px;letter-spacing:-.01em;margin-bottom:32px}
+.dot{width:18px;height:18px;border-radius:5px;background:var(--accent);display:grid;place-items:center;flex:0 0 18px}
+.dot svg{width:11px;height:11px;stroke:#fff}
+h1{font-size:32px;line-height:40px;letter-spacing:-1.28px;margin:0 0 8px;font-weight:600}
+h3{font-size:16px;line-height:24px;letter-spacing:-.32px;margin:0 0 4px;font-weight:600}
+.sub{color:var(--fg-2);line-height:22px;margin:0 0 40px;max-width:70ch}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);box-shadow:var(--shadow-card);padding:8px 24px}
+.row{display:flex;gap:8px;align-items:center}
+.wrap{flex-wrap:wrap}
+.between{display:flex;gap:16px;align-items:center;justify-content:space-between}
+.tiny{font-size:13px;line-height:18px}
+.muted{color:var(--fg-3)}
+.dim{color:var(--fg-2)}
+label{display:block;font-size:13px;font-weight:500;color:var(--fg-2);margin-bottom:6px}
+.hint{font-size:13px;line-height:18px;color:var(--fg-3);margin-top:6px}
+.field{margin-top:16px}
+.btn{height:40px;padding:0 12px;font-size:14px;font-weight:500;background:var(--surface-2);
+  border:1px solid var(--line-2);border-radius:var(--r-sm);display:inline-flex;align-items:center;
+  justify-content:center;gap:6px;white-space:nowrap;
+  transition:background .15s var(--ease),border-color .15s var(--ease),color .15s var(--ease)}
+.btn:hover{background:var(--hover);border-color:var(--line-3);color:var(--fg)}
+.btn:active{background:var(--active)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.btn.sm{height:32px;padding:0 10px;font-size:13px}
+.btn svg{width:15px;height:15px;flex:0 0 15px}
+.btn:disabled,.btn:disabled:hover{background:var(--surface-2);border-color:var(--line);color:var(--fg-3);cursor:not-allowed}
+.pill{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;font-size:13px;
+  border-radius:var(--r-sm);border:1px solid var(--line-2);background:var(--surface-2);color:var(--fg-2);white-space:nowrap}
+.pill.green{color:var(--green-fg);border-color:var(--green-line);background:var(--green-bg)}
+.pill.amber{color:var(--amber-fg);border-color:var(--amber-line);background:var(--amber-bg)}
+.pill.red{color:var(--red-fg);border-color:var(--red-line);background:var(--red-bg)}
+.sdot{width:7px;height:7px;border-radius:50%;flex:0 0 7px;background:currentColor}
+.pill.amber .sdot{animation:blink 1.6s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+.note{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:12px 14px;color:var(--fg-2);font-size:13px;line-height:20px;margin-top:16px}
+.note.warn{border-color:var(--amber-line);background:var(--amber-bg);color:var(--amber-fg)}
+.note.bad{border-color:var(--red-line);background:var(--red-bg);color:var(--red-fg)}
+.note.good{border-color:var(--green-line);background:var(--green-bg);color:var(--green-fg)}
+.copy{display:flex;gap:8px;align-items:center;border-radius:var(--r-sm);height:40px;padding:0 6px 0 12px;
+  font-family:var(--mono);font-size:13px;background:var(--surface-2);border:1px solid var(--line-2);color:var(--fg)}
+.copy span{flex:1;overflow:auto;white-space:nowrap}
+.wizstep{display:grid;grid-template-columns:28px 1fr;gap:16px;padding:24px 0;border-top:1px solid var(--line)}
+.wizstep:first-of-type{border-top:none}
+.wizn{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:12px;
+  font-weight:500;background:var(--surface-2);color:var(--fg-3);border:1px solid var(--line-2)}
+.wizn svg{width:13px;height:13px}
+.wizn.ok{background:var(--green-bg);border-color:var(--green-line);color:var(--green-fg)}
+.wizn.now{background:var(--accent-bg);border-color:#3b3bab;color:var(--accent-fg)}
+.log{font-family:var(--mono);font-size:12px;line-height:18px;color:var(--fg-3);background:var(--bg);
+  border:1px solid var(--line);border-radius:var(--r-sm);padding:10px 12px;margin-top:12px;
+  max-height:132px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+.enginerow{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  padding:14px 0;border-top:1px solid var(--line)}
+.enginerow:first-of-type{border-top:none}
+.foot{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:32px}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">
+    <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16"/><path d="M8 14l3-3 3 3 4-5"/></svg></span>
+    LightsOut
+  </div>
+  <h1>Setup</h1>
+  <p class="sub">Four steps, once. Every one of them can be repeated later from this page, so
+    nothing here is a decision you are stuck with.</p>
+
+  <div class="card" id="steps">
+    <div class="wizstep" id="s1"></div>
+    <div class="wizstep" id="s2"></div>
+    <div class="wizstep" id="s3"></div>
+    <div class="wizstep" id="s4"></div>
+  </div>
+
+  <div class="foot">
+    <span class="tiny muted" id="footnote">Loading…</span>
+    <button class="btn primary" id="finish" disabled>Open the panel</button>
+  </div>
+</main>
+
+<script>
+"use strict";
+/* ----------------------------------------------------------------------
+   No framework and no build step (ST-04). Four renderers over one state
+   object fetched from /api/setup/state, re-rendered whenever it changes.
+   Form values live in `draft` so a re-render never eats what is being typed.
+   ---------------------------------------------------------------------- */
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+const ICON = {
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
+  open: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
+};
+
+let state = null;
+/** Per-engine login flow: {flowId, url, code, lines, done, auth, error}. */
+const flows = { claude: null, codex: null };
+const draft = { workspacePath: "", project: { name: "", verify: "", remote: "" }, keys: {} };
+let busy = "";
+let lastError = "";
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  let body = null;
+  try { body = await response.json(); } catch { body = null; }
+  if (!body) throw new Error(`${response.status} ${response.statusText}`);
+  if (body.ok === false) throw new Error(body.error ? body.error.message : "request failed");
+  return body;
+}
+
+async function refresh() {
+  try {
+    state = await api("/api/setup/state");
+    lastError = "";
+  } catch (err) {
+    lastError = err.message;
+  }
+  render();
+}
+
+/* ---------- step status ---------- */
+function stepDone(n) {
+  if (!state) return false;
+  if (n === 1) return Boolean(state.workspace.confirmedAt);
+  if (n === 2) return state.engines.every((e) => e.auth);
+  if (n === 3) return Boolean(state.mcp.connected);
+  return state.projects.length > 0;
+}
+function currentStep() {
+  for (let n = 1; n <= 4; n++) if (!stepDone(n)) return n;
+  return 5;
+}
+function badge(n) {
+  const done = stepDone(n);
+  const now = !done && currentStep() === n;
+  return `<div class="wizn ${done ? "ok" : now ? "now" : ""}">${done ? ICON.check : n}</div>`;
+}
+
+/* ---------- step 1: workspace (RT-02) ---------- */
+function renderWorkspace() {
+  const ws = state.workspace;
+  const pending = draft.workspaceAnswer;
+  $("s1").innerHTML = `${badge(1)}<div>
+    <h3>Workspace</h3>
+    <p class="tiny dim">This folder on your machine is where the projects will live. They are
+      ordinary git repositories: open them in your editor, back them up, edit them by hand.</p>
+    <div class="copy" style="margin-top:16px"><span class="mono">${esc(ws.path)}</span>
+      <button class="btn sm" data-copy="${esc(ws.path)}">${ICON.copy} Copy</button></div>
+    <p class="hint">Mounted as <code>${esc(ws.mode)}</code>${
+      ws.confirmedAt ? ` · confirmed ${esc(ws.confirmedAt.slice(0, 16).replace("T", " "))}` : ""
+    }</p>
+    <div class="row wrap" style="margin-top:16px">
+      <button class="btn primary" data-act="confirm-workspace" ${busy === "workspace" ? "disabled" : ""}>
+        ${ws.confirmedAt ? "Confirm again" : "Use this folder"}</button>
+      <button class="btn" data-act="toggle-workspace">Use a different folder</button>
+    </div>
+    <div class="${draft.workspaceOpen ? "" : "hidden"}">
+      <div class="field">
+        <label for="wspath">Folder on this machine</label>
+        <input id="wspath" data-draft="workspacePath" placeholder="C:\\Users\\you\\Documents\\LightsOut"
+               value="${esc(draft.workspacePath)}">
+        <p class="hint">A container cannot change its own mounts, so this answers with the line to
+          edit and you restart LightsOut once.</p>
+      </div>
+    </div>
+    ${pending && pending.requiresRestart ? `<div class="note warn">
+      Edit this line at the top of <code>Start-LightsOut.ps1</code> and start LightsOut again:
+      <div class="copy" style="margin-top:10px;background:transparent"><span class="mono">${esc(pending.line)}</span>
+        <button class="btn sm" data-copy="${esc(pending.line)}">${ICON.copy} Copy</button></div>
+    </div>` : ""}
+  </div>`;
+}
+
+/* ---------- step 2: engines (SU-04, §14.4) ---------- */
+function engineRow(engine) {
+  const flow = flows[engine.engine];
+  const name = engine.engine === "claude" ? "Claude" : "Codex";
+  const pill = engine.auth
+    ? `<span class="pill green"><span class="sdot"></span>connected${engine.authSource ? ` · ${esc(engine.authSource)}` : ""}</span>`
+    : !engine.detected
+      ? `<span class="pill red"><span class="sdot"></span>CLI missing</span>`
+      : flow && !flow.done
+        ? `<span class="pill amber"><span class="sdot"></span>waiting for you</span>`
+        : `<span class="pill"><span class="sdot"></span>not connected</span>`;
+
+  const live = flow && !flow.done ? `
+    ${flow.url ? `<div class="note good">
+      <div class="between"><span>Open this page and approve the request.</span>
+        <a class="btn sm" href="${esc(flow.url)}" target="_blank" rel="noreferrer">${ICON.open} Open</a></div>
+      <div class="copy" style="margin-top:10px;background:transparent"><span class="mono">${esc(flow.url)}</span>
+        <button class="btn sm" data-copy="${esc(flow.url)}">${ICON.copy} Copy</button></div>
+      ${flow.code ? `<p style="margin:10px 0 0">Code: <code class="num">${esc(flow.code)}</code></p>` : ""}
+    </div>` : `<div class="note">Starting the ${esc(name)} CLI…</div>`}
+    <div class="log">${esc((flow.lines || []).slice(-8).join("\n"))}</div>` : "";
+
+  const failed = flow && flow.done && !flow.auth
+    ? `<div class="note bad">${esc(flow.error || "The login finished without authenticating. Try again.")}</div>`
+    : "";
+
+  const keyOpen = draft.keys[engine.engine] !== undefined;
+  return `<div class="enginerow-wrap">
+    <div class="enginerow">
+      <div><b>${esc(name)}</b><div class="tiny muted mono">${esc(engine.adapter || engine.engine)}</div></div>
+      <div class="row wrap">${pill}
+        <button class="btn sm" data-act="login" data-engine="${esc(engine.engine)}"
+          ${!engine.detected || (flow && !flow.done) ? "disabled" : ""}>
+          ${engine.auth ? "Reconnect" : "Connect"}</button>
+        <button class="btn sm" data-act="toggle-key" data-engine="${esc(engine.engine)}">API key</button>
+      </div>
+    </div>
+    ${live}${failed}
+    ${keyOpen ? `<div class="field">
+      <label for="key-${esc(engine.engine)}">${esc(name)} API key</label>
+      <div class="row"><input id="key-${esc(engine.engine)}" type="password" autocomplete="off"
+          placeholder="paste the key" value="${esc(draft.keys[engine.engine])}"
+          data-keyfield="${esc(engine.engine)}">
+        <button class="btn" data-act="submit-key" data-engine="${esc(engine.engine)}"
+          ${busy === "key-" + engine.engine ? "disabled" : ""}>Save</button></div>
+      <p class="hint">Handed to the engine's own CLI on stdin and stored in its volume. LightsOut
+        never reads it back.</p>
+      ${draft.keyResult && draft.keyResult.engine === engine.engine && !draft.keyResult.accepted
+        ? `<div class="note bad">${esc(draft.keyResult.output || "The CLI refused the key.")}</div>` : ""}
+    </div>` : ""}
+  </div>`;
+}
+
+function renderEngines() {
+  const missing = state.engines.filter((e) => !e.auth).length;
+  $("s2").innerHTML = `${badge(2)}<div>
+    <h3>Connect the engines</h3>
+    <p class="tiny dim">Claude runs the work and Codex gives the second opinion before a doubt is
+      opened, so connect both. One is enough to start; the advisor stays off until the other is in.</p>
+    <div style="margin-top:8px">${state.engines.map(engineRow).join("")}</div>
+    ${missing === 1 ? `<div class="note">One engine still missing: chains will run, but the
+      second-opinion step is skipped until it is connected.</div>` : ""}
+  </div>`;
+}
+
+/* ---------- step 3: Claude Desktop (SU-09) ---------- */
+function renderDesktop() {
+  const mcp = state.mcp;
+  $("s3").innerHTML = `${badge(3)}<div>
+    <h3>Connect Claude Desktop</h3>
+    <p class="tiny dim">Add LightsOut as a custom connector. Recent builds manage MCP servers in
+      the app and never read the config file, so this URL is the whole setup.</p>
+    <div class="copy" style="margin-top:16px"><span class="mono">${esc(mcp.url)}</span>
+      <button class="btn sm" data-copy="${esc(mcp.url)}">${ICON.copy} Copy</button></div>
+    <p class="hint">Claude Desktop → Settings → Connectors → Add custom connector → paste the URL.</p>
+    <div class="row wrap" style="margin-top:16px">
+      ${mcp.connected
+        ? `<span class="pill green"><span class="sdot"></span>connected${
+            mcp.lastSeenAt ? ` · last call ${esc(mcp.lastSeenAt.slice(11, 16))}` : ""}</span>`
+        : `<span class="pill amber"><span class="sdot"></span>waiting for the first call</span>`}
+      <button class="btn sm" data-act="recheck">Check again</button>
+    </div>
+    ${mcp.connected ? "" : `<div class="note">Ask Claude Desktop something like
+      <em>"check LightsOut health"</em>. The indicator turns green as soon as a tool call arrives.</div>`}
+  </div>`;
+}
+
+/* ---------- step 4: first project (PM-01, TP-05) ---------- */
+function renderProject() {
+  const made = state.projects;
+  const only = state.templates.length === 1;
+  $("s4").innerHTML = `${badge(4)}<div>
+    <h3>First project</h3>
+    <p class="tiny dim">Scaffolds <code>doc/</code>, writes <code>lightsout.yaml</code> and makes the
+      first git commit, through the same call Claude Desktop uses.</p>
+    ${made.length ? `<div class="note good">${made.length} project${made.length > 1 ? "s" : ""}:
+      ${made.map((p) => `<code>${esc(p.path)}</code>`).join(", ")}</div>` : ""}
+    <div class="field">
+      <label for="pname">Name</label>
+      <input id="pname" data-draft="project.name" placeholder="my-first-project" value="${esc(draft.project.name)}">
+    </div>
+    <div class="field">
+      <label for="ptpl">Template</label>
+      <select id="ptpl" ${only ? "disabled" : ""}>
+        ${state.templates.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join("")}
+      </select>
+      ${only ? `<p class="hint">The four phase templates arrive with the builtin library; for now a
+        project starts empty and you drive it with chains.</p>` : ""}
+    </div>
+    <div class="field">
+      <label for="pverify">Verify command <span class="muted">(optional)</span></label>
+      <input id="pverify" data-draft="project.verify" placeholder="npm test" value="${esc(draft.project.verify)}">
+      <p class="hint">Run after every task; a red result pauses the chain instead of pushing.</p>
+    </div>
+    <div class="field">
+      <label for="premote">Git remote <span class="muted">(optional)</span></label>
+      <input id="premote" data-draft="project.remote" placeholder="git@github.com:you/repo.git" value="${esc(draft.project.remote)}">
+    </div>
+    <div class="row" style="margin-top:16px">
+      <button class="btn primary" data-act="create-project" ${busy === "project" ? "disabled" : ""}>
+        ${busy === "project" ? "Creating…" : "Create project"}</button>
+    </div>
+    ${draft.projectError ? `<div class="note bad">${esc(draft.projectError)}</div>` : ""}
+  </div>`;
+}
+
+function render() {
+  if (!state) {
+    $("footnote").textContent = lastError || "Loading…";
+    return;
+  }
+  renderWorkspace();
+  renderEngines();
+  renderDesktop();
+  renderProject();
+  const step = currentStep();
+  $("finish").disabled = false;
+  $("footnote").textContent = lastError
+    ? lastError
+    : step === 5
+      ? "Everything is set up."
+      : `Step ${step} of 4.`;
+}
+
+/* ---------- actions ---------- */
+async function startLogin(engine) {
+  flows[engine] = { flowId: null, url: "", code: "", lines: [], done: false, auth: false, error: "" };
+  render();
+  let started;
+  try {
+    started = await api(`/api/setup/login/${engine}`, { method: "POST" });
+  } catch (err) {
+    flows[engine] = { done: true, auth: false, lines: [], error: err.message };
+    render();
+    return;
+  }
+  const flow = flows[engine];
+  flow.flowId = started.flowId;
+  const source = new EventSource(`/api/setup/login/${started.flowId}`);
+  source.onmessage = (message) => {
+    const event = JSON.parse(message.data);
+    if (event.type === "log") flow.lines.push(event.line);
+    else if (event.type === "url") flow.url = event.url;
+    else if (event.type === "code") flow.code = event.code;
+    else if (event.type === "error") { flow.error = event.message; }
+    else if (event.type === "done") {
+      flow.done = true;
+      flow.auth = event.auth;
+      source.close();
+      void refresh();
+      return;
+    }
+    render();
+  };
+  source.onerror = () => {
+    source.close();
+    flow.done = true;
+    void refresh();
+  };
+}
+
+async function submitKey(engine) {
+  const key = (draft.keys[engine] || "").trim();
+  if (key.length < 8) { draft.keyResult = { engine, accepted: false, output: "That key looks too short." }; render(); return; }
+  busy = `key-${engine}`;
+  render();
+  try {
+    const result = await api(`/api/setup/login/${engine}/key`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key }),
+    });
+    draft.keyResult = result;
+    if (result.accepted) { delete draft.keys[engine]; }
+  } catch (err) {
+    draft.keyResult = { engine, accepted: false, output: err.message };
+  }
+  busy = "";
+  await refresh();
+}
+
+async function createProject() {
+  const name = draft.project.name.trim();
+  if (!name) { draft.projectError = "Give the project a name."; render(); return; }
+  busy = "project";
+  draft.projectError = "";
+  render();
+  try {
+    await api("/api/projects", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name,
+        ...(draft.project.verify.trim() ? { verify: draft.project.verify.trim() } : {}),
+        ...(draft.project.remote.trim() ? { remote: draft.project.remote.trim() } : {}),
+      }),
+    });
+    draft.project = { name: "", verify: "", remote: "" };
+  } catch (err) {
+    draft.projectError = err.message;
+  }
+  busy = "";
+  await refresh();
+}
+
+async function confirmWorkspace() {
+  busy = "workspace";
+  render();
+  try {
+    const wanted = draft.workspaceOpen ? draft.workspacePath.trim() : "";
+    const result = await api("/api/setup/workspace", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(wanted ? { path: wanted } : {}),
+    });
+    draft.workspaceAnswer = result.confirmed ? null : result;
+  } catch (err) {
+    lastError = err.message;
+  }
+  busy = "";
+  await refresh();
+}
+
+document.addEventListener("click", (event) => {
+  const target = event.target.closest("[data-act],[data-copy]");
+  if (!target) return;
+  const copy = target.getAttribute("data-copy");
+  if (copy !== null) {
+    void navigator.clipboard.writeText(copy).then(() => {
+      const original = target.innerHTML;
+      target.innerHTML = `${ICON.check} Copied`;
+      setTimeout(() => { target.innerHTML = original; }, 1400);
+    });
+    return;
+  }
+  const act = target.getAttribute("data-act");
+  const engine = target.getAttribute("data-engine");
+  if (act === "confirm-workspace") void confirmWorkspace();
+  else if (act === "toggle-workspace") { draft.workspaceOpen = !draft.workspaceOpen; render(); }
+  else if (act === "login") void startLogin(engine);
+  else if (act === "toggle-key") {
+    if (draft.keys[engine] === undefined) draft.keys[engine] = "";
+    else delete draft.keys[engine];
+    render();
+  } else if (act === "submit-key") void submitKey(engine);
+  else if (act === "create-project") void createProject();
+  else if (act === "recheck") void refresh();
+});
+
+/* Keep the draft in step with the inputs so a re-render never eats what is being typed. */
+document.addEventListener("input", (event) => {
+  const field = event.target;
+  const path = field.getAttribute("data-draft");
+  if (path === "workspacePath") draft.workspacePath = field.value;
+  else if (path === "project.name") draft.project.name = field.value;
+  else if (path === "project.verify") draft.project.verify = field.value;
+  else if (path === "project.remote") draft.project.remote = field.value;
+  const keyEngine = field.getAttribute("data-keyfield");
+  if (keyEngine) draft.keys[keyEngine] = field.value;
+});
+
+$("finish").addEventListener("click", () => {
+  void api("/api/setup/complete", { method: "POST" }).finally(() => { window.location.href = "/"; });
+});
+
+void refresh();
+/*
+ * Slow poll: the MCP indicator and the engine auth state change without the browser asking.
+ * A re-render replaces the inputs, so the poll stands down while one of them has focus —
+ * `draft` would keep the text, but not the caret.
+ */
+setInterval(() => {
+  if (busy) return;
+  const active = document.activeElement;
+  if (active && (active.tagName === "INPUT" || active.tagName === "SELECT")) return;
+  void refresh();
+}, 4000);
+</script>
+</body>
+</html>

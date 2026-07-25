@@ -19,6 +19,7 @@ import { ensureWorkspaceLayout } from "./workspace/layout.js";
 import { recoverInterrupted } from "./orchestrator/recovery.js";
 import { Orchestrator } from "./orchestrator/orchestrator.js";
 import { DoubtService } from "./orchestrator/doubts.js";
+import { LoginFlows } from "./setup/login-flows.js";
 
 async function readVersion(): Promise<string> {
   try {
@@ -103,12 +104,16 @@ async function main(): Promise<void> {
   // Phase 6 exposes it over MCP; nothing resumes on its own after a restart (RT-07).
   const orchestrator = new Orchestrator(config, repos, bus, agents);
 
-  // 6. HTTP: panel, health (JSON API, SSE and /mcp land in phases 6-7).
+  // 5c. Interactive engine logins driven from the browser (SU-04).
+  const loginFlows = new LoginFlows(health);
+
+  // 6. HTTP: panel, health, setup wizard and /mcp (the read-only JSON API lands in phase 7).
   const app = await createHttpServer({
     config,
     bus,
     health,
     repos,
+    loginFlows,
     checkDatabase: () => checkDatabase(db),
     mcp: {
       config,
@@ -130,6 +135,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     console.log(`[shutdown] ${signal} received`);
     agents.stopWatching();
+    loginFlows.closeAll();
     const active = orchestrator.activeRuns;
     if (active.length > 0) {
       console.log(`[shutdown] waiting for ${active.length} active run(s)`);

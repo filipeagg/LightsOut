@@ -28,3 +28,8 @@ Thumbs.db
 # Test/coverage artifacts
 coverage/
 .vitest/
+
+# The packed desktop extension is a deliverable, unlike the compiled dist/
+!dist/
+dist/*
+!dist/lightsout.mcpb

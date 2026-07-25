@@ -17,12 +17,19 @@ import type { AgentsLoader } from "../agents/loader.js";
 import type { HealthProbe } from "../health.js";
 import { failure, notFound, success, type Envelope } from "../mcp/envelope.js";
 import { doubtView, overviewView, projectStatusView } from "../views.js";
+import type { TemplatesLoader } from "../templates/loader.js";
+import type { KnowledgeLoader } from "../knowledge/loader.js";
+import type { Vault } from "../vault/vault.js";
 
 export type ApiDeps = {
   config: Config;
   repos: Repos;
   agents: AgentsLoader;
   health: HealthProbe;
+  /** Phase 9 material. Absent in a process that does not load it; the routes say so. */
+  templates?: TemplatesLoader;
+  knowledge?: KnowledgeLoader;
+  vault?: Vault;
 };
 
 /** Accepted model and reasoning values per engine (AP-08). Static until the engines publish one. */
@@ -218,25 +225,88 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
     envelope(reply, async () => ({ engines: ENGINE_MODELS })),
   );
 
-  // Phase 9 resources (TP, KB, VT). Empty and honest rather than absent, so the panel's
-  // renderers are written once.
+  // Phase 9 resources (TP, KB, VT). A process without them answers the same empty shape
+  // rather than 404, so the panel's renderers are written once.
   app.get("/api/projects/:id/phases", async (request, reply) =>
     envelope(reply, async () => {
       const { id } = z.object({ id: z.string().min(1) }).parse(request.params);
-      project(id);
-      return { phases: [], available: false, note: "Phases arrive with the templates (TP-06)." };
+      const row = project(id);
+      return {
+        available: true,
+        phases: repos.phases.list(row.id).map((phase) => ({
+          id: phase.id,
+          ref: phase.phase_id,
+          position: phase.position,
+          title: phase.title,
+          agent: phase.agent_id,
+          gate: phase.gate,
+          status: phase.status,
+          optional: Boolean(phase.optional),
+          repeatable: Boolean(phase.repeatable),
+          deliverable: phase.deliverable,
+          taskId: phase.task_id,
+          startedAt: phase.started_at,
+          endedAt: phase.ended_at,
+        })),
+        knowledge: repos.projectKnowledge.list(row.id).map((k) => ({
+          baseId: k.base_id,
+          kind: k.kind,
+          writable: k.writable === 1,
+        })),
+      };
     }),
   );
 
   app.get("/api/templates", async (_request, reply) =>
-    envelope(reply, async () => ({ templates: [], available: false })),
+    envelope(reply, async () => {
+      if (!deps.templates) return { templates: [], rejected: [], available: false };
+      return {
+        available: true,
+        templates: deps.templates.list().map((t) => ({
+          id: t.id,
+          name: t.name,
+          description: t.description,
+          requiresWritableKnowledge: t.requires_writable_knowledge,
+          phases: t.phases.map((p) => ({
+            id: p.id,
+            title: p.title,
+            agent: p.agent,
+            gate: p.gate,
+            optional: p.optional,
+            repeatable: p.repeatable,
+            deliverable: p.deliverable ?? null,
+          })),
+        })),
+        rejected: deps.templates.current().rejected,
+      };
+    }),
   );
 
   app.get("/api/knowledge", async (_request, reply) =>
-    envelope(reply, async () => ({ bases: [], available: false })),
+    envelope(reply, async () => {
+      if (!deps.knowledge) return { bases: [], rejected: [], available: false };
+      return {
+        available: true,
+        bases: deps.knowledge.list().map((base) => ({
+          id: base.manifest.id,
+          name: base.manifest.name,
+          kind: base.manifest.kind,
+          description: base.manifest.description,
+          tags: base.manifest.tags,
+          owner: base.manifest.owner ?? null,
+          updated: base.manifest.updated ?? null,
+          documents: base.documents.map((d) => ({ file: d.file, bytes: d.bytes })),
+        })),
+        rejected: deps.knowledge.rejections(),
+      };
+    }),
   );
 
+  // Field names and whether a value is set; there is no route that returns one (VT-03).
   app.get("/api/vault", async (_request, reply) =>
-    envelope(reply, async () => ({ entries: [], available: false })),
+    envelope(reply, async () => {
+      if (!deps.vault) return { entries: [], available: false };
+      return { available: true, entries: await deps.vault.listViews() };
+    }),
   );
 }

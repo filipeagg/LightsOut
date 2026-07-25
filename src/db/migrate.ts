@@ -40,8 +40,88 @@ function readSchemaSql(): string {
   throw new Error(`schema.sql not found (looked in: ${candidates.join(", ")})`);
 }
 
+/**
+ * Version 2 (phase 9): phases, knowledge attachments and the vault audit trail
+ * (TP-05/06, KB-03, VT-05), plus projects.template_id (PM-07) and the 'gate'
+ * doubt kind (TP-01, §16.2).
+ *
+ * The doubts CHECK constraint can only grow by rebuilding the table. Enforcement
+ * of decisions.doubt_id is deferred to commit, by which point the rebuilt table
+ * carries the same ids under the same name.
+ */
+const PHASE9_SQL = `
+PRAGMA defer_foreign_keys = ON;
+
+ALTER TABLE projects ADD COLUMN template_id TEXT;
+
+CREATE TABLE doubts_v2 (
+  id             TEXT PRIMARY KEY,
+  ref            TEXT NOT NULL,
+  project_id     TEXT NOT NULL REFERENCES projects(id),
+  task_id        TEXT NOT NULL REFERENCES tasks(id),
+  run_id         TEXT REFERENCES runs(id),
+  kind           TEXT NOT NULL CHECK (kind IN ('functional','permission','gate')),
+  status         TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','answered','closed')),
+  context        TEXT NOT NULL,
+  blocks         TEXT NOT NULL,
+  options        TEXT NOT NULL CHECK (json_valid(options)),
+  recommendation TEXT,
+  second_opinion TEXT CHECK (second_opinion IS NULL OR json_valid(second_opinion)),
+  answer         TEXT,
+  created_at     TEXT NOT NULL,
+  answered_at    TEXT,
+  UNIQUE (project_id, ref)
+);
+INSERT INTO doubts_v2 SELECT * FROM doubts;
+DROP TABLE doubts;
+ALTER TABLE doubts_v2 RENAME TO doubts;
+CREATE INDEX ix_doubts_open ON doubts(status) WHERE status = 'open';
+
+CREATE TABLE project_phases (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES projects(id),
+  position      INTEGER NOT NULL,
+  phase_id      TEXT NOT NULL,
+  title         TEXT NOT NULL,
+  agent_id      TEXT NOT NULL,
+  instructions  TEXT NOT NULL,
+  deliverable   TEXT,
+  verify_cmd    TEXT,
+  gate          TEXT NOT NULL DEFAULT 'auto' CHECK (gate IN ('auto','human')),
+  optional      INTEGER NOT NULL DEFAULT 0,
+  repeatable    INTEGER NOT NULL DEFAULT 0,
+  status        TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending','running','done','failed','skipped')),
+  task_id       TEXT REFERENCES tasks(id),
+  started_at    TEXT,
+  ended_at      TEXT,
+  UNIQUE (project_id, position),
+  UNIQUE (project_id, phase_id)
+);
+CREATE INDEX ix_phases_project ON project_phases(project_id, position);
+
+CREATE TABLE project_knowledge (
+  project_id    TEXT NOT NULL REFERENCES projects(id),
+  base_id       TEXT NOT NULL,
+  kind          TEXT NOT NULL,
+  writable      INTEGER NOT NULL DEFAULT 0,
+  attached_at   TEXT NOT NULL,
+  PRIMARY KEY (project_id, base_id)
+);
+
+CREATE TABLE vault_audit (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id     TEXT NOT NULL REFERENCES runs(id),
+  ts         TEXT NOT NULL,
+  entry_id   TEXT NOT NULL,
+  fields     TEXT NOT NULL CHECK (json_valid(fields))
+);
+CREATE INDEX ix_vault_audit_run ON vault_audit(run_id, id);
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial schema", up: applyInitialSchema },
+  { version: 2, name: "phases, knowledge, vault audit", up: PHASE9_SQL },
 ];
 
 function currentVersion(db: Db): number {

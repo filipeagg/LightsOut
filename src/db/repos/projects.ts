@@ -11,6 +11,7 @@ export type CreateProject = {
   pushPolicy?: PushPolicy;
   policyPack?: string;
   verifyCmd?: string | null;
+  templateId?: string | null;
 };
 
 export type UpdateProject = Partial<
@@ -24,8 +25,9 @@ export class ProjectsRepo {
     this.db
       .prepare(
         `INSERT INTO projects
-           (id, name, path, repo_remote, push_policy, policy_pack, verify_cmd, archived, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+           (id, name, path, repo_remote, push_policy, policy_pack, verify_cmd,
+            template_id, archived, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
       )
       .run(
         input.id,
@@ -35,6 +37,7 @@ export class ProjectsRepo {
         input.pushPolicy ?? "manual",
         input.policyPack ?? "default",
         input.verifyCmd ?? null,
+        input.templateId ?? null,
         nowIso(),
       );
     return this.getOrThrow(input.id);

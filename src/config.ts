@@ -22,6 +22,8 @@ const schema = z.object({
   inactivityMin: intFromEnv(8),
   permissionWaitHours: intFromEnv(24),
   advisorConfidence: z.coerce.number().min(0).max(1).default(0.7),
+  /** How much curated knowledge one prompt may carry (KB-06, DESIGN §17.2). */
+  knowledgeBudgetChars: intFromEnv(120000, 0),
   eventRetentionDays: intFromEnv(90),
   adapterClaude: z.string().min(1).default("claude-agent-acp"),
   adapterCodex: z.string().min(1).default("codex-acp"),
@@ -45,6 +47,7 @@ function raw(env: NodeJS.ProcessEnv) {
     inactivityMin: env.LO_INACTIVITY_MIN,
     permissionWaitHours: env.LO_PERMISSION_WAIT_HOURS,
     advisorConfidence: env.LO_ADVISOR_CONFIDENCE,
+    knowledgeBudgetChars: env.LO_KNOWLEDGE_BUDGET_CHARS,
     eventRetentionDays: env.LO_EVENT_RETENTION_DAYS,
     adapterClaude: env.LO_ADAPTER_CLAUDE,
     adapterCodex: env.LO_ADAPTER_CODEX,

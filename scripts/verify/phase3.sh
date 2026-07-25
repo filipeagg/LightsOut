@@ -63,11 +63,12 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 check "docker ps --format '{{.Names}}' | grep -qx $CONTAINER" "container running"
-check "docker exec $CONTAINER test -f /workspace/agents/${AGENT}.yaml" \
-  "example profiles seeded into the workspace (AP-01)"
-check "docker exec $CONTAINER test -f /workspace/agents/policies/default.yaml" \
+# Phase 9 replaced first-boot seeding with the builtin library read where it ships (BA-01).
+check "docker exec $CONTAINER test -f /opt/lightsout/builtin/agents/${AGENT}.yaml" \
+  "builtin profiles present in the image (AP-01, BA-01)"
+check "docker exec $CONTAINER test -f /opt/lightsout/builtin/policies/default.yaml" \
   "default policy pack present (PE-01)"
-check "docker logs $CONTAINER 2>&1 | grep -q 'agents: 2 profile'" \
+check "docker logs $CONTAINER 2>&1 | grep -qE 'agents: 1[0-9]* profile'" \
   "profiles loaded at boot (AP-02)"
 
 echo "-- sample project"

@@ -79,6 +79,19 @@ LightsOut is controlled through MCP. Add this to `claude_desktop_config.json`
 `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS), then restart
 Claude Desktop:
 
+**The short path, and the one to prefer:** in Claude Desktop open Settings, go to Connectors, add
+a custom connector and paste this URL, with no authentication:
+
+```
+http://127.0.0.1:8484/mcp
+```
+
+Recent Claude Desktop builds manage MCP servers through connectors and extensions and ignore
+`claude_desktop_config.json` entirely — editing that file does nothing on those versions. The URL
+connector also needs no bridge process and no `docker exec`.
+
+The rest of this section is the fallback for builds that do read the config file.
+
 On Linux or macOS, where `docker` is on the host PATH:
 
 ```json

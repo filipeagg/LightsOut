@@ -6,7 +6,7 @@
   "description": "Run chains of coding agents unattended, with mediated permissions and doubts you answer.",
   "long_description": "LightsOut orchestrates coding agents (Claude Code and Codex) inside a container on your machine. Launch a chain of tasks and it runs them unattended: it commits per task, runs your verify command, and stops to ask only when a decision is genuinely yours. This extension is a thin local bridge to the container's MCP endpoint at 127.0.0.1; nothing leaves your machine.",
   "author": {
-    "name": "Hispatec"
+    "name": "LightsOut"
   },
   "license": "Apache-2.0",
   "keywords": ["agents", "orchestration", "docker", "development"],

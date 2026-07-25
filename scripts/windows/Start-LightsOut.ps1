@@ -1,5 +1,5 @@
 # Start LightsOut on Windows with Docker Desktop (SU-02).
-# Nothing else is needed: no WSL commands, no repository, no files to edit.
+# Nothing else is needed: no repository, no shell, no files to edit.
 #
 #   powershell -ExecutionPolicy Bypass -File Start-LightsOut.ps1
 #
@@ -11,7 +11,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-if (-not $Image) { $Image = "ghcr.io/hispatec/lightsout:latest" }
+if (-not $Image) { $Image = "lightsout:local" }   # replaced by the published image in SU-01
 $container = "lightsout"
 
 function Find-Docker {

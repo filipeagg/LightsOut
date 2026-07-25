@@ -35,11 +35,10 @@ logs, the database, and restarting the container mid-run.
 
 ## Prerequisites
 
-Docker Engine must be running inside WSL2 Ubuntu, and the container must be up:
+Docker Desktop must be running and the container must be up. On Windows, double-click
+`scripts/windows/1-Start-LightsOut.bat`; anywhere else:
 
 ```bash
-cd /mnt/c/Users/fcg102006/Desktop/claude/LightsOut
-export DOCKER_CONFIG=$HOME/.docker-lo          # Docker Desktop leftovers, see INSTALL.md
 docker compose up -d
 curl -s localhost:8484/health
 ```

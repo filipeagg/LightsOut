@@ -79,6 +79,8 @@ LightsOut is controlled through MCP. Add this to `claude_desktop_config.json`
 `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS), then restart
 Claude Desktop:
 
+On Linux or macOS, where `docker` is on the host PATH:
+
 ```json
 {
   "mcpServers": {
@@ -88,6 +90,31 @@ Claude Desktop:
     }
   }
 }
+```
+
+On Windows with Docker Engine inside WSL2 the host has no working `docker` command, so the call
+goes through `wsl.exe`. A leftover `docker.exe` from an old Docker Desktop install may exist on
+PATH and silently reach no daemon, which looks exactly like a broken MCP server:
+
+```json
+{
+  "mcpServers": {
+    "lightsout": {
+      "command": "wsl.exe",
+      "args": [
+        "-d", "Ubuntu", "--",
+        "docker", "exec", "-i", "lightsout", "node", "dist/mcp/stdio-bridge.js"
+      ]
+    }
+  }
+}
+```
+
+Check the pipeline before restarting Claude Desktop; it must answer with `serverInfo`:
+
+```powershell
+'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"d","version":"0"}}}' |
+  wsl.exe -d Ubuntu -- docker exec -i lightsout node dist/mcp/stdio-bridge.js
 ```
 
 The bridge holds no state: it forwards JSON-RPC to the container's `/mcp` endpoint, which is

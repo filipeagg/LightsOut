@@ -61,6 +61,22 @@ check "docker ps --format '{{.Names}}' | grep -qx $CONTAINER" "container running
 
 echo "-- 3-task chain, unattended (OR-01..03, PM-01, PM-04)"
 docker exec "$CONTAINER" rm -rf "/workspace/projects/${GOOD}"
+# Since phase 5 a permission gate holds the run until a human answers, so the gate plays the
+# human in the background: otherwise an unattended chain could wait on the 24 h slow clock.
+answer_doubts_while_running() {
+  local pid="$1" budget_s="$2" ref
+  local deadline=$(( $(date +%s) + budget_s ))
+  while kill -0 "$pid" 2>/dev/null && [ "$(date +%s)" -lt "$deadline" ]; do
+    sleep 5
+    ref=$(sql "SELECT ref FROM doubts WHERE status='open' ORDER BY created_at DESC LIMIT 1")
+    [ -z "$ref" ] && continue
+    project=$(sql "SELECT project_id FROM doubts WHERE ref='${ref}' AND status='open' ORDER BY created_at DESC LIMIT 1")
+    echo "  INFO  answering ${project}/${ref} as the human would"
+    docker exec "$CONTAINER" node dist/cli/doubts.js answer \
+      --project "$project" --doubt "$ref" --choice A --note "answered by the gate" >/dev/null 2>&1
+  done
+}
+
 docker exec "$CONTAINER" node dist/cli/run-chain.js \
   --project "$GOOD" --agent "$AGENT" --level quick \
   --verify "test -f one.txt" \
@@ -68,7 +84,10 @@ docker exec "$CONTAINER" node dist/cli/run-chain.js \
   --task "Create one.txt :: Create a file one.txt in the project root with the single line 'one'. Nothing else." \
   --task "Create two.txt :: Create a file two.txt in the project root with the single line 'two'. Nothing else." \
   --task "Create three.txt :: Create a file three.txt in the project root with the single line 'three'. Nothing else." \
-  >/tmp/lo-p4-chain.json 2>/tmp/lo-p4-chain.log
+  >/tmp/lo-p4-chain.json 2>/tmp/lo-p4-chain.log &
+chain_bg=$!
+answer_doubts_while_running "$chain_bg" "${LO_PHASE4_BUDGET_S:-600}"
+wait "$chain_bg"
 chain_exit=$?
 if [ "$chain_exit" = "0" ]; then
   ok "chain completed unattended (OR-02)"
@@ -118,7 +137,18 @@ docker exec "$CONTAINER" node dist/cli/run-chain.js \
   --chain "Contradictory gate" \
   --task "Create only.txt :: Create a file only.txt in the project root with the single line 'only'. Nothing else." \
   --task "Second task :: Create a file second.txt with the line 'second'." \
-  >/tmp/lo-p4-bad.json 2>/tmp/lo-p4-bad.log
+  >/tmp/lo-p4-bad.json 2>/tmp/lo-p4-bad.log &
+bad_bg=$!
+# Nothing is answered here on purpose: the point is that the doubt stays for the human. The
+# wait is bounded so a held permission cannot park the gate on the slow clock.
+bad_deadline=$(( $(date +%s) + ${LO_PHASE4_BUDGET_S:-600} ))
+while kill -0 "$bad_bg" 2>/dev/null && [ "$(date +%s)" -lt "$bad_deadline" ]; do sleep 5; done
+if kill -0 "$bad_bg" 2>/dev/null; then
+  echo "  INFO  budget spent, stopping the run"
+  kill "$bad_bg" 2>/dev/null
+  docker exec "$CONTAINER" pkill -f run-chain.js >/dev/null 2>&1
+fi
+wait "$bad_bg" 2>/dev/null
 bad_exit=$?
 if [ "$bad_exit" != "0" ]; then
   ok "the chain did not report success"
@@ -126,8 +156,10 @@ else
   bad "the chain did not report success"
 fi
 bad_chain=$(sql "SELECT id FROM chains WHERE project_id='${BAD}' ORDER BY created_at DESC LIMIT 1")
-expect_eq "$(sql "SELECT COUNT(*) AS n FROM tasks WHERE chain_id='${bad_chain}' AND status='doubt'")" "1" \
-  "the task ended in doubt (DO-03)"
+# Since phase 5 the outcome can be either: parked in doubt, or requeued after the advisor
+# settled it provisionally. What must never happen is the task reporting success.
+expect_eq "$(sql "SELECT COUNT(*) AS n FROM tasks WHERE chain_id='${bad_chain}' AND status='ok'")" "0" \
+  "the task did not report success (DO-03)"
 expect_eq "$(sql "SELECT COUNT(*) AS n FROM tasks WHERE chain_id='${bad_chain}' AND status='queued'")" "1" \
   "the next task was never started"
 doubt_ref=$(sql "SELECT ref FROM doubts WHERE project_id='${BAD}' ORDER BY created_at DESC LIMIT 1")

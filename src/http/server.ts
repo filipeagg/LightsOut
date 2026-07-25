@@ -13,6 +13,8 @@ import type { Config } from "../config.js";
 import type { Bus } from "../bus.js";
 import type { HealthProbe } from "../health.js";
 import type { Repos } from "../db/repos/index.js";
+import { mountMcp } from "../mcp/server.js";
+import type { McpDeps } from "../mcp/tools.js";
 
 export type ServerDeps = {
   config: Config;
@@ -21,6 +23,8 @@ export type ServerDeps = {
   /** Read-only access for the JSON API and SSE (phase 7); SELECT-only (OB-01). */
   repos: Repos;
   checkDatabase: () => { ok: boolean; error?: string };
+  /** When present, the MCP endpoint is mounted at /mcp (MC-01). */
+  mcp?: McpDeps;
 };
 
 const PANEL_DIR = path.resolve(process.cwd(), "panel");
@@ -56,6 +60,9 @@ export async function createHttpServer(deps: ServerDeps): Promise<FastifyInstanc
     const db = deps.checkDatabase();
     return deps.health.snapshot(db.ok, db.error);
   });
+
+  // MCP endpoint (MC-01). Mounted before the static catch-all so /mcp is not served as a file.
+  if (deps.mcp) await mountMcp(app, deps.mcp);
 
   app.get("/*", async (request, reply) => {
     const file = resolvePanelFile(request.url.split("?")[0] ?? "/");

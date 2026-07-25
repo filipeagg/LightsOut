@@ -86,6 +86,32 @@ describe("classifier", () => {
     expect(classify({ kind: "execute", commands: ["tidy up", "no match here"] })).toBe("other");
   });
 
+  it("treats shell writes inside the project as project_write", () => {
+    // Real case from the phase 4 gate: this used to fall into `other` and stop the chain on a
+    // human gate even though writing inside the project is exactly what the task asked for.
+    expect(classify({ kind: "execute", command: `printf 'one\\n' > ${PROJECT}/one.txt` })).toBe(
+      "project_write",
+    );
+    expect(classify({ kind: "execute", command: "echo hello >> notes.md" })).toBe("project_write");
+    expect(classify({ kind: "execute", command: "touch src/new.ts" })).toBe("project_write");
+    expect(classify({ kind: "execute", command: "mkdir -p src/deep" })).toBe("project_write");
+    expect(classify({ kind: "execute", command: "sed -i s/a/b/ src/a.ts" })).toBe("project_write");
+  });
+
+  it("finds path escapes hidden inside a command (PE-02)", () => {
+    expect(classify({ kind: "execute", command: "printf x > /etc/passwd" })).toBe(
+      "outside_workspace",
+    );
+    expect(classify({ kind: "execute", command: "echo x > ../sibling/file.txt" })).toBe(
+      "outside_workspace",
+    );
+    expect(classify({ kind: "execute", command: "cat /etc/shadow" })).toBe("outside_workspace");
+    // A redirect that stays inside is still a write, not an escape.
+    expect(classify({ kind: "execute", command: `echo x > ${PROJECT}/inside.txt` })).toBe(
+      "project_write",
+    );
+  });
+
   it("accepts extra matchers from a pack", () => {
     const custom = new Classifier({ exec_check: ["^bazel test\\b"] });
     expect(custom.classify({ projectPath: PROJECT, command: "bazel test //..." }).class).toBe(

@@ -17,6 +17,7 @@ import { createRepos } from "./db/repos/index.js";
 import { AgentsLoader } from "./agents/loader.js";
 import { recoverInterrupted } from "./orchestrator/recovery.js";
 import { Orchestrator } from "./orchestrator/orchestrator.js";
+import { DoubtService } from "./orchestrator/doubts.js";
 
 async function readVersion(): Promise<string> {
   try {
@@ -100,6 +101,15 @@ async function main(): Promise<void> {
     health,
     repos,
     checkDatabase: () => checkDatabase(db),
+    mcp: {
+      config,
+      repos,
+      agents,
+      health,
+      orchestrator,
+      doubts: new DoubtService(config, repos, bus, agents),
+      version,
+    },
   });
   await app.listen({ host: config.bind, port: config.port });
   console.log(`[boot] listening on http://${config.bind}:${config.port}`);

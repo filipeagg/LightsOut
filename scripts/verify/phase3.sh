@@ -118,8 +118,10 @@ expect_ge "$(sql "SELECT COUNT(*) AS n FROM permission_audit WHERE run_id='${run
   "at least one action allowed by policy"
 expect_ge "$(sql "SELECT COUNT(*) AS n FROM permission_audit WHERE run_id='${run_id}' AND verdict IN ('deny','require_human')")" 1 \
   "the network attempt was denied or gated (PE-01, RT-05)"
-expect_ge "$(sql "SELECT COUNT(*) AS n FROM permission_audit WHERE run_id='${run_id}' AND action_class='network'")" 1 \
-  "the network attempt was classified as network, not 'other' (PE-01)"
+# Either class is correct and neither is the useless 'other': a fetch is `network`, and a fetch
+# that writes outside the project is `outside_workspace` because path escapes win (PE-02).
+expect_ge "$(sql "SELECT COUNT(*) AS n FROM permission_audit WHERE run_id='${run_id}' AND action_class IN ('network','outside_workspace')")" 1 \
+  "the network attempt was classified precisely, not as 'other' (PE-01, PE-02)"
 check "docker exec $CONTAINER test -f /workspace/projects/${PROJECT}/hello.txt" \
   "the allowed write actually happened (PE-02)"
 check "! docker exec $CONTAINER test -f /workspace/projects/${PROJECT}/../escaped.txt" \

@@ -82,15 +82,73 @@ export function parseAdvisorAnswer(text: string): AdvisorAnswer | undefined {
   return undefined;
 }
 
-export async function consultAdvisor(input: ConsultInput): Promise<AdvisorResult> {
-  const startedAt = Date.now();
+/**
+ * One ephemeral read-only session, one prompt, the concatenated reply text.
+ * Shared by the structured second opinion and the free-form `consult` tool (MC-05, DO-06).
+ */
+export async function askEngine(input: {
+  adapterCommand: string;
+  cwd: string;
+  prompt: string;
+  timeoutMs?: number;
+  onStderr?: (line: string) => void;
+}): Promise<string> {
   const timeoutMs = input.timeoutMs ?? ADVISOR_TIMEOUT_MS;
   const adapter = spawnAdapter({
     command: input.adapterCommand,
     cwd: input.cwd,
     ...(input.onStderr ? { onStderr: input.onStderr } : {}),
   });
+  let settled = false;
+  try {
+    const conversation = acp
+      .client({ name: "lightsout-advisor" })
+      .onRequest(acp.methods.client.session.requestPermission, (ctx) => {
+        const reject = ctx.params.options.find(
+          (o) => o.kind === "reject_once" || o.kind === "reject_always",
+        );
+        return reject
+          ? { outcome: { outcome: "selected" as const, optionId: reject.optionId } }
+          : { outcome: { outcome: "cancelled" as const } };
+      })
+      .connectWith(adapter.stream, async (ctx) => {
+        await ctx.request(acp.methods.agent.initialize, {
+          protocolVersion: acp.PROTOCOL_VERSION,
+          clientCapabilities: {},
+        });
+        return ctx.buildSession(input.cwd).withSession(async (session) => {
+          let text = "";
+          void session.prompt(input.prompt).catch(() => undefined);
+          for (;;) {
+            const message = await session.nextUpdate();
+            if (message.kind === "stop") return text;
+            const update = message.notification.update;
+            if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {
+              text += update.content.text;
+            }
+          }
+        });
+      })
+      .catch((err: unknown) => {
+        if (settled) return "";
+        throw err;
+      });
 
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`advisor timeout after ${timeoutMs} ms`)), timeoutMs),
+    );
+    try {
+      return await Promise.race([conversation, timeout]);
+    } finally {
+      settled = true;
+    }
+  } finally {
+    await adapter.stop(5000);
+  }
+}
+
+export async function consultAdvisor(input: ConsultInput): Promise<AdvisorResult> {
+  const startedAt = Date.now();
   const fail = (error: string): AdvisorResult => ({
     ok: false,
     engine: input.engine,
@@ -99,57 +157,13 @@ export async function consultAdvisor(input: ConsultInput): Promise<AdvisorResult
   });
 
   try {
-    // The connection rejects with "ACP connection closed" once the adapter is stopped, which
-    // can happen after we already have the answer or after the timeout won the race. Keeping
-    // the handler attached means that late rejection is never unhandled.
-    let settled = false;
-    const conversation = acp
-      .client({ name: "lightsout-advisor" })
-        // Read-only by construction: every permission request is rejected.
-        .onRequest(acp.methods.client.session.requestPermission, (ctx) => {
-          const reject = ctx.params.options.find(
-            (o) => o.kind === "reject_once" || o.kind === "reject_always",
-          );
-          return reject
-            ? { outcome: { outcome: "selected" as const, optionId: reject.optionId } }
-            : { outcome: { outcome: "cancelled" as const } };
-        })
-        .connectWith(adapter.stream, async (ctx) => {
-          await ctx.request(acp.methods.agent.initialize, {
-            protocolVersion: acp.PROTOCOL_VERSION,
-            clientCapabilities: {},
-          });
-          return ctx.buildSession(input.cwd).withSession(async (session) => {
-            let text = "";
-            void session.prompt(buildPrompt(input)).catch(() => undefined);
-            for (;;) {
-              const message = await session.nextUpdate();
-              if (message.kind === "stop") return text;
-              const update = message.notification.update;
-              if (
-                update.sessionUpdate === "agent_message_chunk" &&
-                update.content.type === "text"
-              ) {
-                text += update.content.text;
-              }
-            }
-          });
-      })
-      .catch((err: unknown) => {
-        if (settled) return ""; // late failure after we already had the answer
-        throw err;
-      });
-
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`advisor timeout after ${timeoutMs} ms`)), timeoutMs),
-    );
-
-    let reply: string;
-    try {
-      reply = await Promise.race([conversation, timeout]);
-    } finally {
-      settled = true;
-    }
+    const reply = await askEngine({
+      adapterCommand: input.adapterCommand,
+      cwd: input.cwd,
+      prompt: buildPrompt(input),
+      ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+      ...(input.onStderr ? { onStderr: input.onStderr } : {}),
+    });
 
     const answer = parseAdvisorAnswer(reply);
     if (!answer) return fail(`advisor reply was not usable JSON: ${reply.slice(0, 200)}`);
@@ -159,7 +173,5 @@ export async function consultAdvisor(input: ConsultInput): Promise<AdvisorResult
     return { ok: true, engine: input.engine, answer, durationMs: Date.now() - startedAt };
   } catch (err) {
     return fail(err instanceof Error ? err.message : String(err));
-  } finally {
-    await adapter.stop(5000);
   }
 }

@@ -36,6 +36,17 @@ export type Classification = {
 
 /** Built-in matcher table (DESIGN §7.2 ships defaults; packs extend it). */
 export const DEFAULT_MATCHERS: Record<string, string[]> = {
+  // Shell writes inside the project. Without these a plain `printf 'x' > file.txt` falls into
+  // `other` and stops an unattended chain on a human gate, even though writing inside the
+  // project is exactly what the task asked for. Path escapes are checked first (PE-02), so
+  // these patterns can only match writes that stay inside the project directory.
+  project_write: [
+    "^(printf|echo)\\b[^|]*>>?\\s*\\S+",
+    "^(cat|tee)\\b[^|]*>>?\\s*\\S+",
+    "^(touch|mkdir|cp|mv)\\b",
+    "^sed\\s+-i\\b",
+    "^(python3?|node)\\s+-c\\b[^|]*(open|writeFile)",
+  ],
   exec_check: [
     "^(npm|pnpm|yarn|bun) (test|run (test|build|lint|typecheck|check))\\b",
     "^(node|tsc|eslint|prettier|vitest|jest|pytest|ruff|mypy|go test|cargo (test|build|check))\\b",
@@ -94,7 +105,29 @@ const COMMAND_ORDER: ActionClass[] = [
   "network",
   "exec_check",
   "git_local",
+  "project_write",
 ];
+
+/**
+ * Paths a shell command touches: redirect targets and absolute-looking arguments. Used to
+ * enforce PE-02 on commands, where the ACP request carries no `locations`.
+ */
+export function pathsInCommand(command: string): string[] {
+  const found: string[] = [];
+  for (const match of command.matchAll(/>>?\s*("([^"]+)"|'([^']+)'|([^\s;|&]+))/g)) {
+    const target = match[2] ?? match[3] ?? match[4];
+    if (target) found.push(target);
+  }
+  // Absolute or parent-relative paths. `/` must be followed by a path character, so build
+  // targets like `bazel test //...` and regex arguments are not mistaken for paths.
+  for (const match of command.matchAll(
+    /(^|\s)(\/[A-Za-z0-9._][^\s;|&"']*|\.\.\/[^\s;|&"']+)/g,
+  )) {
+    const target = match[2];
+    if (target) found.push(target);
+  }
+  return found;
+}
 
 export class Classifier {
   private readonly table: Map<ActionClass, RegExp[]>;
@@ -116,19 +149,22 @@ export class Classifier {
   }
 
   classify(input: ClassifyInput): Classification {
-    const escaping = (input.paths ?? []).find(
-      (p) => !Classifier.isInside(input.projectPath, p),
-    );
+    const candidates = [input.command, ...(input.commands ?? [])]
+      .map((c) => (c ?? "").trim())
+      .filter((c) => c.length > 0);
+
+    // Path escapes win over everything (PE-02), including paths hidden inside a command.
+    const declaredPaths = [
+      ...(input.paths ?? []),
+      ...candidates.flatMap((candidate) => pathsInCommand(candidate)),
+    ];
+    const escaping = declaredPaths.find((p) => !Classifier.isInside(input.projectPath, p));
     if (escaping) {
       return {
         class: "outside_workspace",
         reason: `path outside the project: ${escaping}`,
       };
     }
-
-    const candidates = [input.command, ...(input.commands ?? [])]
-      .map((c) => (c ?? "").trim())
-      .filter((c) => c.length > 0);
 
     if (candidates.length > 0) {
       // COMMAND_ORDER is ordered by danger, so the outer loop makes the most dangerous

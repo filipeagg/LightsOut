@@ -9,23 +9,29 @@ Working: the container with both engines authenticated, the database, agent prof
 policy packs, a single mediated run, and chains of tasks that execute unattended with git
 commits, a verify gate and self-updating project docs.
 
+Working too: doubts with a second opinion from the other engine, provisional decisions with git
+checkpoint tags, answering a doubt to resume the work, and the fifteen MCP tools.
+
 Not built yet, so not a bug:
 
-- Answering a doubt (phase 5). A doubt is recorded and the chain stops there; there is no way
-  to reply to it yet.
-- Control from Claude Desktop over MCP (phase 6). Everything is driven from the terminal.
 - The web panel beyond `/health` (phase 7). `http://127.0.0.1:8484/` shows a placeholder.
-- One-command install and the setup wizard (phase 8).
-- The advisor second opinion, provisional decisions and checkpoint tags (phase 5).
+- One-command install, the published image and the setup wizard (phase 8).
+- Anything in the v2 backlog of REQUIREMENTS.md.
+
+Worth knowing: a permission the policy sends to a human parks the run for up to
+`LO_PERMISSION_WAIT_HOURS` (24 by default). That is by design, not a hang: answer the doubt with
+`answer_doubt` and the run continues where it stopped.
 
 ## Control interface
 
-The intended way to drive LightsOut is MCP from Claude Desktop: `list_projects`,
-`project_status`, `create_project`, `launch_task`, `launch_chain`, `abort_run`, `list_doubts`,
-`answer_doubt`, `get_history`, `read_doc`, `write_doc`, `list_agents`, `health`. That server is
-phase 6 and does not exist yet, so until it ships the CLIs below are the only way in, and the
-terminal stays useful afterwards for what MCP does not expose: files on disk, git history,
-container logs, the database, and restarting the container mid-run.
+LightsOut is driven over MCP from Claude Desktop (INSTALL.md §5 has the config): `health`,
+`list_projects`, `create_project`, `project_status`, `list_agents`, `reload_agents`,
+`launch_chain`, `launch_task`, `abort_run`, `list_doubts`, `answer_doubt`, `get_history`,
+`read_doc`, `write_doc`, `consult`. The endpoint is also reachable directly at
+`http://127.0.0.1:8484/mcp`.
+
+The terminal stays useful for what MCP does not expose: files on disk, git history, container
+logs, the database, and restarting the container mid-run.
 
 ## Prerequisites
 

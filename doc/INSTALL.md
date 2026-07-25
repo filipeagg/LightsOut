@@ -72,7 +72,33 @@ while the long-lived container keeps its isolated network. Credentials live in t
 If your ChatGPT workspace has device-code auth disabled by policy, use the default browser
 flow (or `--api-key`); `--device-auth` will be rejected by the identity provider.
 
-## 5. Verify
+## 5. Connect Claude Desktop (MCP)
+
+LightsOut is controlled through MCP. Add this to `claude_desktop_config.json`
+(`%APPDATA%\Claude\claude_desktop_config.json` on Windows,
+`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS), then restart
+Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "lightsout": {
+      "command": "docker",
+      "args": ["exec", "-i", "lightsout", "node", "dist/mcp/stdio-bridge.js"]
+    }
+  }
+}
+```
+
+The bridge holds no state: it forwards JSON-RPC to the container's `/mcp` endpoint, which is
+also reachable directly at `http://127.0.0.1:8484/mcp` for clients that speak streamable HTTP.
+
+Fifteen tools are exposed: `health`, `list_projects`, `create_project`, `project_status`,
+`list_agents`, `reload_agents`, `launch_chain`, `launch_task`, `abort_run`, `list_doubts`,
+`answer_doubt`, `get_history`, `read_doc`, `write_doc`, `consult`. Ask Claude Desktop for
+`health` first: it should report both engines authenticated.
+
+## 6. Verify
 
 ```bash
 ./scripts/verify/phase1.sh
@@ -81,7 +107,7 @@ flow (or `--api-key`); `--device-auth` will be rejected by the identity provider
 Must print `PHASE 1 GREEN`. Panel and API: <http://127.0.0.1:8484/> (localhost only).
 Health JSON: `curl -s localhost:8484/health`.
 
-## 6. Optional: enforce the egress allowlist (RT-05)
+## 7. Optional: enforce the egress allowlist (RT-05)
 
 By default outbound traffic is unrestricted and `/health` reports
 `network: unrestricted`. To restrict it, add your git remote hosts to `proxy/filter`, then:

@@ -15,6 +15,8 @@ import type { HealthProbe } from "../health.js";
 import type { Repos } from "../db/repos/index.js";
 import { mountMcp } from "../mcp/server.js";
 import type { McpDeps } from "../mcp/tools.js";
+import type { LoginFlows } from "../setup/login-flows.js";
+import { registerSetupRoutes, SETUP_KEYS } from "./setup.js";
 
 export type ServerDeps = {
   config: Config;
@@ -25,6 +27,8 @@ export type ServerDeps = {
   checkDatabase: () => { ok: boolean; error?: string };
   /** When present, the MCP endpoint is mounted at /mcp (MC-01). */
   mcp?: McpDeps;
+  /** Interactive engine logins driven from the wizard (SU-04). */
+  loginFlows: LoginFlows;
 };
 
 const PANEL_DIR = path.resolve(process.cwd(), "panel");
@@ -61,8 +65,25 @@ export async function createHttpServer(deps: ServerDeps): Promise<FastifyInstanc
     return deps.health.snapshot(db.ok, db.error);
   });
 
+  // Setup, wizard and export routes (SU-03..06, §12.1b).
+  registerSetupRoutes(app, {
+    config: deps.config,
+    repos: deps.repos,
+    health: deps.health,
+    loginFlows: deps.loginFlows,
+  });
+
   // MCP endpoint (MC-01). Mounted before the static catch-all so /mcp is not served as a file.
-  if (deps.mcp) await mountMcp(app, deps.mcp);
+  // The timestamp is what turns wizard step 3's "test connection" indicator green (§14.3).
+  if (deps.mcp) {
+    await mountMcp(app, deps.mcp, () => {
+      try {
+        deps.repos.settings.set(SETUP_KEYS.mcpLastSeen, new Date().toISOString());
+      } catch {
+        // A settings write must never break an MCP request.
+      }
+    });
+  }
 
   app.get("/*", async (request, reply) => {
     const file = resolvePanelFile(request.url.split("?")[0] ?? "/");

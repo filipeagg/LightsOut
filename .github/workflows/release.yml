@@ -1,0 +1,106 @@
+# Publish the container image to GHCR (SU-01, SU-08, DESIGN §14.1).
+#
+# Tagging `vX.Y.Z` builds linux/amd64 and linux/arm64 and pushes
+# ghcr.io/<owner>/lightsout:X.Y.Z, :X.Y, :X and :latest. Updating an installation is
+# `docker pull` plus a restart: migrations run at boot and every piece of state lives in a
+# volume or the host workspace, so a replaced container keeps credentials, database and projects.
+#
+# The namespace follows the repository owner, so the image name is right whatever account or
+# organisation this ends up under, and no secret beyond the workflow token is needed.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version to publish, without the leading v (e.g. 0.2.0)"
+        required: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/lightsout
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the test stage
+        run: docker build --target test -t lightsout:test .
+      - name: Typecheck
+        run: docker run --rm lightsout:test npm run typecheck
+      - name: Unit tests
+        run: docker run --rm lightsout:test npm test
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Refuse a version that does not match package.json
+        run: |
+          declared=$(node -p "require('./package.json').version")
+          if [ "$declared" != "${{ steps.version.outputs.value }}" ]; then
+            echo "package.json says $declared but the tag says ${{ steps.version.outputs.value }}" >&2
+            exit 1
+          fi
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}},value=v${{ steps.version.outputs.value }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ steps.version.outputs.value }}
+            type=semver,pattern={{major}},value=v${{ steps.version.outputs.value }}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.title=LightsOut
+            org.opencontainers.image.description=Agent orchestration: chains of coding-agent runs, mediated permissions, doubts and second opinions, driven over MCP.
+            org.opencontainers.image.licenses=Apache-2.0
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          echo "Published:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

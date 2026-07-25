@@ -76,6 +76,10 @@ export async function createHttpServer(deps: ServerDeps): Promise<FastifyInstanc
     repos: deps.repos,
     agents: deps.agents,
     health: deps.health,
+    // The MCP deps already carry the phase 9 loaders; both surfaces read the same objects.
+    ...(deps.mcp?.templates ? { templates: deps.mcp.templates } : {}),
+    ...(deps.mcp?.knowledge ? { knowledge: deps.mcp.knowledge } : {}),
+    ...(deps.mcp?.vault ? { vault: deps.mcp.vault } : {}),
   });
   registerStreamRoute(app, {
     config: deps.config,

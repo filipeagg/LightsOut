@@ -16,7 +16,10 @@ import type { Repos } from "../db/repos/index.js";
 import { mountMcp } from "../mcp/server.js";
 import type { McpDeps } from "../mcp/tools.js";
 import type { LoginFlows } from "../setup/login-flows.js";
+import type { AgentsLoader } from "../agents/loader.js";
 import { registerSetupRoutes, SETUP_KEYS } from "./setup.js";
+import { registerApiRoutes } from "./api.js";
+import { registerStreamRoute } from "./stream.js";
 
 export type ServerDeps = {
   config: Config;
@@ -29,6 +32,8 @@ export type ServerDeps = {
   mcp?: McpDeps;
   /** Interactive engine logins driven from the wizard (SU-04). */
   loginFlows: LoginFlows;
+  /** Agent profiles for the read API (WP-01, AP-02). */
+  agents: AgentsLoader;
 };
 
 const PANEL_DIR = path.resolve(process.cwd(), "panel");
@@ -63,6 +68,20 @@ export async function createHttpServer(deps: ServerDeps): Promise<FastifyInstanc
   app.get("/health", async () => {
     const db = deps.checkDatabase();
     return deps.health.snapshot(db.ok, db.error);
+  });
+
+  // Read-only JSON API and the event stream (WP-01, WP-03, §12.1/§12.2).
+  registerApiRoutes(app, {
+    config: deps.config,
+    repos: deps.repos,
+    agents: deps.agents,
+    health: deps.health,
+  });
+  registerStreamRoute(app, {
+    config: deps.config,
+    bus: deps.bus,
+    repos: deps.repos,
+    health: deps.health,
   });
 
   // Setup, wizard and export routes (SU-03..06, §12.1b).

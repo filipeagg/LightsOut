@@ -1,19 +1,705 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>LightsOut</title>
-    <link rel="stylesheet" href="/style.css" />
-  </head>
-  <body>
-    <header><h1>LightsOut</h1></header>
-    <main id="app">
-      <!-- Phase 7 replaces this with the hash-routed panel (WP-01..08); the wizard moves to #/setup. -->
-      <p><a href="/setup.html">Setup</a> — workspace, engines, Claude Desktop, first project.</p>
-      <p>Boot placeholder. Live health:</p>
-      <pre id="health">loading…</pre>
-    </main>
-    <script src="/app.js"></script>
-  </body>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LightsOut</title>
+<!--
+  The panel (WP-01, WP-03..10, OB-03; DESIGN §12.3). One file, no build step (ST-04).
+  Read-only in phase 7: every control that changes something arrives in phase 10 (WP-02).
+  The design tokens are the ones settled in doc/prototype/README.md — Radix slate/iris, Geist,
+  Vercel's tracking rule. They are implemented here, not re-decided.
+-->
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist/index.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist-mono/index.css">
+<style>
+:root{
+  --sans:'Geist Variable','Geist',-apple-system,system-ui,'Segoe UI',sans-serif;
+  --mono:'Geist Mono Variable','Geist Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  --bg:#111113; --surface:#18191b; --surface-2:#212225; --hover:#272a2d; --active:#2e3135;
+  --line:#ffffff14; --line-2:#ffffff24; --line-3:#ffffff3d;
+  --fg:#edeef0; --fg-2:#b0b4ba; --fg-3:#777b84;
+  --accent:#5b5bd6; --accent-hover:#6e6ade; --accent-fg:#b1a9ff; --accent-bg:#1c1c3c;
+  --green:#30a46c; --green-fg:#3dd68c; --green-bg:#132d21; --green-line:#20573e;
+  --amber:#ffc53d; --amber-fg:#ffca16; --amber-bg:#302008; --amber-line:#5c3d05;
+  --red:#e5484d;   --red-fg:#ff9592;   --red-bg:#3b1219;   --red-line:#72232d;
+  --blue:#0090ff;  --blue-fg:#70b8ff;  --blue-bg:#0d2847;  --blue-line:#104d87;
+  --r-sm:6px; --r-md:12px;
+  --shadow-card:0 1px 2px rgba(0,0,0,.16);
+  --ease:cubic-bezier(.175,.885,.32,1.1);
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:20px;
+  letter-spacing:0;font-weight:400;font-feature-settings:'calt' 1,'liga' 1;-webkit-font-smoothing:antialiased}
+.num,.stat .n,.timeline,.mono,code,td .tiny,th{font-variant-numeric:tabular-nums slashed-zero}
+:focus-visible{outline:none;box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--accent-fg)}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;cursor:pointer}
+code,.mono{font-family:var(--mono);font-size:13px}
+code{color:var(--fg-2)}
+
+/* ---------- shell ---------- */
+#app{display:grid;grid-template-columns:228px 1fr;min-height:100vh}
+aside{background:var(--surface);border-right:1px solid var(--line);padding:20px 12px;display:flex;
+  flex-direction:column;gap:2px;position:sticky;top:0;height:100vh;overflow:auto}
+.brand{display:flex;align-items:center;gap:9px;padding:6px 10px 24px;font-weight:600;font-size:15px;letter-spacing:-.01em}
+.dot{width:18px;height:18px;border-radius:5px;background:var(--accent);display:grid;place-items:center;flex:0 0 18px}
+.dot svg{width:11px;height:11px;stroke:#fff}
+.navsec{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;color:var(--fg-3);padding:22px 10px 6px}
+aside a{height:32px;padding:0 10px;border-radius:var(--r-sm);color:var(--fg-2);display:flex;
+  justify-content:space-between;align-items:center;gap:8px;font-size:14px;
+  transition:background .15s var(--ease),color .15s var(--ease)}
+aside a:hover{background:var(--surface-2);color:var(--fg)}
+aside a.on{background:var(--hover);color:var(--fg);font-weight:500}
+main{padding:40px;padding-bottom:120px;max-width:1240px}
+h1{font-size:32px;line-height:40px;letter-spacing:-1.28px;margin:0 0 8px;font-weight:600}
+h2{font-size:24px;line-height:32px;letter-spacing:-.96px;margin:40px 0 16px;font-weight:600}
+h3{font-size:16px;line-height:24px;letter-spacing:-.32px;margin:0;font-weight:600}
+h1 em,h2 em{font-style:normal;color:var(--fg-3)}
+.sub{color:var(--fg-2);font-size:14px;line-height:22px;margin:0 0 32px;max-width:78ch}
+
+/* ---------- primitives ---------- */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);box-shadow:var(--shadow-card)}
+.pad{padding:24px}
+.pad-sm{padding:16px}
+.row{display:flex;gap:8px;align-items:center}
+.between{display:flex;gap:16px;align-items:center;justify-content:space-between}
+.wrap{flex-wrap:wrap}
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:920px){.g2,.g3,.g4{grid-template-columns:1fr}#app{grid-template-columns:1fr}aside{position:static;height:auto}}
+.muted{color:var(--fg-3)}.dim{color:var(--fg-2)}
+.tiny{font-size:13px;line-height:18px}
+.micro{font-size:11px;line-height:16px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;color:var(--fg-3)}
+.btn{height:40px;padding:0 12px;font-size:14px;font-weight:500;background:var(--surface-2);
+  border:1px solid var(--line-2);border-radius:var(--r-sm);display:inline-flex;align-items:center;
+  justify-content:center;gap:6px;white-space:nowrap;
+  transition:background .15s var(--ease),border-color .15s var(--ease),color .15s var(--ease)}
+.btn:hover{background:var(--hover);border-color:var(--line-3);color:var(--fg)}
+.btn:active{background:var(--active)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.btn.sm{height:32px;padding:0 10px;font-size:13px}
+.btn svg{width:15px;height:15px;flex:0 0 15px}
+.btn.sm svg{width:14px;height:14px;flex:0 0 14px}
+.btn:disabled,.btn:disabled:hover{background:var(--surface-2);border-color:var(--line);color:var(--fg-3);cursor:not-allowed}
+.pill{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;font-size:13px;
+  border-radius:var(--r-sm);border:1px solid var(--line-2);background:var(--surface-2);color:var(--fg-2);white-space:nowrap}
+.pill b{font-weight:500;color:var(--fg)}
+.pill.green{color:var(--green-fg);border-color:var(--green-line);background:var(--green-bg)}
+.pill.amber{color:var(--amber-fg);border-color:var(--amber-line);background:var(--amber-bg)}
+.pill.red{color:var(--red-fg);border-color:var(--red-line);background:var(--red-bg)}
+.pill.blue{color:var(--blue-fg);border-color:var(--blue-line);background:var(--blue-bg)}
+.pill.violet{color:var(--accent-fg);border-color:#3b3bab;background:var(--accent-bg)}
+.pill.code{font-family:var(--mono);font-size:12px;letter-spacing:-.01em}
+.sdot{width:7px;height:7px;border-radius:50%;flex:0 0 7px;background:currentColor}
+.pill.amber .sdot{animation:blink 1.6s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;height:32px;font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--fg-3);padding:0 16px;border-bottom:1px solid var(--line)}
+td{padding:12px 16px;border-bottom:1px solid var(--line);vertical-align:middle;font-size:14px;line-height:20px}
+tr:last-child td{border-bottom:none}
+tbody tr{transition:background .15s var(--ease)}
+tbody tr:hover{background:var(--surface-2)}
+.bar{height:4px;border-radius:2px;background:var(--surface-2);overflow:hidden;display:flex;box-shadow:0 0 0 1px var(--line) inset}
+.bar i{display:block;height:100%}
+.kv{display:grid;grid-template-columns:168px 1fr;gap:12px 16px;font-size:14px;margin:0}
+.kv dt{color:var(--fg-3)}
+.kv dd{margin:0}
+.empty{color:var(--fg-3);text-align:center;padding:48px;font-size:14px}
+.note{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px 14px;
+  color:var(--fg-2);font-size:13px;line-height:20px}
+.note.warn{border-color:var(--amber-line);background:var(--amber-bg);color:var(--amber-fg)}
+.note.bad{border-color:var(--red-line);background:var(--red-bg);color:var(--red-fg)}
+.note.good{border-color:var(--green-line);background:var(--green-bg);color:var(--green-fg)}
+
+/* ---------- attention strip (OB-03) ---------- */
+.attn{background:var(--surface);border:1px solid var(--amber-line);border-radius:var(--r-md);
+  padding:20px 24px;margin-bottom:32px;box-shadow:var(--shadow-card)}
+.attn.calm{border-color:var(--green-line)}
+.attn.bad{border-color:var(--red-line)}
+.attn .hd{margin:0 0 8px;font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--amber-fg);display:flex;align-items:center;gap:7px}
+.attn.calm .hd{color:var(--green-fg)}
+.attn.bad .hd{color:var(--red-fg)}
+.attn .hd svg{width:14px;height:14px}
+.attnitem{display:flex;gap:14px;align-items:flex-start;padding:16px 0;border-top:1px solid var(--line)}
+.attnitem:first-of-type{border-top:none}
+.attnitem .ic{width:28px;height:28px;flex:0 0 28px;display:grid;place-items:center;border-radius:var(--r-sm);
+  background:var(--surface-2);border:1px solid var(--line-2);color:var(--fg-2)}
+.attnitem .ic svg{width:15px;height:15px}
+
+/* ---------- steps and runs ---------- */
+.phase{display:grid;grid-template-columns:28px 1fr auto;gap:16px;padding:16px 0;border-top:1px solid var(--line);align-items:start}
+.phase:first-child{border-top:none}
+.mark{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:500;
+  border:1px solid var(--line-2);color:var(--fg-3);background:var(--surface-2)}
+.mark svg{width:13px;height:13px}
+.mark.done{border-color:var(--green-line);background:var(--green-bg);color:var(--green-fg)}
+.mark.running{border-color:var(--amber-line);background:var(--amber-bg);color:var(--amber-fg)}
+.mark.running svg{animation:spin 1.1s linear infinite}
+.mark.failed{border-color:var(--red-line);background:var(--red-bg);color:var(--red-fg)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.phase .ttl{font-weight:500;font-size:14px;line-height:20px}
+.phase.pending .ttl{color:var(--fg-2);font-weight:400}
+.phasemeta{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.phasebar{display:flex;gap:3px;margin-top:4px;min-width:132px}
+.phasebar i{height:4px;flex:1;border-radius:2px;background:var(--surface-2);box-shadow:0 0 0 1px var(--line) inset}
+.phasebar i.done{background:var(--green);box-shadow:none}
+.phasebar i.running{background:var(--amber);box-shadow:none}
+.phasebar i.failed{background:var(--red);box-shadow:none}
+
+/* ---------- misc ---------- */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:0 0 32px}
+.tabs a{height:40px;padding:0 12px;font-size:14px;color:var(--fg-3);display:inline-flex;align-items:center;gap:7px;
+  border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .15s var(--ease)}
+.tabs a:hover{color:var(--fg-2)}
+.tabs a.on{color:var(--fg);font-weight:500;border-bottom-color:var(--accent)}
+.stat{padding:20px}
+.stat .n{font-size:32px;font-weight:600;letter-spacing:-1.28px;line-height:40px}
+.stat .l{font-size:13px;color:var(--fg-3);margin-top:2px}
+.timeline{font-family:var(--mono);font-size:13px;line-height:24px;max-height:420px;overflow:auto}
+.timeline > div{display:flex;gap:16px}
+.timeline .t{color:var(--fg-3);flex:0 0 62px}
+.timeline .k{flex:0 0 132px;color:var(--fg-2)}
+.timeline .v{color:var(--fg-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.conn{position:fixed;right:20px;bottom:20px;font-size:13px;height:32px;padding:0 12px;border-radius:var(--r-sm);
+  z-index:50;background:var(--surface-2);border:1px solid var(--line-2);color:var(--fg-3);display:flex;
+  align-items:center;gap:7px}
+.conn.live{color:var(--green-fg);border-color:var(--green-line);background:var(--green-bg)}
+.conn.down{color:var(--red-fg);border-color:var(--red-line);background:var(--red-bg)}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside>
+    <div class="brand"><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16"/><path d="M8 14l3-3 3 3 4-5"/></svg></span> LightsOut</div>
+    <a href="#/" data-r="/">Overview</a>
+    <a href="#/projects" data-r="/projects">Projects <span id="nav-projects"></span></a>
+    <div class="navsec">Configuration</div>
+    <a href="#/agents" data-r="/agents">Agents</a>
+    <div class="navsec">System</div>
+    <a href="#/health" data-r="/health">Health <span id="nav-health"></span></a>
+    <a href="/setup.html">Setup</a>
+  </aside>
+  <main id="view"><div class="empty">Loading…</div></main>
+</div>
+<div class="conn" id="conn"><span class="sdot"></span> connecting…</div>
+
+<script>
+"use strict";
+/* ======================================================================
+   Small vanilla renderers fed by fetch() plus SSE patches (DESIGN §12.3).
+   Nothing is optimistic and nothing is cached across a change: the stream
+   says "something moved", the renderer re-reads the view from the API.
+   ====================================================================== */
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+const ICON = {
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+  spin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 9 9"/></svg>',
+  alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>',
+  question: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>',
+  plug: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6"/><path d="M15 2v6"/><path d="M6 8h12v3a6 6 0 0 1-12 0Z"/><path d="M12 17v5"/></svg>',
+  pause: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 5v14"/><path d="M15 5v14"/></svg>',
+  ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 4.5-5"/></svg>',
+};
+
+/** Everything the views read. Replaced wholesale, never patched in place. */
+const store = { overview: null, project: null, history: null, agents: null, health: null, error: "" };
+let route = { name: "/", id: null, tab: null };
+let stream = null;
+let runListener = null;
+let timeline = [];
+
+async function api(path) {
+  const response = await fetch(path, { headers: { accept: "application/json" } });
+  const body = await response.json().catch(() => null);
+  if (!body) throw new Error(`${response.status} ${response.statusText}`);
+  if (body.ok === false) throw new Error(body.error ? body.error.message : "request failed");
+  return body;
+}
+
+/* ---------- formatting ---------- */
+const pad2 = (n) => String(n).padStart(2, "0");
+function duration(seconds) {
+  if (seconds == null) return "—";
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${pad2(s % 60)}s`;
+  return `${Math.floor(s / 3600)}h ${pad2(Math.floor((s % 3600) / 60))}m`;
+}
+function ago(minutes) {
+  if (minutes == null) return "—";
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${Math.round(minutes)}m ago`;
+  if (minutes < 1440) return `${Math.floor(minutes / 60)}h ago`;
+  return `${Math.floor(minutes / 1440)}d ago`;
+}
+function sinceIso(iso) {
+  return iso ? ago((Date.now() - new Date(iso).getTime()) / 60000) : "—";
+}
+function clock(iso) {
+  const d = new Date(iso);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+/** Status colour: never colour alone — every pill carries a dot or an icon too. */
+const STATUS_TONE = {
+  ok: "green", completed: "green", running: "amber", active: "amber", queued: "",
+  waiting_human: "amber", doubt: "amber", paused: "red", verify_failed: "red",
+  error: "red", timeout: "red", stuck: "red", aborted: "red", interrupted: "red", idle: "",
+};
+const tone = (status) => STATUS_TONE[status] ?? "";
+const statusPill = (status) =>
+  `<span class="pill ${tone(status)}"><span class="sdot"></span>${esc(status)}</span>`;
+
+function markClass(status) {
+  if (status === "ok") return "done";
+  if (status === "running" || status === "waiting_human" || status === "doubt") return "running";
+  if (["error", "timeout", "stuck", "aborted", "verify_failed", "interrupted"].includes(status)) return "failed";
+  return "";
+}
+
+/* ---------- attention strip (OB-03) ---------- */
+function attentionStrip(overview) {
+  const items = overview.attention;
+  if (items.length === 0) {
+    return `<div class="attn calm">
+      <p class="hd">${ICON.ok} Nothing needs you</p>
+      <div class="tiny dim">${overview.counts.activeRuns} run(s) in flight,
+        ${overview.counts.projects} project(s).</div>
+    </div>`;
+  }
+  const worst = items.some((i) => i.severity === "red") ? "bad" : "";
+  const icon = { doubt: ICON.question, paused: ICON.pause, engine: ICON.plug };
+  return `<div class="attn ${worst}">
+    <p class="hd">${ICON.alert} Needs attention · ${items.length}</p>
+    ${items.map((i) => `<div class="attnitem">
+      <span class="ic">${icon[i.kind] ?? ICON.alert}</span>
+      <div style="flex:1;min-width:0">
+        <div class="between">
+          <div><b>${esc(i.title)}</b>
+            ${i.projectId ? `<a class="pill" href="#/p/${encodeURIComponent(i.projectId)}">${esc(i.projectId)}</a>` : ""}
+          </div>
+          <span class="tiny muted">${esc(ago(i.ageMin))}</span>
+        </div>
+        <div class="tiny dim" style="margin-top:4px">${esc(String(i.detail || "").slice(0, 240))}</div>
+      </div>
+    </div>`).join("")}
+  </div>`;
+}
+
+/* ---------- run card (WP-05) ---------- */
+function runCard(run) {
+  const elapsed = Math.min(1, run.elapsedS / Math.max(1, run.timeoutS));
+  const idle = Math.min(1, run.inactivityS / Math.max(1, run.inactivityLimitS));
+  const bar = (fraction, colour) =>
+    `<div class="bar"><i style="width:${(fraction * 100).toFixed(1)}%;background:${colour}"></i></div>`;
+  const last = run.lastAction;
+  return `<div class="card pad">
+    <div class="between">
+      <div>
+        <h3>${esc(run.taskTitle || run.taskId)}</h3>
+        <div class="tiny muted" style="margin-top:4px">
+          <a href="#/p/${encodeURIComponent(run.projectId)}">${esc(run.projectName || run.projectId)}</a>
+          · <span class="mono">${esc(run.id)}</span>
+        </div>
+      </div>
+      <div class="row wrap">${statusPill(run.status)}
+        <span class="pill">${esc(run.engine)}${run.model ? ` · ${esc(run.model)}` : ""}</span>
+        ${run.agentId ? `<span class="pill violet">${esc(run.agentId)}</span>` : ""}
+      </div>
+    </div>
+    <div class="grid g2" style="margin-top:20px">
+      <div>
+        <div class="between tiny"><span class="micro">Elapsed</span>
+          <span class="num dim">${duration(run.elapsedS)} / ${duration(run.timeoutS)}</span></div>
+        <div style="margin-top:6px">${bar(elapsed, elapsed > 0.85 ? "var(--red)" : "var(--accent)")}</div>
+      </div>
+      <div>
+        <div class="between tiny"><span class="micro">Since last action</span>
+          <span class="num dim">${duration(run.inactivityS)} / ${duration(run.inactivityLimitS)}</span></div>
+        <div style="margin-top:6px">${bar(idle, idle > 0.85 ? "var(--amber)" : "var(--fg-3)")}</div>
+      </div>
+    </div>
+    ${last ? `<div class="note" style="margin-top:16px"><span class="mono">${esc(last.type)}</span>
+      — ${esc(JSON.stringify(last.payload).slice(0, 200))}</div>` : ""}
+  </div>`;
+}
+
+/* ---------- chain steps ---------- */
+function chainSteps(chain) {
+  if (!chain) return `<div class="empty">No chain has been launched on this project yet.</div>`;
+  return chain.tasks.map((task) => {
+    const cls = markClass(task.status);
+    const glyph = cls === "done" ? ICON.check : cls === "running" ? ICON.spin : String(task.position);
+    return `<div class="phase ${task.status === "queued" ? "pending" : ""}">
+      <div class="mark ${cls}">${glyph}</div>
+      <div>
+        <div class="ttl">${esc(task.title)}</div>
+        <div class="phasemeta">${statusPill(task.status)}
+          <span class="pill violet">${esc(task.agentId)}</span>
+          <span class="pill code">${esc(task.id)}</span></div>
+      </div>
+      <div></div>
+    </div>`;
+  }).join("");
+}
+
+function doubtCard(doubt) {
+  return `<div class="card pad" style="margin-bottom:16px">
+    <div class="between">
+      <h3>${esc(doubt.ref)} <em>${esc(doubt.kind)}</em></h3>
+      <div class="row">${statusPill(doubt.status)}<span class="pill amber"><span class="sdot"></span>${esc(ago(doubt.ageMin))}</span></div>
+    </div>
+    <p class="tiny dim" style="margin:12px 0 0;white-space:pre-wrap">${esc(doubt.context)}</p>
+    ${doubt.blocks ? `<p class="tiny muted" style="margin:8px 0 0">Blocks: ${esc(doubt.blocks)}</p>` : ""}
+    ${doubt.options.length ? `<div class="grid" style="margin-top:16px;gap:8px">
+      ${doubt.options.map((o) => `<div class="note"><b>${esc(o.id)}</b> — ${esc(o.text)}</div>`).join("")}
+    </div>` : ""}
+    ${doubt.secondOpinion ? `<div class="note" style="margin-top:16px">
+      <span class="micro">Second opinion</span><br>${esc(JSON.stringify(doubt.secondOpinion).slice(0, 400))}</div>` : ""}
+    <div class="note" style="margin-top:16px">Answer it from Claude Desktop with
+      <code>answer_doubt</code>. The answer form lands here in phase 10 (WP-02).</div>
+  </div>`;
+}
+
+/* ====================== views ====================== */
+function viewOverview() {
+  const o = store.overview;
+  if (!o) return `<div class="empty">Loading…</div>`;
+  const stat = (n, label, cls) =>
+    `<div class="card stat"><div class="n ${cls || ""}">${n}</div><div class="l">${esc(label)}</div></div>`;
+  return `<h1>Overview</h1>
+    <p class="sub">Everything running, everything waiting for a human, and the state of the
+      engines that do the work.</p>
+    ${attentionStrip(o)}
+    <div class="grid g4">
+      ${stat(o.counts.activeRuns, "active runs")}
+      ${stat(o.counts.openDoubts, "open doubts")}
+      ${stat(o.counts.paused, "paused chains")}
+      ${stat(o.counts.projects, "projects")}
+    </div>
+    <h2>Active runs</h2>
+    ${o.activeRuns.length
+      ? `<div class="grid">${o.activeRuns.map(runCard).join("")}</div>`
+      : `<div class="card"><div class="empty">Nothing is running.</div></div>`}
+    <h2>Engines</h2>
+    <div class="card"><table><thead><tr><th>Engine</th><th>Adapter</th><th>Detected</th><th>Auth</th><th>Checked</th></tr></thead>
+      <tbody>${o.engines.map((e) => `<tr>
+        <td><b>${esc(e.engine)}</b></td>
+        <td><code>${esc(e.adapter)}</code></td>
+        <td>${e.detected ? `<span class="pill green"><span class="sdot"></span>yes</span>` : `<span class="pill red"><span class="sdot"></span>no</span>`}</td>
+        <td>${e.auth ? `<span class="pill green"><span class="sdot"></span>${esc(e.authSource || "yes")}</span>` : `<span class="pill red"><span class="sdot"></span>not connected</span>`}</td>
+        <td class="tiny muted">${esc(sinceIso(e.checkedAt))}</td>
+      </tr>`).join("")}</tbody></table></div>
+    <p class="tiny muted" style="margin-top:16px">Network: <code>${esc(o.network)}</code></p>`;
+}
+
+function viewProjects() {
+  const o = store.overview;
+  if (!o) return `<div class="empty">Loading…</div>`;
+  if (o.projects.length === 0) {
+    return `<h1>Projects</h1><div class="card"><div class="empty">
+      No projects yet. Create the first one from <a href="/setup.html">Setup</a> or through Claude Desktop.
+    </div></div>`;
+  }
+  const bar = (p) => {
+    const steps = p.chain ? p.chain.steps : [];
+    if (steps.length === 0) return `<span class="tiny muted">no chain</span>`;
+    return `<div class="phasebar">${steps.map((s) => `<i class="${markClass(s.status)}" title="${esc(s.title)}"></i>`).join("")}</div>`;
+  };
+  return `<h1>Projects <em>${o.projects.length}</em></h1>
+    <p class="sub">One row per project: what it is doing, how far along, and what it is waiting for.</p>
+    <div class="card"><table>
+      <thead><tr><th>Project</th><th>Status</th><th>Progress</th><th>Doubts</th><th>Last activity</th></tr></thead>
+      <tbody>${o.projects.map((p) => `<tr onclick="location.hash='#/p/${encodeURIComponent(p.id)}'" style="cursor:pointer">
+        <td><b>${esc(p.name)}</b><div class="tiny muted mono">${esc(p.path)}</div></td>
+        <td>${statusPill(p.status)}</td>
+        <td style="min-width:160px">${bar(p)}
+          <div class="tiny muted" style="margin-top:6px">${p.chain ? esc(p.chain.title) : "—"}</div></td>
+        <td>${p.openDoubts ? `<span class="pill amber"><span class="sdot"></span>${p.openDoubts}</span>` : `<span class="tiny muted">—</span>`}</td>
+        <td class="tiny muted">${esc(sinceIso(p.lastActivity))}</td>
+      </tr>`).join("")}</tbody>
+    </table></div>`;
+}
+
+function projectTabs(id, tab) {
+  const item = (href, key, label) =>
+    `<a href="${href}" class="${tab === key ? "on" : ""}">${label}</a>`;
+  const base = `#/p/${encodeURIComponent(id)}`;
+  return `<div class="tabs">${item(base, null, "Current")}${item(`${base}/history`, "history", "History")}</div>`;
+}
+
+function viewProject() {
+  const s = store.project;
+  if (!s) return `<div class="empty">Loading…</div>`;
+  const p = s.project;
+  return `<h1>${esc(p.name)}</h1>
+    <p class="sub mono">${esc(p.path)}</p>
+    ${projectTabs(p.id, null)}
+    <div class="row wrap" style="margin-bottom:24px">
+      ${statusPill(s.chain ? s.chain.status : "idle")}
+      <span class="pill">push: ${esc(p.pushPolicy)}</span>
+      ${p.verifyCmd ? `<span class="pill code">verify: ${esc(p.verifyCmd)}</span>` : ""}
+      ${p.remote ? `<span class="pill code">${esc(p.remote)}</span>` : ""}
+    </div>
+    ${s.run ? runCard(s.run) : `<div class="card"><div class="empty">No run in flight. Next: ${esc(s.state.next || "nothing queued")}</div></div>`}
+    ${s.doubts.length ? `<h2>Open doubts <em>${s.doubts.length}</em></h2>${s.doubts.map(doubtCard).join("")}` : ""}
+    <h2>Chain</h2>
+    <div class="card pad">${chainSteps(s.chain)}</div>
+    ${s.run ? `<h2>Timeline</h2><div class="card pad"><div class="timeline" id="timeline">${timelineRows()}</div></div>` : ""}
+    <h2>State</h2>
+    <div class="card pad"><dl class="kv">
+      <dt>Phase</dt><dd>${esc(s.state.phase)}</dd>
+      <dt>Next task</dt><dd>${esc(s.state.next || "—")}</dd>
+      <dt>Last decision</dt><dd>${s.state.lastDecision
+        ? `${esc(s.state.lastDecision.kind)} · <b>${esc(s.state.lastDecision.choice)}</b>
+           <span class="tiny muted">${esc(sinceIso(s.state.lastDecision.at))}</span>`
+        : "—"}</dd>
+    </dl></div>`;
+}
+
+function timelineRows() {
+  if (timeline.length === 0) return `<div class="muted">Waiting for the first event…</div>`;
+  return timeline.slice(-200).map((e) => `<div>
+    <span class="t">${esc(clock(e.ts))}</span>
+    <span class="k">${esc(e.type)}</span>
+    <span class="v">${esc(JSON.stringify(e.payload).slice(0, 160))}</span>
+  </div>`).join("");
+}
+
+function viewHistory() {
+  const h = store.history;
+  const s = store.project;
+  if (!h || !s) return `<div class="empty">Loading…</div>`;
+  return `<h1>${esc(s.project.name)}</h1>
+    <p class="sub mono">${esc(s.project.path)}</p>
+    ${projectTabs(s.project.id, "history")}
+    ${h.runs.length === 0 ? `<div class="card"><div class="empty">No runs yet.</div></div>` : `
+    <div class="card"><table>
+      <thead><tr><th>Task</th><th>Engine</th><th>Status</th><th>Started</th><th>Duration</th><th>Cost</th></tr></thead>
+      <tbody>${h.runs.map((r) => `<tr>
+        <td><b>${esc(r.task)}</b>${r.summary ? `<div class="tiny muted">${esc(r.summary.slice(0, 120))}</div>` : ""}
+          ${r.exitReason ? `<div class="tiny muted">exit: ${esc(r.exitReason)}</div>` : ""}</td>
+        <td class="tiny">${esc(r.engine)}${r.model ? `<div class="muted">${esc(r.model)}</div>` : ""}</td>
+        <td>${statusPill(r.status)}</td>
+        <td class="tiny muted">${esc(sinceIso(r.startedAt))}</td>
+        <td class="tiny num">${duration(r.durationS)}</td>
+        <td class="tiny num">${r.costUsd == null ? "—" : "$" + r.costUsd.toFixed(4)}</td>
+      </tr>`).join("")}</tbody>
+    </table></div>
+    <p class="tiny muted" style="margin-top:16px">${h.totals.runs} run(s)${
+      h.totals.costUsd ? ` · $${h.totals.costUsd.toFixed(4)} reported` : " · no cost reported"}</p>`}`;
+}
+
+function viewAgents() {
+  const a = store.agents;
+  if (!a) return `<div class="empty">Loading…</div>`;
+  return `<h1>Agents <em>${a.agents.length}</em></h1>
+    <p class="sub">Profiles loaded from the workspace. Editing them here arrives with the write
+      surface (AP-06, phase 10); for now they are files under <code>agents/</code>.</p>
+    <div class="card"><table>
+      <thead><tr><th>Id</th><th>Engine</th><th>Model</th><th>Policy</th><th>Advisor</th><th></th></tr></thead>
+      <tbody>${a.agents.map((p) => `<tr>
+        <td><b>${esc(p.id)}</b><div class="tiny muted">${esc(p.name || "")}</div>
+          ${p.error ? `<div class="tiny" style="color:var(--red-fg)">${esc(p.error)}</div>` : ""}</td>
+        <td>${p.engine ? esc(p.engine) : "—"}</td>
+        <td class="tiny">${p.model ? esc(p.model) : "—"}</td>
+        <td class="tiny">${p.policy ? esc(p.policy) : "—"}</td>
+        <td class="tiny">${p.advisor ? esc(p.advisor) : "—"}</td>
+        <td>${p.valid ? `<span class="pill green"><span class="sdot"></span>valid</span>`
+                      : `<span class="pill red"><span class="sdot"></span>rejected</span>`}</td>
+      </tr>`).join("")}</tbody>
+    </table></div>
+    <p class="tiny muted" style="margin-top:16px">Policy packs: ${a.packs.map((k) => `<code>${esc(k)}</code>`).join(" ") || "—"}</p>`;
+}
+
+function viewHealth() {
+  const h = store.health;
+  if (!h) return `<div class="empty">Loading…</div>`;
+  return `<h1>Health</h1>
+    <p class="sub">What the container, the database and the engines say about themselves.</p>
+    <div class="row wrap" style="margin-bottom:24px">
+      ${statusPill(h.status === "ok" ? "ok" : "verify_failed")}
+      <span class="pill">v${esc(h.version)}</span>
+      <span class="pill">up ${esc(duration(h.orchestrator.uptimeSec))}</span>
+      <span class="pill">network: ${esc(h.network)}</span>
+    </div>
+    <div class="card pad"><dl class="kv">
+      <dt>Database</dt><dd><code>${esc(h.database.path)}</code>
+        ${h.database.ok ? `<span class="pill green"><span class="sdot"></span>ok</span>`
+                        : `<span class="pill red"><span class="sdot"></span>${esc(h.database.error || "error")}</span>`}</dd>
+      <dt>Started</dt><dd>${esc(h.orchestrator.startedAt)}</dd>
+    </dl></div>
+    <h2>Engines</h2>
+    <div class="card"><table><thead><tr><th>Engine</th><th>Adapter</th><th>Detected</th><th>Auth</th></tr></thead>
+      <tbody>${h.engines.map((e) => `<tr>
+        <td><b>${esc(e.engine)}</b></td><td><code>${esc(e.adapter)}</code></td>
+        <td>${e.detected ? "yes" : "no"}</td>
+        <td>${e.auth ? `<span class="pill green"><span class="sdot"></span>${esc(e.authSource || "yes")}</span>`
+                     : `<span class="pill red"><span class="sdot"></span>not connected</span>`}</td>
+      </tr>`).join("")}</tbody></table></div>`;
+}
+
+/* ====================== router and data ====================== */
+function parseRoute() {
+  const hash = location.hash.replace(/^#/, "") || "/";
+  const parts = hash.split("/").filter(Boolean);
+  if (parts[0] === "p" && parts[1]) {
+    return { name: "/p", id: decodeURIComponent(parts[1]), tab: parts[2] ?? null };
+  }
+  return { name: `/${parts[0] ?? ""}`, id: null, tab: null };
+}
+
+const RENDER = {
+  "/": viewOverview,
+  "/projects": viewProjects,
+  "/p": () => (route.tab === "history" ? viewHistory() : viewProject()),
+  "/agents": viewAgents,
+  "/health": viewHealth,
+};
+
+function paint() {
+  const render = RENDER[route.name] ?? (() => `<div class="empty">Not found: ${esc(location.hash)}</div>`);
+  // The timeline is the one thing the user scrolls while it is being repainted every second.
+  const scrolled = $("timeline") ? $("timeline").scrollTop : null;
+  $("view").innerHTML = store.error
+    ? `<div class="note bad" style="margin-bottom:24px">${esc(store.error)}</div>${render()}`
+    : render();
+  if (scrolled !== null && $("timeline")) $("timeline").scrollTop = scrolled;
+
+  const active = route.name === "/p" ? "/projects" : route.name;
+  document.querySelectorAll("aside a[data-r]").forEach((a) => {
+    a.classList.toggle("on", a.getAttribute("data-r") === active);
+  });
+  const o = store.overview;
+  $("nav-projects").innerHTML = o && o.counts.openDoubts
+    ? `<span class="pill amber">${o.counts.openDoubts}</span>` : "";
+  $("nav-health").innerHTML = o && o.engines.some((e) => !e.auth || !e.detected)
+    ? `<span class="pill red">1</span>` : "";
+}
+
+/** Load whatever the current route needs, then paint. Failures are shown, never swallowed. */
+async function load() {
+  try {
+    if (route.name === "/p" && route.id) {
+      store.project = await api(`/api/projects/${encodeURIComponent(route.id)}`);
+      if (route.tab === "history") {
+        store.history = await api(`/api/projects/${encodeURIComponent(route.id)}/history?limit=50`);
+      }
+      watchRun(store.project.run ? store.project.run.id : null);
+    } else if (route.name === "/agents") {
+      store.agents = await api("/api/agents");
+    } else if (route.name === "/health") {
+      store.health = await api("/health");
+    } else {
+      store.overview = await api("/api/overview");
+    }
+    store.error = "";
+  } catch (err) {
+    store.error = err.message;
+  }
+  paint();
+}
+
+/**
+ * Tail one run's timeline. The named SSE event carries the run id, so the listener is swapped
+ * whenever the open run changes; the backlog comes from the REST endpoint so a run already in
+ * flight is not shown starting from the middle.
+ */
+async function watchRun(runId) {
+  if (runListener) {
+    if (stream) stream.removeEventListener(runListener.name, runListener.fn);
+    runListener = null;
+  }
+  timeline = [];
+  if (!runId) return;
+  try {
+    const seen = await api(`/api/runs/${encodeURIComponent(runId)}/events?limit=200`);
+    timeline = seen.events;
+  } catch { /* the run may have just ended; the stream will fill in */ }
+  const name = `run:${runId}`;
+  const fn = (message) => {
+    timeline.push(JSON.parse(message.data));
+    const node = $("timeline");
+    if (node) {
+      node.innerHTML = timelineRows();
+      node.scrollTop = node.scrollHeight;
+    }
+  };
+  runListener = { name, fn };
+  if (stream) stream.addEventListener(name, fn);
+  const node = $("timeline");
+  if (node) node.innerHTML = timelineRows();
+}
+
+/* ---------- SSE (WP-03) ---------- */
+function setConnection(state, label) {
+  const node = $("conn");
+  node.className = `conn ${state}`;
+  node.innerHTML = `<span class="sdot"></span> ${esc(label)}`;
+}
+
+let reconnectDelay = 1000;
+function connect() {
+  stream = new EventSource("/api/stream");
+
+  stream.addEventListener("open", () => {
+    reconnectDelay = 1000;
+    setConnection("live", "live");
+  });
+
+  stream.addEventListener("overview", (message) => {
+    // The overview backs two views directly and the sidebar counters everywhere else.
+    store.overview = JSON.parse(message.data);
+    paint();
+  });
+
+  stream.addEventListener("doubt", () => {
+    if (route.name === "/p") void load();
+  });
+
+  stream.addEventListener("system", () => {
+    if (route.name === "/p") void load();
+  });
+
+  if (runListener) stream.addEventListener(runListener.name, runListener.fn);
+
+  stream.onerror = () => {
+    setConnection("down", "reconnecting…");
+    stream.close();
+    // The browser reconnects EventSource on its own, but only for a live socket; a server
+    // restart needs a fresh one, with backoff so a container that is down is not hammered.
+    setTimeout(connect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, 15000);
+  };
+}
+
+/** The run card's clocks tick locally between events, so the panel never looks frozen. */
+setInterval(() => {
+  const run = route.name === "/p" && store.project ? store.project.run : null;
+  if (run) {
+    run.elapsedS += 1;
+    run.inactivityS += 1;
+    if (!document.hidden) paint();
+  }
+}, 1000);
+
+window.addEventListener("hashchange", () => {
+  route = parseRoute();
+  void load();
+});
+
+route = parseRoute();
+void load();
+connect();
+</script>
+</body>
 </html>

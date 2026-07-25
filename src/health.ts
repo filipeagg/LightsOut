@@ -31,6 +31,8 @@ export type EngineHealth = {
   auth: boolean;
   /** "subscription" | "api_key" | null — how auth was satisfied (NF-03). */
   authSource: "subscription" | "api_key" | null;
+  /** What the engine said when it last refused to work, if it did (§11.3). */
+  authError?: string;
   checkedAt: string;
 };
 
@@ -180,6 +182,8 @@ export class HealthProbe {
   private cache: EngineHealth[] | null = null;
   private cachedAt = 0;
   private readonly startedAt = new Date();
+  /** Engines that refused to work for real, whatever their status command claims (§11.3). */
+  private readonly failures = new Map<EngineName, string>();
 
   constructor(
     private readonly config: Config,
@@ -192,14 +196,38 @@ export class HealthProbe {
     this.cache = null;
   }
 
+  /**
+   * A run just died on this engine's credentials (§11.3).
+   *
+   * The status commands are not enough on their own: `claude auth status` happily reports
+   * `loggedIn: true` while the OAuth token behind it has expired, and the failure only shows up
+   * when a real request is made. So the observed failure wins over the probe until someone
+   * reconnects — that is what puts the engine in the panel's attention strip (OB-03).
+   */
+  noteAuthFailure(engine: EngineName, detail: string): void {
+    this.failures.set(engine, detail);
+    this.invalidate();
+  }
+
+  /** Called when a login completes or a run succeeds: the engine is demonstrably working. */
+  clearAuthFailure(engine: EngineName): void {
+    if (this.failures.delete(engine)) this.invalidate();
+  }
+
   async engines(force = false): Promise<EngineHealth[]> {
     const fresh = Date.now() - this.cachedAt < CACHE_TTL_MS;
     if (!force && this.cache && fresh) return this.cache;
 
-    const engines = await Promise.all([
+    const probed = await Promise.all([
       probeEngine("claude", this.config.adapterClaude, this.env),
       probeEngine("codex", this.config.adapterCodex, this.env),
     ]);
+    const engines = probed.map((engine) => {
+      const failure = this.failures.get(engine.engine);
+      return failure
+        ? { ...engine, auth: false, authSource: null, authError: failure }
+        : engine;
+    });
 
     // Re-probe on failure: only a fully healthy result is cached.
     const allGood = engines.every((e) => e.detected && e.auth);

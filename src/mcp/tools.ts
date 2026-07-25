@@ -15,10 +15,12 @@ import type { AgentsLoader } from "../agents/loader.js";
 import type { HealthProbe } from "../health.js";
 import type { Orchestrator } from "../orchestrator/orchestrator.js";
 import type { DoubtService } from "../orchestrator/doubts.js";
-import type { ChainRow, DoubtRow, ProjectRow, RunRow } from "../db/types.js";
+import type { ProjectRow } from "../db/types.js";
 import { createProject } from "../projects/scaffold.js";
 import { askEngine } from "../acp/advisor.js";
 import { conflict, failure, invalid, notFound, success, toolResult } from "./envelope.js";
+// One read model for both surfaces: the panel renders these exact shapes (DESIGN §12.0).
+import { activeRunFor, doubtView, projectListItem, projectStatusView } from "../views.js";
 
 export type McpDeps = {
   config: Config;
@@ -32,73 +34,6 @@ export type McpDeps = {
 
 const DOC_NAMES = ["STATE", "PLAN", "DECISIONS", "QUESTIONS"] as const;
 const levelSchema = z.enum(["quick", "full"]);
-
-function ageMinutes(iso: string): number {
-  return Math.round((Date.now() - new Date(iso).getTime()) / 60000);
-}
-
-function secondsSince(iso: string): number {
-  return Math.round((Date.now() - new Date(iso).getTime()) / 1000);
-}
-
-/** Shape a doubt for Desktop: options as buttons, second opinion visible (MC-03). */
-function doubtView(deps: McpDeps, doubt: DoubtRow) {
-  const task = deps.repos.tasks.get(doubt.task_id);
-  return {
-    id: doubt.id,
-    ref: doubt.ref,
-    projectId: doubt.project_id,
-    taskTitle: task?.title ?? "",
-    kind: doubt.kind,
-    status: doubt.status,
-    context: doubt.context,
-    blocks: doubt.blocks,
-    options: deps.repos.doubts.options(doubt),
-    recommendation: doubt.recommendation,
-    secondOpinion: deps.repos.doubts.secondOpinion(doubt),
-    ageMin: ageMinutes(doubt.created_at),
-  };
-}
-
-function activeRunFor(deps: McpDeps, projectId: string): RunRow | undefined {
-  return deps.repos.runs
-    .listActive()
-    .find((run) => deps.repos.tasks.get(run.task_id)?.project_id === projectId);
-}
-
-function runView(deps: McpDeps, run: RunRow, project: ProjectRow) {
-  const task = deps.repos.tasks.get(run.task_id);
-  const last = deps.repos.events.lastAction(run.id);
-  const timeoutMin =
-    task?.level === "quick" ? deps.config.timeoutQuickMin : deps.config.timeoutFullMin;
-  return {
-    id: run.id,
-    taskId: run.task_id,
-    status: run.status,
-    engine: run.engine,
-    model: run.model,
-    elapsedS: secondsSince(run.started_at),
-    inactivityS: last ? secondsSince(last.ts) : secondsSince(run.started_at),
-    lastAction: last ? { type: last.type, payload: JSON.parse(last.payload) } : null,
-    timeoutS: timeoutMin * 60,
-    projectId: project.id,
-  };
-}
-
-function chainView(deps: McpDeps, chain: ChainRow) {
-  return {
-    id: chain.id,
-    title: chain.title,
-    status: chain.status,
-    tasks: deps.repos.tasks.listByChain(chain.id).map((t) => ({
-      id: t.id,
-      position: t.position,
-      title: t.title,
-      status: t.status,
-      agentId: t.agent_id,
-    })),
-  };
-}
 
 function docPath(project: ProjectRow, doc: string): string {
   return path.join(project.path, "doc", `${doc}.md`);
@@ -156,19 +91,9 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
     "All projects with their active run and open doubt counts.",
     { archived: z.boolean().optional() },
     async ({ archived }) => ({
-      projects: repos.projects.list({ includeArchived: archived ?? false }).map((p) => {
-        const chain = repos.chains.activeForProject(p.id);
-        const run = activeRunFor(deps, p.id);
-        const history = repos.runs.history({ projectId: p.id, limit: 1 });
-        return {
-          id: p.id,
-          name: p.name,
-          status: chain?.status ?? "idle",
-          activeRun: run ? { id: run.id, status: run.status } : null,
-          openDoubts: repos.doubts.listOpen(p.id).length,
-          lastActivity: history[0]?.started_at ?? p.created_at,
-        };
-      }),
+      projects: repos.projects
+        .list({ includeArchived: archived ?? false })
+        .map((p) => projectListItem(deps, p)),
     }),
   );
 
@@ -201,36 +126,7 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
     "project_status",
     "Everything about one project in a single call: chain, current run, doubts and state (MC-06).",
     { projectId: z.string().min(1) },
-    async ({ projectId }) => {
-      const row = project(projectId);
-      const chain = repos.chains.activeForProject(row.id) ?? repos.chains.listByProject(row.id)[0];
-      const run = activeRunFor(deps, row.id);
-      const decision = repos.decisions.latest(row.id);
-      const open = repos.doubts.listOpen(row.id);
-      const next = chain ? repos.tasks.nextQueued(chain.id) : undefined;
-      return {
-        project: {
-          id: row.id,
-          name: row.name,
-          path: row.path,
-          pushPolicy: row.push_policy,
-          verifyCmd: row.verify_cmd,
-          remote: row.repo_remote,
-        },
-        chain: chain ? chainView(deps, chain) : null,
-        run: run ? runView(deps, run, row) : null,
-        doubts: open.map((d) => doubtView(deps, d)),
-        state: {
-          phase: chain
-            ? `chain "${chain.title}" ${repos.tasks.listByChain(chain.id).filter((t) => t.status === "ok").length}/${repos.tasks.listByChain(chain.id).length} (${chain.status})`
-            : "no chain",
-          lastDecision: decision
-            ? { kind: decision.kind, choice: decision.choice, at: decision.created_at }
-            : null,
-          next: next ? next.title : null,
-        },
-      };
-    },
+    async ({ projectId }) => projectStatusView(deps, project(projectId)),
   );
 
   tool("list_agents", "Agent profiles, valid and rejected (AP-02).", {}, async () => {

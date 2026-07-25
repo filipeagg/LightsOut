@@ -39,8 +39,12 @@ docker run -d --name lightsout --restart unless-stopped \
   lightsout:local
 ```
 
-Every setting has a working default (DESIGN §3.4), so there is no file to edit. Projects live in
-the `lightsout-workspace` volume (RT-02).
+Every setting has a working default (DESIGN §3.4), so there is no file to edit.
+
+Note: RT-02 now makes the workspace a host folder (`%USERPROFILE%\Documents\LightsOut` by
+default) so projects are openable in your own editor. That migration has not landed yet — the
+command above still mounts the `lightsout-workspace` volume, which is what this machine runs.
+This file will change with the code, not before it.
 
 ### 3. Connect the engines (once per machine)
 
@@ -113,9 +117,10 @@ To rebuild the Claude Desktop extension after changing `extension/`:
 .\scripts\windows\Build-Extension.ps1     # writes dist/lightsout.mcpb
 ```
 
-Only if you want projects in a host folder instead of the managed volume: set
-`LIGHTSOUT_WORKSPACE` and swap the two workspace volume lines in `docker-compose.yml`. Prefer a
-native Linux path; a mounted Windows drive is several times slower for git and file I/O.
+To put projects in a host folder ahead of the RT-02 migration: set `LIGHTSOUT_WORKSPACE` and swap
+the two workspace volume lines in `docker-compose.yml`. This becomes the default once the
+migration lands; on Docker Desktop a mounted Windows folder is slower than the volume for git and
+file I/O, which is a price worth paying to have the projects where you can see them.
 
 ## Optional: enforce the egress allowlist (RT-05)
 
@@ -131,12 +136,15 @@ docker compose -f docker-compose.yml -f docker-compose.secure.yml --profile secu
 - `.env` — ignored by git, written per machine.
 - Engine credentials — in Docker volumes; every machine does its own login.
 - The SQLite database — a Docker volume; it is that machine's history.
-- The workspace volume (`projects/`, `agents/`) — share projects through their git remotes
-  (PM-05), not by copying volumes. From phase 8 the panel can also export a project as a zip or
-  sync it to a host folder (SU-06).
-- Agent profiles and policy packs live in the workspace, not in the repo. A fresh machine starts
-  from `examples/agents/`, copied on first boot when `agents/` is empty. Keep tuned profiles in
-  their own repository if you want them on several machines.
+- The workspace (`projects/`, `agents/`, and from phase 9 `templates/`, `knowledge/`,
+  `vault.yaml`) — share projects through their git remotes (PM-05), not by copying volumes. The
+  panel can also export a project as a zip (SU-06).
+- `vault.yaml` — credentials for API probing (VT-01). Git-ignored by design; it never leaves the
+  machine and never enters the database.
+- Agent profiles, policy packs and project templates: from phase 9 the library ships inside the
+  image (BA-01, TP-02), so a fresh machine has all of it with no copying step. The workspace holds
+  only your overrides, and an override shadows the builtin of the same id. Today it still works
+  the old way: `examples/agents/` is copied on first boot when `agents/` is empty.
 
 ## Troubleshooting
 

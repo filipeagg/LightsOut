@@ -74,7 +74,10 @@ describe("LoginFlows", () => {
 
   it("cancels a flow the user walked away from", async () => {
     const flows = new LoginFlows(probe(true), {
-      login: { claude: ["sh", "-c", "echo 'https://example.test/wait'; sleep 60"] },
+      // `exec sleep`, not `sleep`: without it the shell forks the sleep, SIGTERM kills only
+      // the shell, and the orphan keeps the inherited stdout open — so node's `close` event,
+      // which waits for the streams as well as the exit, does not arrive until the sleep ends.
+      login: { claude: ["sh", "-c", "echo 'https://example.test/wait'; exec sleep 60"] },
     });
     const id = await flows.start("claude");
     const finished = collect(flows, id);

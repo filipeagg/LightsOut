@@ -20,7 +20,9 @@ export type TaskStatus =
 /** Runs share the task states plus waiting_human, and never sit in queued. */
 export type RunStatus = Exclude<TaskStatus, "queued"> | "waiting_human";
 
-export type DoubtKind = "functional" | "permission";
+export type DoubtKind = "functional" | "permission" | "gate";
+export type PhaseGate = "auto" | "human";
+export type PhaseStatus = "pending" | "running" | "done" | "failed" | "skipped";
 export type DoubtStatus = "open" | "answered" | "closed";
 export type DecisionKind = "human" | "provisional" | "auto";
 export type PermissionVerdict = "allow" | "deny" | "require_human" | "provisional";
@@ -44,6 +46,11 @@ export type EventType =
   | "git.tag"
   | "git.push"
   | "system.auth"
+  | "phase.state"
+  | "config.changed"
+  | "knowledge.attached"
+  | "knowledge.detached"
+  | "vault.read"
   | "system";
 
 export type ProjectRow = {
@@ -54,8 +61,44 @@ export type ProjectRow = {
   push_policy: PushPolicy;
   policy_pack: string;
   verify_cmd: string | null;
+  template_id: string | null;
   archived: number;
   created_at: string;
+};
+
+export type ProjectPhaseRow = {
+  id: string;
+  project_id: string;
+  position: number;
+  phase_id: string;
+  title: string;
+  agent_id: string;
+  instructions: string;
+  deliverable: string | null;
+  verify_cmd: string | null;
+  gate: PhaseGate;
+  optional: number;
+  repeatable: number;
+  status: PhaseStatus;
+  task_id: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+};
+
+export type ProjectKnowledgeRow = {
+  project_id: string;
+  base_id: string;
+  kind: string;
+  writable: number;
+  attached_at: string;
+};
+
+export type VaultAuditRow = {
+  id: number;
+  run_id: string;
+  ts: string;
+  entry_id: string;
+  fields: string;
 };
 
 export type ChainRow = {

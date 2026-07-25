@@ -12,6 +12,9 @@ import { DoubtsRepo } from "./doubts.js";
 import { DecisionsRepo } from "./decisions.js";
 import { AuditRepo } from "./audit.js";
 import { SettingsRepo } from "./settings.js";
+import { PhasesRepo } from "./phases.js";
+import { ProjectKnowledgeRepo } from "./knowledge.js";
+import { VaultAuditRepo } from "./vault-audit.js";
 
 export type Repos = {
   db: Db;
@@ -24,6 +27,9 @@ export type Repos = {
   decisions: DecisionsRepo;
   audit: AuditRepo;
   settings: SettingsRepo;
+  phases: PhasesRepo;
+  projectKnowledge: ProjectKnowledgeRepo;
+  vaultAudit: VaultAuditRepo;
 };
 
 export function createRepos(db: Db): Repos {
@@ -38,6 +44,9 @@ export function createRepos(db: Db): Repos {
     decisions: new DecisionsRepo(db),
     audit: new AuditRepo(db),
     settings: new SettingsRepo(db),
+    phases: new PhasesRepo(db),
+    projectKnowledge: new ProjectKnowledgeRepo(db),
+    vaultAudit: new VaultAuditRepo(db),
   };
 }
 
@@ -51,4 +60,7 @@ export {
   DecisionsRepo,
   AuditRepo,
   SettingsRepo,
+  PhasesRepo,
+  ProjectKnowledgeRepo,
+  VaultAuditRepo,
 };

@@ -714,10 +714,15 @@ Docker Desktop's virtual machine is an implementation detail the user does not m
 scripts locate `docker.exe` themselves, start Docker Desktop when it is not running, and report
 state by reading `/health` instead of asking the user to interpret anything.
 
-`Connect-ClaudeDesktop.ps1` exists because editing `claude_desktop_config.json` by hand does not
-survive: Claude Desktop rewrites that file with its own preferences when it exits, so an edit
-made while it runs is lost. The script waits for the process to disappear, patches the file with
-the absolute path of `docker.exe`, keeps a `.bak` and reopens the app.
+Connecting Claude Desktop is a URL, not a file. Recent builds manage MCP servers through
+connectors and extensions and never read `claude_desktop_config.json`, so the documented path is
+pasting `http://127.0.0.1:8484/mcp` into the app's custom-connector dialog: no bridge process, no
+`docker exec`, nothing to edit. The wizard shows the URL with a copy button.
+
+`Connect-ClaudeDesktop.ps1` and `dist/mcp/stdio-bridge.js` remain for builds that still read the
+config file. The script waits for the app to exit before patching, because Claude Desktop
+rewrites that file with its own preferences on exit and an edit made while it runs is silently
+lost — verified the hard way on this machine.
 
 Maintainer verification runs the same bash gates against Docker Desktop through Git Bash, with
 `MSYS_NO_PATHCONV=1` so container paths survive `docker exec` verbatim. No WSL, no integration.

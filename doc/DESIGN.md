@@ -706,6 +706,22 @@ each independently repeatable later from `#/health` and `#/settings`:
 4. **First project.** Name, optional git remote, optional verify command; scaffolds through
    the same code path as `create_project` (PM-01).
 
+### 14.3b Windows entry points (SU-07, SU-09, SU-10)
+
+Windows users get Docker Desktop and four numbered files under `scripts/windows/`, each a
+double-click: start, connect Claude, connect Codex, connect Claude Desktop. WSL never appears —
+Docker Desktop's virtual machine is an implementation detail the user does not manage. The
+scripts locate `docker.exe` themselves, start Docker Desktop when it is not running, and report
+state by reading `/health` instead of asking the user to interpret anything.
+
+`Connect-ClaudeDesktop.ps1` exists because editing `claude_desktop_config.json` by hand does not
+survive: Claude Desktop rewrites that file with its own preferences when it exits, so an edit
+made while it runs is lost. The script waits for the process to disappear, patches the file with
+the absolute path of `docker.exe`, keeps a `.bak` and reopens the app.
+
+Maintainer verification runs the same bash gates against Docker Desktop through Git Bash, with
+`MSYS_NO_PATHCONV=1` so container paths survive `docker exec` verbatim. No WSL, no integration.
+
 ### 14.4 Login without a terminal (SU-04)
 
 `POST /api/setup/login/:engine` spawns the engine CLI login inside the container and returns
@@ -714,9 +730,15 @@ and code parsed from the CLI output, then the final state from a fresh auth prob
 
 The callback needs care. Both CLIs bind their loopback listener inside the container, which a
 published port cannot reach (the mapping arrives on the container's external interface). A
-small TCP forwarder in the orchestrator process listens on the container's non-loopback
-address, port 1455, and pipes to `127.0.0.1:1455`; the published port then works. The
-forwarder only runs while a login flow is active and needs no new dependency (`node:net`).
+small TCP forwarder (`src/net/forwarder.ts`, `node:net`, no new dependency) listens on the
+container's non-loopback address, port 1455, and pipes to `127.0.0.1:1455`; the published port
+then works. It runs only while a login flow is active.
+
+The same forwarder serves the scripted path: `dist/cli/login.js <engine>` starts it, runs the
+engine's login with inherited stdio and reports the resulting auth state. That is what
+`scripts/windows/Connect-Engine.ps1` calls through `docker exec -it`, so a login needs neither
+host networking nor a second container, and behaves identically on Docker Desktop and on a
+Linux engine.
 
 ### 14.5 Taking projects out of the managed volume (SU-06)
 

@@ -10,6 +10,11 @@
 # is never left waiting on the 24 h slow clock.
 set -uo pipefail
 
+# Git Bash on Windows rewrites /container/paths into Windows paths; container paths must
+# survive verbatim through docker exec.
+export MSYS_NO_PATHCONV=1
+export MSYS2_ARG_CONV_EXCL='*'
+
 cd "$(dirname "$0")/../.."
 
 CONTAINER="${LO_CONTAINER:-lightsout}"

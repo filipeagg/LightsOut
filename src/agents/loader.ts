@@ -9,7 +9,6 @@
 import { cp, mkdir, readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { watch, type FSWatcher } from "node:fs";
 // js-yaml 5 is ESM with named exports only: there is no default export.
 import { load as loadYaml } from "js-yaml";
 import { agentProfileSchema, type AgentProfile, type RejectedProfile } from "./schema.js";
@@ -66,8 +65,10 @@ export class AgentsLoader {
     rejected: [],
     fragments: new Map(),
   };
-  private watcher: FSWatcher | undefined;
-  private reloadTimer: NodeJS.Timeout | undefined;
+  private pollTimer: NodeJS.Timeout | undefined;
+  /** Fingerprint of the last loaded tree; a change in it is what triggers a reload. */
+  private fingerprint = "";
+  private polling = false;
 
   constructor(
     private readonly workspace: string,
@@ -187,7 +188,41 @@ export class AgentsLoader {
     }
 
     this.snapshot = { profiles, packs, rejected, fragments };
+    this.fingerprint = await this.treeFingerprint();
     return { loaded: profiles.size, packs: packs.size, rejected, seeded };
+  }
+
+  /**
+   * Cheap signature of everything the loader reads: path, size and mtime of each file under
+   * `agents/`. Bind mounts do not deliver reliable inotify events, so this is compared on a
+   * poll instead of trusting the filesystem to tell us (AP-03, DESIGN §14.2).
+   */
+  private async treeFingerprint(): Promise<string> {
+    const parts: string[] = [];
+    const walk = async (dir: string): Promise<void> => {
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          await walk(full);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        try {
+          const info = await stat(full);
+          parts.push(`${full}:${info.size}:${info.mtimeMs}`);
+        } catch {
+          // vanished between readdir and stat: the next poll will see the final state
+        }
+      }
+    };
+    await walk(this.agentsDir);
+    return parts.join("\n");
   }
 
   /** Resolved instructions: fragments first, then the profile's own text (AP-04). */
@@ -199,24 +234,38 @@ export class AgentsLoader {
     return parts.join("\n\n");
   }
 
-  /** Pick up changes without a restart (AP-03); debounced to survive editor saves. */
-  startWatching(debounceMs = 300): void {
-    if (this.watcher) return;
+  /**
+   * Pick up changes without a restart (AP-03). Polls the fingerprint every `pollMs` instead of
+   * subscribing to filesystem events, which a Windows bind mount does not deliver reliably.
+   */
+  startWatching(pollMs = 2000): void {
+    if (this.pollTimer) return;
+    this.pollTimer = setInterval(() => {
+      void this.pollOnce();
+    }, pollMs);
+    this.pollTimer.unref?.();
+  }
+
+  /** One poll cycle: reload only when the tree actually changed. Exposed for tests. */
+  async pollOnce(): Promise<boolean> {
+    if (this.polling) return false;
+    this.polling = true;
     try {
-      this.watcher = watch(this.agentsDir, { recursive: true }, () => {
-        if (this.reloadTimer) clearTimeout(this.reloadTimer);
-        this.reloadTimer = setTimeout(() => {
-          void this.load().then((report) => this.onReload?.(report));
-        }, debounceMs);
-      });
+      const next = await this.treeFingerprint();
+      if (next === this.fingerprint) return false;
+      const report = await this.load();
+      this.onReload?.(report);
+      return true;
     } catch {
-      // Watching is best-effort: reload_agents (AP-03) always works.
+      // A transient read error must not kill the interval: the next poll retries.
+      return false;
+    } finally {
+      this.polling = false;
     }
   }
 
   stopWatching(): void {
-    if (this.reloadTimer) clearTimeout(this.reloadTimer);
-    this.watcher?.close();
-    this.watcher = undefined;
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pollTimer = undefined;
   }
 }

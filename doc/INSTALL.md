@@ -34,17 +34,24 @@ On macOS or Linux, or if you prefer a command:
 ```bash
 docker run -d --name lightsout --restart unless-stopped \
   -p 127.0.0.1:8484:8484 -p 127.0.0.1:1455:1455 \
-  -v lightsout-db:/data -v lightsout-workspace:/workspace \
+  -v lightsout-db:/data -v "$HOME/LightsOut:/workspace" \
   -v claude-auth:/home/app/.claude -v codex-auth:/home/app/.codex \
   lightsout:local
 ```
 
 Every setting has a working default (DESIGN §3.4), so there is no file to edit.
 
-Note: RT-02 now makes the workspace a host folder (`%USERPROFILE%\Documents\LightsOut` by
-default) so projects are openable in your own editor. That migration has not landed yet — the
-command above still mounts the `lightsout-workspace` volume, which is what this machine runs.
-This file will change with the code, not before it.
+The workspace is a folder on your own machine (RT-02): `%USERPROFILE%\Documents\LightsOut` on
+Windows, `~/LightsOut` elsewhere. Projects, agent profiles, templates and knowledge bases live
+there, so you can open a project in your own editor without any export step. Set
+`LIGHTSOUT_WORKSPACE` to put it somewhere else. The one rule: do not hand-edit a project while a
+run is active on it — the panel shows which projects are busy.
+
+Headless installs that have nobody to open the folder can keep the managed volume:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.volume.yml up -d
+```
 
 ### 3. Connect the engines (once per machine)
 
@@ -117,10 +124,13 @@ To rebuild the Claude Desktop extension after changing `extension/`:
 .\scripts\windows\Build-Extension.ps1     # writes dist/lightsout.mcpb
 ```
 
-To put projects in a host folder ahead of the RT-02 migration: set `LIGHTSOUT_WORKSPACE` and swap
-the two workspace volume lines in `docker-compose.yml`. This becomes the default once the
-migration lands; on Docker Desktop a mounted Windows folder is slower than the volume for git and
-file I/O, which is a price worth paying to have the projects where you can see them.
+On Docker Desktop a mounted Windows folder is slower than a managed volume for git and file I/O.
+That is the price of having the projects where you can see them; if a machine does not need that,
+`docker-compose.volume.yml` gives the volume back.
+
+Compose declares its volumes with explicit names, so `docker compose up` and
+`Start-LightsOut.ps1` mount the same `lightsout-db`, `claude-auth` and `codex-auth` and one
+installation is one set of credentials.
 
 ## Optional: enforce the egress allowlist (RT-05)
 

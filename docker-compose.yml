@@ -8,11 +8,9 @@ services:
       - "127.0.0.1:${LO_PORT:-8484}:8484"      # panel + API + /mcp (WP-09)
       - "127.0.0.1:1455:1455"                  # engine OAuth callback (SU-04, phase 8)
     volumes:
-      # RT-02: managed volume by default, so a target machine configures nothing.
-      # Advanced: set LIGHTSOUT_WORKSPACE and swap the two lines below.
-      - lightsout-workspace:/workspace
-      # - ${LIGHTSOUT_WORKSPACE}:/workspace
-      # - ${LO_EXPORT_DIR}:/export              # optional sync target (SU-06)
+      # RT-02: a folder on the user's own machine, so projects are openable in their own editor.
+      # Headless installs use the managed volume: add -f docker-compose.volume.yml.
+      - ${LIGHTSOUT_WORKSPACE:-~/LightsOut}:/workspace
       - lightsout-db:/data                      # DB-01
       - claude-auth:/home/app/.claude           # RT-03
       - codex-auth:/home/app/.codex             # RT-03
@@ -21,6 +19,7 @@ services:
       - LO_BIND=0.0.0.0
       - LO_DB=/data/lightsout.db
       - LO_WORKSPACE=/workspace
+      - LO_WORKSPACE_MODE=${LO_WORKSPACE_MODE:-host}
     env_file: .env
 
   # Egress allowlist proxy (RT-05). Enable with: docker compose --profile secure up -d
@@ -35,8 +34,12 @@ services:
     expose:
       - "8888"
 
+# Explicit names: compose would otherwise prefix them with the project directory name, and
+# scripts/windows/Start-LightsOut.ps1 (plain docker run) would mount different, empty volumes.
 volumes:
   lightsout-db:
-  lightsout-workspace:
+    name: lightsout-db
   claude-auth:
+    name: claude-auth
   codex-auth:
+    name: codex-auth

@@ -23,7 +23,9 @@ import type { PolicyEngine } from "../policy/engine.js";
 import type { Verdict } from "../policy/schema.js";
 import type { ProjectRow, RunRow, TaskRow } from "../db/types.js";
 import type { AgentProfile } from "../agents/schema.js";
+import path from "node:path";
 import { spawnAdapter, type AdapterProcess } from "./adapter.js";
+import { SCRATCH_REL } from "../policy/classify.js";
 import { parseResult, type AgentResult, type DoubtPayload } from "./result.js";
 import { composePrompt, readDocContext } from "./prompt.js";
 
@@ -532,14 +534,19 @@ export class RunSession {
     this.armHardTimeout();
     this.armInactivity();
 
+    // Anything installed into the scratch directory is importable without the agent having to
+    // work out how (ST-03b): `pip install --target .lightsout/tmp/deps X` then `import X`.
+    const runEnv: Record<string, string> = {
+      PYTHONPATH: `${path.join(project.path, SCRATCH_REL, "deps")}:${process.env.PYTHONPATH ?? ""}`
+        .replace(/:$/, ""),
+      ...(this.deps.vaultEnv ?? {}),
+    };
     const adapter = spawnAdapter({
       command: this.deps.adapterCommand,
       cwd: project.path,
       // Vault values reach the agent only here: they are excluded from every other run's
       // environment, so an agent with no network grant cannot see them at all (§18).
-      ...(this.deps.vaultEnv && Object.keys(this.deps.vaultEnv).length > 0
-        ? { env: this.deps.vaultEnv }
-        : {}),
+      env: runEnv,
       ...(this.deps.onStderr ? { onStderr: this.deps.onStderr } : {}),
     });
     this.adapter = adapter;

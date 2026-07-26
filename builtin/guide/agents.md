@@ -35,6 +35,7 @@ reviewer: reviews a change. codex, read-only.
 software-auditor: audits delivered code into doc/AUDIT.md. codex, read-only, runs late.
 qa-engineer: writes and runs tests, reports doc/QA-REPORT.md. test pack.
 contract-prober: finds out how an external API really behaves, into doc/CONTRACTS.md. probe pack, network.
+integrator: builds and runs an integration — calls the API and writes the client. integrate pack: network, writes anywhere in the project, the vault.
 codebase-analyst: reads a system and writes the knowledge base. curate pack.
 answerer: answers a question from attached knowledge. no-write.
 coordinator: owns a project across phases; usually embodied by you rather than launched.

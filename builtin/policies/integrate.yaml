@@ -1,0 +1,28 @@
+# integrate: the pack for work that talks to a real system and writes the code that talks to it
+# (§19). It exists because none of the other seven combined the three things an integration needs:
+# `probe` has the network but confines writes to probes/ and doc/, `default` writes anywhere in the
+# project but denies the network, and no pack allowed both. The gap was found the hard way — a task
+# that had to call an API, install a library and write an .xlsx had nowhere to run.
+#
+# Dependencies stay a human call (ST-03): a library installed into the image changes the build for
+# every later run. A library installed into .lightsout/tmp/deps does not, and classifies as
+# project_write, so the ordinary way to get one needs no gate at all (ST-03b).
+id: integrate
+vault:
+  test_only_required: false
+rules:
+  - { class: project_read, verdict: allow }
+  - { class: project_write, verdict: allow }
+  - { class: exec_check, verdict: allow }
+  - { class: script_exec, verdict: allow, reason: "own tooling; the body is inspected (PE-07)" }
+  - { class: network, verdict: allow, reason: "the point of this agent; egress is allowlisted (RT-05)" }
+  - { class: git_local, verdict: allow }
+  - { class: deps_install, verdict: require_human, reason: "a dependency changes the build for every later run (ST-03); install into .lightsout/tmp/deps instead" }
+  - { class: delete, verdict: require_human }
+  - { class: git_push, verdict: deny, reason: "pushing is the orchestrator's job (PM-05)" }
+  - { class: knowledge_write, verdict: deny }
+  - { class: outside_workspace, verdict: deny }
+  - { class: credentials, verdict: require_human }
+  - { class: publish_external, verdict: deny }
+  - { class: other, verdict: require_human }
+matchers: {}

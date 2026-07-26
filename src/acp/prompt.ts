@@ -9,8 +9,11 @@ import { SENTINEL_CLOSE, SENTINEL_OPEN } from "./result.js";
 import { SCRATCH_REL } from "../policy/classify.js";
 import { HUMAN_MARKER } from "../projects/deliverable.js";
 
-/** 3: machine-first documents (BA-07). 2: tooling licence and scratch directory (PE-07, PE-08). */
-export const PROTOCOL_VERSION = 3;
+/**
+ * 4: where to install a library, and what never to try (ST-03b). 3: machine-first documents
+ * (BA-07). 2: the tooling licence and the scratch directory (PE-07, PE-08).
+ */
+export const PROTOCOL_VERSION = 4;
 
 /** Constant, versioned protocol block (DESIGN §6.2 block 2). */
 export const PROTOCOL_BLOCK = `# LightsOut protocol v${PROTOCOL_VERSION}
@@ -28,6 +31,15 @@ credentials, installs dependencies or deletes files is judged as if you had type
 yourself. Put temporary files in \`${SCRATCH_REL}\`; it is emptied when this run ends, and it is
 the one place you may write regardless of any other restriction on where you can write.
 Anything you leave elsewhere is committed and reported.
+
+If you need a Python library, install it into the scratch space and import it — no permission
+needed, and it is already on your PYTHONPATH:
+
+  pip install --target ${SCRATCH_REL}/deps <package>
+
+Never run \`ensurepip\`, \`python -m venv\` over the system interpreter, or anything else that
+writes outside the project: that is denied by a rule no permission can lift, and the toolchain you
+need is already installed.
 
 Every Markdown file this system writes and reads back — your deliverable, doc/STATE.md,
 doc/PLAN.md, doc/DECISIONS.md, doc/QUESTIONS.md, doc/OPEN-QUESTIONS.md, knowledge documents — is

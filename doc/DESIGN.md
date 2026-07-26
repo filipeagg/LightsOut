@@ -1257,6 +1257,12 @@ documents are read from `<workspace>/<source>/` on every load, so a file dropped
 the file explorer is visible to the next session without touching the panel. The path is resolved
 against the workspace root and refused if it escapes it, points at `knowledge/` itself or is
 absolute: the container only sees the workspace (RT-02), and a manifest arrives from a browser.
+
+`GET /api/knowledge/folders` walks the workspace tree — depth first, alphabetical, no depth limit,
+bounded at 2000 folders — reporting each folder's depth, how many text documents it holds directly
+and whether it has children, and the panel renders that as a tree to pick from. There is no folder
+dialog to offer instead: a browser cannot hand a server a path, and a folder elsewhere on the host
+is not on the container's filesystem at all.
 A linked base is never writable — `writableKnowledge` refuses it (KB-05), because the curation
 project would be editing a folder that something else owns.
 

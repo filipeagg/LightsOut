@@ -241,6 +241,8 @@ let route = { name: "/", id: null, tab: null };
 let showArchived = false;
 /** Whether the phase editor shows the JSON view instead of the form (TP-04). */
 let editingJson = false;
+/** The folder chosen in the open knowledge form; `null` means "not opened yet" (KB-08). */
+let sourcePick = null;
 let stream = null;
 let runListener = null;
 let timeline = [];
@@ -284,6 +286,7 @@ async function act(method, path, payload) {
   editing = null;
   draft = null;
   editingJson = false;
+  sourcePick = null;
   await load();
 }
 
@@ -1188,7 +1191,7 @@ function viewKnowledge() {
       with its base and its kind, because a preference and a constraint are not the same
       thing (KB-02).</p>
     <div class="row" style="margin-bottom:16px">
-      <button class="btn primary" onclick="editing='new-base';paint()">New base</button>
+      <button class="btn primary" onclick="editBase('new-base')">New base</button>
     </div>
     ${editing === "new-base" ? baseForm(null) : ""}
     ${k.bases
@@ -1203,7 +1206,7 @@ function viewKnowledge() {
             b.updated ? ` · updated ${esc(b.updated)}` : ""}${
             b.source ? ` · read from <code>${esc(b.source)}</code>` : ""}</div></div>
         <div class="row" style="gap:6px">
-          <button class="btn sm" onclick="editing='base:${esc(b.id)}';paint()">Edit</button>
+          <button class="btn sm" onclick="editBase('base:${esc(b.id)}')">Edit</button>
           ${b.source
             ? ""
             : `<button class="btn sm" onclick="editing='doc:${esc(b.id)}';paint()">Add a document</button>`}
@@ -1244,12 +1247,22 @@ function documentList(b) {
  * "read documents from" is the switch between a base that holds its own documents and one that
  * points at a folder already in the workspace.
  */
+/** Open a base form fresh: a folder chosen in another base's form must not leak into this one. */
+function editBase(which) {
+  sourcePick = null;
+  editing = which;
+  paint();
+}
+
 function baseForm(b) {
   const isNew = b === null;
   const base = b ?? { id: "", name: "", kind: "technical", description: "", tags: [], source: null };
   const kinds = ["technical", "functional", "organisational", "market", "other"];
   const folders = store.folders ? store.folders.folders : [];
-  const known = base.source && !folders.includes(base.source) ? [base.source] : [];
+  // A base whose folder has since been removed still shows it, flagged: silently unlinking it
+  // would hide the reason its documents disappeared.
+  const known =
+    base.source && !folders.some((f) => f.path === base.source) ? [base.source] : [];
   return `<div class="card pad" style="margin-top:12px;margin-bottom:16px">
     <div class="row wrap" style="gap:16px">
       ${isNew
@@ -1262,23 +1275,76 @@ function baseForm(b) {
       <label class="tiny">Tags<br><input id="kb-tags" value="${esc((base.tags || []).join(", "))}" placeholder="erp, legacy"></label>
     </div>
     <label class="tiny">Description<br><input id="kb-description" value="${esc(base.description || "")}" style="width:100%"></label>
-    <label class="tiny" style="display:block;margin-top:12px">Read documents from<br>
-      <select id="kb-source">
-        <option value="">this base's own folder (knowledge/${esc(base.id || "<id>")})</option>
-        ${[...known, ...folders]
-          .map((f) => `<option value="${esc(f)}" ${f === base.source ? "selected" : ""}>${esc(f)}</option>`)
-          .join("")}
-      </select></label>
-    <p class="tiny muted" style="margin-top:6px">A folder here stays the source of truth: drop a
-      <code>.md</code> or <code>.txt</code> in it and the next session sees it. Only folders inside
-      the workspace are offered, because that is all the container can see. A linked base cannot be
-      the writable one (KB-05).</p>
+    <div class="micro" style="margin-top:16px">Read documents from</div>
+    ${folderTree(base, folders, known)}
+    <p class="tiny muted" style="margin-top:8px">A folder here stays the source of truth: drop a
+      <code>.md</code> or <code>.txt</code> in it and the next session sees it. Only the workspace
+      is listed, and not out of caution — a browser cannot hand over a folder path, and the
+      container's filesystem <em>is</em> the workspace (RT-02), so a folder elsewhere on the
+      computer is absent rather than forbidden. A linked base cannot be the writable one (KB-05).</p>
     <div class="row" style="gap:8px;margin-top:12px">
       <button class="btn primary" onclick="saveBase(${isNew ? "null" : `'${esc(base.id)}'`})">
         ${isNew ? "Create" : "Save"}</button>
       <button class="btn" onclick="editing=null;paint()">Cancel</button>
     </div>
   </div>`;
+}
+
+/**
+ * The workspace tree, as a list of radio rows indented by depth (KB-08). A tree of radios rather
+ * than a `<select>` because the whole point is to see where a folder sits and how many documents
+ * it holds — a flat dropdown of paths shows neither. The chosen path is kept in a hidden input, so
+ * `saveBase` reads it exactly like every other field.
+ */
+function folderTree(base, folders, known) {
+  if (sourcePick === null) sourcePick = base.source || "";
+  const chosen = sourcePick;
+  const row = (value, label, extra, depth) =>
+    `<label class="row" style="gap:8px;padding:5px 8px;padding-left:${8 + depth * 18}px;border-radius:var(--r-sm);cursor:pointer">
+      <input type="checkbox" ${value === chosen ? "checked" : ""}
+             onchange="pickFolder('${esc(value)}')" style="pointer-events:none">
+      <span>${label}</span>${extra}</label>`;
+
+  const missing = known
+    .map((f) =>
+      row(
+        f,
+        `<code>${esc(f)}</code>`,
+        ` <span class="pill red">not in the workspace any more</span>`,
+        0,
+      ),
+    )
+    .join("");
+
+  const rows = folders
+    .map((f) =>
+      row(
+        f.path,
+        esc(f.name),
+        f.documents
+          ? ` <span class="tiny muted">${f.documents} document(s)</span>`
+          : ` <span class="tiny muted">—</span>`,
+        f.depth,
+      ),
+    )
+    .join("");
+
+  return `<input type="hidden" id="kb-source" value="${esc(chosen)}">
+    <div class="card" style="max-height:280px;overflow:auto;padding:6px">
+      ${row("", `this base's own folder <code>knowledge/${esc(base.id || "<id>")}</code>`, "", 0)}
+      ${missing}
+      ${rows || `<div class="tiny muted" style="padding:8px">The workspace has no other folders
+        yet. Make one next to <code>knowledge/</code> in the workspace and it appears here.</div>`}
+    </div>`;
+}
+
+/**
+ * One folder at a time: this is a choice, not a set. Kept panel-local rather than read back off
+ * the DOM, because `paint()` rebuilds the tree and would otherwise re-render the old value.
+ */
+function pickFolder(value) {
+  sourcePick = sourcePick === value ? "" : value;
+  paint();
 }
 
 /** Add a document: type it, or pick a text file from the computer and it is read in place. */

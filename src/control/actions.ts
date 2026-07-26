@@ -21,6 +21,7 @@ import {
   KnowledgeWriter,
   listWorkspaceFolders,
   type ManifestPatch,
+  type WorkspaceFolder,
 } from "../knowledge/writer.js";
 import type { Vault } from "../vault/vault.js";
 import type { VaultEntry, VaultEntryView } from "../vault/schema.js";
@@ -424,8 +425,8 @@ export class Actions {
     return { deleted: true };
   }
 
-  /** The folders a base could be linked to (KB-08): what is in the workspace, one level down. */
-  async knowledgeFolders(): Promise<string[]> {
+  /** The folders a base could be linked to (KB-08): the workspace tree, in render order. */
+  async knowledgeFolders(): Promise<WorkspaceFolder[]> {
     return listWorkspaceFolders(this.deps.config.workspace);
   }
 

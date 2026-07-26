@@ -93,6 +93,11 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       ),
       network: deps.config.egress,
       activeRuns: orchestrator.activeRuns,
+      // MC-08: both paths, always, so nobody has to guess the mapping.
+      workspace: {
+        container: deps.config.workspace,
+        host: deps.config.workspaceHost || null,
+      },
       version: deps.version,
     };
   });
@@ -434,6 +439,45 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
         throw notFound(err instanceof Error ? err.message : String(err));
       }
     },
+  );
+
+  tool(
+    "list_areas",
+    "The workspace directories this project may read outside its own (PE-09), with both the " +
+      "container path and the one on this machine.",
+    { projectId: z.string().min(1) },
+    async ({ projectId }) => actions.listAreas(projectId),
+  );
+
+  tool(
+    "add_area",
+    "Let this project read a directory of the workspace outside itself (PE-09) — the imported " +
+      "source of a system, a folder of material. Read-only: an agent may copy from it into the " +
+      "project, never write to it. Refused for the workspace root, agents/, templates/, " +
+      "vault.yaml, knowledge/ and other projects.",
+    { projectId: z.string().min(1), path: z.string().min(1), note: z.string().optional() },
+    async ({ projectId, path: target, note }) =>
+      actions.addArea("mcp", projectId, { path: target, ...(note ? { note } : {}) }),
+  );
+
+  tool(
+    "remove_area",
+    "Withdraw a read-only area from a project (PE-09), by its path or its id.",
+    { projectId: z.string().min(1), path: z.string().min(1) },
+    async ({ projectId, path: target }) => actions.removeArea("mcp", projectId, target),
+  );
+
+  tool(
+    "resolve_path",
+    "Where is this, really (MC-08)? Give a container path, a path on this machine, or a path " +
+      "relative to a project, and get all of them back plus whether it exists. Use it before " +
+      "telling a person where a file is.",
+    { path: z.string().optional(), projectId: z.string().optional() },
+    async ({ path: target, projectId }) =>
+      actions.resolvePath({
+        ...(target ? { path: target } : {}),
+        ...(projectId ? { projectId } : {}),
+      }),
   );
 
   tool(

@@ -701,6 +701,12 @@ Two paths need naming explicitly now that the workspace holds shared material (�
 - Writes under `/workspace/agents/`, `/workspace/templates/` or to the vault file always
   classify as `credentials`, regardless of pack, so an agent can never reconfigure the system
   that is running it. That is a hard floor like PE-03.
+- **Declared read-only areas (PE-09).** A project may declare directories of the workspace outside
+  its own that it is allowed to *read*. A path inside one of them classifies as `project_read`
+  instead of `outside_workspace`; a write to one stays `outside_workspace` and is denied by the hard
+  floor, whatever the pack says. This is what turns the real failure of 2026-07-26 — an analyst
+  told where the code was, unable to `ls` it, unable to copy it, and stuck in a loop of writing
+  reports about being stuck — into a read the policy allows. See §9.5 for the model and its limits.
 - Writes under `<project>/.lightsout/tmp/` are `project_write` **and are exempt from
   `write_scopes`** (PE-08). A `read-only` agent whose writes are confined to `doc/` still needs
   somewhere to put a helper script and its intermediate output; without this exemption the only
@@ -869,6 +875,51 @@ Both answers carry two paths: `path` (inside the container, `/workspace/…`) an
 file on the user's own machine, from `LO_WORKSPACE_HOST`), because MCP's caller is a person who may
 want to open the file in their editor and the container path is useless to them. When the host
 workspace is not configured, `hostPath` is null rather than a guess.
+
+**Everywhere, not only here (MC-08).** `health` reports the workspace both ways, `project_status`
+carries the project's `hostPath`, areas carry theirs, and `resolve_path` translates one path into
+the other in either direction — give it a container path, a host path or a project-relative one and
+it answers with all three plus whether the thing exists. A Windows host path is answered with
+backslashes even when the mount was written with forward slashes, because its whole purpose is to
+be pasted somewhere.
+
+### 9.5 Read-only workspace areas (PE-09)
+
+**The failure this fixes.** A curation project was told, by the user, exactly where the code was:
+`/workspace/sources/efemis_django-master`. Every attempt to reach it — `ls -la /workspace/sources/`,
+`cp -r … ./sources/`, even `ls /workspace/`— classified as `outside_workspace` and was denied by the
+hard floor. The agent could not read it, could not copy it, and spent six passes writing a document
+about being blocked. The policy was right in the general case and wrong in this one, and there was
+no way to say so.
+
+An **area** is that missing sentence: *this project may read this directory of the workspace.*
+
+```
+migration 5: project_areas(id, project_id, path, note, added_by, created_at)
+             UNIQUE (project_id, path)
+```
+
+`path` is workspace-relative and stored normalised with forward slashes. Rules, all enforced in
+`validateArea()` and none of them overridable by a pack:
+
+| refused | why |
+|---|---|
+| the workspace root, or anything above it | an area is a *part* of the workspace, not all of it |
+| `agents/`, `templates/`, `vault.yaml` | an agent may not read the system that runs it (§7.1) |
+| anything under `knowledge/` | KB-03/KB-05 govern knowledge; attach a base instead |
+| another project's directory under `projects/` | one project is not a source of truth for another |
+| a path that does not exist | a typo is refused at declaration, not silently at run time |
+
+**Read only, always.** The area grants `project_read`, never a write: an agent copies *from* an area
+*into* its own project, which is a write it already has. Making areas writable would put one
+project's agent inside another project's files, and there is no case for it that attaching a
+knowledge base or declaring an area on the target project does not cover better.
+
+The runner resolves the project's areas before the session starts and passes them to the classifier
+with the workspace root; the prompt lists them under the project context, because an area the agent
+does not know about is an area it will not use. Every declaration and removal is a
+`config.changed {kind:'area'}` event with the actor: a widened boundary is a decision, and it is
+recorded like one.
 
 ## 10. MCP server (MC-01..06)
 

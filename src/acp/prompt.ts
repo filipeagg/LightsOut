@@ -87,6 +87,12 @@ export type ComposeInput = {
    * stops an agent inferring its purpose from a phase title.
    */
   projectContext?: string | undefined;
+  /**
+   * Workspace directories this project may read outside its own (PE-09). Listed in the prompt
+   * because an area the agent does not know about is an area it will not use — which is exactly
+   * how a phase spent six passes reporting that it could not reach the code.
+   */
+  readAreas?: string[] | undefined;
   /** The curated knowledge block built by src/knowledge/inject.ts (KB-04). */
   knowledgeBase?: string | undefined;
   /** The vault index: labels, URLs and variable names, never a value (VT-02). */
@@ -167,6 +173,18 @@ export function composePrompt(input: ComposeInput, docs: DocContext): string {
   if (input.projectContext?.trim()) {
     contextParts.push(
       `## What this project is for (fixed context, PM-09)\n\n${input.projectContext.trim()}`,
+    );
+  }
+  if (input.readAreas?.length) {
+    contextParts.push(
+      [
+        "## Readable outside this project (PE-09)",
+        "",
+        "These directories of the workspace are yours to read, and to copy from into this",
+        "project. You may not write into them.",
+        "",
+        ...input.readAreas.map((area, i) => `area.${i + 1}: ${area}`),
+      ].join("\n"),
     );
   }
   if (docs.state) {

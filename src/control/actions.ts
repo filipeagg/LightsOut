@@ -29,7 +29,10 @@ import type { Orchestrator } from "../orchestrator/orchestrator.js";
 import type { PhaseService, LaunchPhaseResult } from "../orchestrator/phases.js";
 import { createProject, type CreateProjectInput } from "../projects/scaffold.js";
 import type { ProjectPhaseRow, ProjectRow, TaskLevel } from "../db/types.js";
+import { existsSync } from "node:fs";
 import { activeRunFor } from "../views.js";
+import { validateArea } from "../projects/areas.js";
+import { Classifier } from "../policy/classify.js";
 import {
   hostPathFor,
   listProjectDocs,
@@ -455,6 +458,154 @@ export class Actions {
       const detail = err instanceof Error ? err.message : String(err);
       throw new Error(`cannot read ${relative} in ${project.id}: ${detail}`);
     }
+  }
+
+  // --- Read-only workspace areas (PE-09, DESIGN §9.5) ------------------------
+
+  /** What this project may read outside itself, with both paths for each area. */
+  listAreas(projectId: string): {
+    projectId: string;
+    areas: {
+      id: string;
+      path: string;
+      absolute: string;
+      hostPath: string | null;
+      note: string | null;
+      addedBy: string;
+      createdAt: string;
+    }[];
+  } {
+    const project = this.project(projectId);
+    const { config } = this.deps;
+    return {
+      projectId: project.id,
+      areas: this.deps.repos.areas.list(project.id).map((row) => {
+        const absolute = path.resolve(config.workspace, row.path);
+        return {
+          id: row.id,
+          path: row.path,
+          absolute,
+          hostPath: hostPathFor(config.workspace, config.workspaceHost, absolute),
+          note: row.note,
+          addedBy: row.added_by,
+          createdAt: row.created_at,
+        };
+      }),
+    };
+  }
+
+  /**
+   * Declare a directory of the workspace this project may read (PE-09). Every rule about what
+   * cannot be an area lives in `validateArea`, so both surfaces refuse the same things for the
+   * same stated reason.
+   */
+  addArea(
+    actor: Actor,
+    projectId: string,
+    input: { path: string; note?: string },
+  ): { projectId: string; path: string; absolute: string; hostPath: string | null } {
+    const project = this.project(projectId);
+    const { config } = this.deps;
+    const target = validateArea(config.workspace, project.path, input.path);
+    this.deps.repos.areas.add({
+      projectId: project.id,
+      path: target.relative,
+      ...(input.note ? { note: input.note } : {}),
+      addedBy: actor,
+    });
+    this.deps.repos.events.append({
+      type: "config.changed",
+      payload: { kind: "area", id: `${project.id}:${target.relative}`, op: "add", actor },
+    });
+    return {
+      projectId: project.id,
+      path: target.relative,
+      absolute: target.absolute,
+      hostPath: hostPathFor(config.workspace, config.workspaceHost, target.absolute),
+    };
+  }
+
+  removeArea(
+    actor: Actor,
+    projectId: string,
+    pathOrId: string,
+  ): { projectId: string; removed: string } {
+    const project = this.project(projectId);
+    const normalised = pathOrId.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+    const row =
+      this.deps.repos.areas.remove(project.id, normalised) ??
+      this.deps.repos.areas.remove(project.id, pathOrId);
+    if (!row) throw new Error(`${pathOrId} is not an area of ${project.id}`);
+    this.deps.repos.events.append({
+      type: "config.changed",
+      payload: { kind: "area", id: `${project.id}:${row.path}`, op: "remove", actor },
+    });
+    return { projectId: project.id, removed: row.path };
+  }
+
+  /**
+   * Where is this, really (MC-08)? Translates between the container's paths and the user's own,
+   * in either direction, and says whether the thing exists. A person told `/workspace/projects/x`
+   * cannot open it, and a guess about the mapping is how a conversation ends up about the wrong
+   * file.
+   */
+  resolvePath(input: { path?: string; projectId?: string }): {
+    workspace: { container: string; host: string | null };
+    container: string | null;
+    host: string | null;
+    relative: string | null;
+    exists: boolean;
+    inWorkspace: boolean;
+  } {
+    const { config } = this.deps;
+    const workspace = {
+      container: config.workspace,
+      host: config.workspaceHost || null,
+    };
+    let raw = input.path?.trim() ?? "";
+    if (input.projectId) {
+      const project = this.project(input.projectId);
+      raw = raw ? path.join(project.path, raw) : project.path;
+    }
+    if (!raw) {
+      return {
+        workspace,
+        container: config.workspace,
+        host: workspace.host,
+        relative: "",
+        exists: true,
+        inWorkspace: true,
+      };
+    }
+
+    // A host path coming back the other way: strip the host root and re-root it in the container.
+    // Separators are normalised and collapsed first, because a path pasted from Windows arrives
+    // with backslashes, sometimes doubled by whatever quoted it.
+    let container = raw.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+    if (config.workspaceHost) {
+      const host = config.workspaceHost
+        .replace(/\\/g, "/")
+        .replace(/\/{2,}/g, "/")
+        .replace(/\/+$/, "");
+      if (container.toLowerCase().startsWith(host.toLowerCase())) {
+        container = path.posix.join(config.workspace, container.slice(host.length));
+      }
+    }
+    if (!container.startsWith("/")) container = path.posix.join(config.workspace, container);
+
+    const resolved = path.resolve(container);
+    const inWorkspace = Classifier.isInside(config.workspace, resolved);
+    const relative = inWorkspace
+      ? path.relative(path.resolve(config.workspace), resolved).split(path.sep).join("/")
+      : null;
+    return {
+      workspace,
+      container: resolved,
+      host: hostPathFor(config.workspace, config.workspaceHost, resolved),
+      relative,
+      exists: existsSync(resolved),
+      inWorkspace,
+    };
   }
 
   /**

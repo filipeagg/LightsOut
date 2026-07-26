@@ -4,6 +4,7 @@
  * doubt creation from the sentinel, and the policy layers for the run.
  */
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import type { Config } from "../config.js";
 import type { Bus } from "../bus.js";
 import type { Repos } from "../db/repos/index.js";
@@ -190,6 +191,12 @@ export class TaskRunner {
 
     const decisionContext = this.doubts.decisionContext(task.id);
     const formatFeedback = await this.formatFeedback(project, task);
+    // The directories this project may read outside itself (PE-09). Resolved here so the policy
+    // and the prompt agree: an area the agent is not told about is an area it will not use.
+    const readAreas = this.repos.areas.list(project.id).map((row) => ({
+      relative: row.path,
+      absolute: path.resolve(this.config.workspace, row.path),
+    }));
 
     const agentPack = this.agents.pack(profile.policy);
     const context = await this.runContext(project, task, input.projectPack ?? agentPack);
@@ -237,6 +244,8 @@ export class TaskRunner {
       ...(context.writableKnowledgeBase
         ? { writableKnowledgeBase: context.writableKnowledgeBase }
         : {}),
+      // PE-09: what this project may read outside itself, resolved once before the session.
+      ...(readAreas.length ? { readAreas: readAreas.map((area) => area.absolute) } : {}),
       // require_human opens a permission doubt and holds the ACP response until it is
       // answered or the slow clock runs out (DESIGN §6.5, §8.4).
       humanGate:

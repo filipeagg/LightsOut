@@ -402,6 +402,27 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
     }),
   );
 
+  // Read-only workspace areas (PE-09).
+  app.post("/api/projects/:id/areas", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = idParam.parse(request.params);
+      const input = body(
+        z.object({ path: z.string().min(1), note: z.string().optional() }),
+        request.body,
+      );
+      return actions.addArea("panel", id, input);
+    }),
+  );
+
+  app.delete("/api/projects/:id/areas/:area", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id, area } = z
+        .object({ id: z.string().min(1), area: z.string().min(1) })
+        .parse(request.params);
+      return actions.removeArea("panel", id, decodeURIComponent(area));
+    }),
+  );
+
   // --- Retiring a project (PM-08) ------------------------------------------
 
   app.post("/api/projects/:id/archived", async (request, reply) =>

@@ -67,6 +67,8 @@ export type RunSessionDeps = {
   workspacePath?: string;
   /** The one base this project may write into, if any (KB-05). */
   writableKnowledgeBase?: string;
+  /** Absolute paths of the workspace directories this project may read (PE-09). */
+  readAreas?: string[];
   /** Defaults to rejecting with an explanation, which is honest for phase 3. */
   humanGate?: HumanGate;
   onStderr?: (line: string) => void;
@@ -302,6 +304,8 @@ export class RunSession {
       ...(this.deps.writableKnowledgeBase
         ? { writableKnowledgeBase: this.deps.writableKnowledgeBase }
         : {}),
+      // PE-09: the directories this project was allowed to read outside itself.
+      ...(this.deps.readAreas?.length ? { readAreas: this.deps.readAreas } : {}),
       ...(toolCall.kind ? { kind: toolCall.kind } : {}),
       ...(toolCall.title ? { title: toolCall.title } : {}),
       ...(paths.length ? { paths } : {}),
@@ -411,6 +415,7 @@ export class RunSession {
         taskSpec: task.spec,
         verifyCmd: task.verify_cmd ?? project.verify_cmd,
         projectContext: project.context,
+        readAreas: this.deps.readAreas,
         decisionContext: this.deps.decisionContext,
         formatFeedback: this.deps.formatFeedback,
         knowledgeBase: this.deps.knowledgeBlock,

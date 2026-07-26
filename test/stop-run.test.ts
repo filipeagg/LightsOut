@@ -84,8 +84,21 @@ async function held() {
   return { project, orch, actions, live, aborted };
 }
 
-async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 30));
+/**
+ * Wait until the run is actually registered. A fixed sleep was flaky under a loaded suite: the
+ * chain loop is asynchronous and 30 ms is not a promise about anything.
+ */
+async function settle(live?: LiveRuns, projectId?: string): Promise<void> {
+  const deadline = Date.now() + 2000;
+  for (;;) {
+    if (!live || !projectId) {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return;
+    }
+    if (live.forProject(projectId).length > 0) return;
+    if (Date.now() > deadline) throw new Error("no run registered within 2 s");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 describe("stop the run that is running (OR-06, OR-09)", () => {
@@ -99,7 +112,7 @@ describe("stop the run that is running (OR-06, OR-09)", () => {
         { title: "two", spec: "s", agentId: "builder" },
       ],
     });
-    await settle();
+    await settle(live, project.id);
     const handle = live.forProject(project.id)[0];
     expect(handle).toBeDefined();
 
@@ -122,7 +135,7 @@ describe("stop the run that is running (OR-06, OR-09)", () => {
       title: "long",
       tasks: [{ title: "one", spec: "s", agentId: "builder" }],
     });
-    await settle();
+    await settle(live, project.id);
     const runId = live.forProject(project.id)[0]!.runId;
 
     const result = await actions.stopRun("mcp", { projectId: project.id });
@@ -179,7 +192,7 @@ describe("stop the run that is running (OR-06, OR-09)", () => {
         { title: "two", spec: "s", agentId: "builder" },
       ],
     });
-    await settle();
+    await settle(live, project.id);
     const runId = live.forProject(project.id)[0]!.runId;
 
     const result = await actions.abortRun("panel", { chainId: launch.chainId });
@@ -202,7 +215,7 @@ describe("stop the run that is running (OR-06, OR-09)", () => {
         { title: "two", spec: "s", agentId: "builder" },
       ],
     });
-    await settle();
+    await settle(live, project.id);
     const handle = live.forProject(project.id)[0]!;
 
     const result = await actions.abortRun("panel", {

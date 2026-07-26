@@ -836,6 +836,53 @@ function contextCard(p) {
   </div>`;
 }
 
+/**
+ * Read-only workspace areas (PE-09). The answer to an agent that knows where the code is and is
+ * denied every way of reading it: name the directory here, once, and it becomes readable.
+ */
+function areasCard(p) {
+  const areas = p.areas || [];
+  return `<div class="card pad" style="margin-bottom:24px">
+    <div class="row" style="justify-content:space-between;align-items:flex-start;gap:16px">
+      <div><b>Readable outside this project</b>
+        <div class="tiny muted">Directories of the workspace this project may read and copy from.
+          Read-only, and never agents/, templates/, vault.yaml, knowledge/ or another project.</div></div>
+    </div>
+    ${areas.length
+      ? `<table style="margin-top:12px"><tbody>${areas
+          .map(
+            (a) => `<tr>
+        <td class="mono tiny">${esc(a.path)}<div class="tiny muted">${esc(a.hostPath || "")}</div></td>
+        <td class="tiny muted">${esc(a.note || "")}</td>
+        <td class="tiny muted">by ${esc(a.addedBy)}</td>
+        <td style="text-align:right"><button class="btn sm danger"
+          onclick="removeArea('${esc(p.id)}','${esc(a.path)}')">Remove</button></td></tr>`,
+          )
+          .join("")}</tbody></table>`
+      : `<p class="tiny muted" style="margin-top:12px">None. Everything outside the project is denied.</p>`}
+    <div class="row" style="gap:8px;margin-top:12px">
+      <input id="area-path" placeholder="sources/efemis_django-master" style="flex:2 1 260px">
+      <input id="area-note" placeholder="why (optional)" style="flex:1 1 160px">
+      <button class="btn" onclick="addArea('${esc(p.id)}')">Allow reading</button>
+    </div>
+  </div>`;
+}
+
+async function addArea(projectId) {
+  const target = field("area-path");
+  if (!target) { store.error = "give a path inside the workspace"; return paint(); }
+  const note = field("area-note");
+  await act("POST", `/api/projects/${encodeURIComponent(projectId)}/areas`,
+    note ? { path: target, note } : { path: target });
+}
+
+async function removeArea(projectId, area) {
+  await act(
+    "DELETE",
+    `/api/projects/${encodeURIComponent(projectId)}/areas/${encodeURIComponent(area)}`,
+  );
+}
+
 async function saveContext(projectId) {
   const context = $("ctx-text") ? $("ctx-text").value.trim() : "";
   if (!context) { store.error = "the context brief cannot be empty (PM-09)"; return paint(); }
@@ -915,8 +962,10 @@ function viewProject() {
   const p = s.project;
   return `<h1>${esc(p.name)}</h1>
     <p class="sub mono">${esc(p.path)}</p>
+    ${p.hostPath ? `<p class="tiny muted mono">on this machine: ${esc(p.hostPath)}</p>` : ""}
     ${projectTabs(p.id, null)}
     ${contextCard(p)}
+    ${areasCard(p)}
     <div class="row wrap" style="margin-bottom:24px">
       ${statusPill(s.chain ? s.chain.status : "idle")}
       <span class="pill">push: ${esc(p.pushPolicy)}</span>

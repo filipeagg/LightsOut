@@ -46,6 +46,12 @@ export type ClassifyInput = {
   workspacePath?: string;
   /** Base id this project may write into, if any (KB-05). */
   writableKnowledgeBase?: string | undefined;
+  /**
+   * Absolute paths of the workspace directories this project may **read** (PE-09, §9.5). A read
+   * inside one of them is `project_read`; a write is still `outside_workspace`, which the hard
+   * floor keeps at deny.
+   */
+  readAreas?: string[] | undefined;
 };
 
 export type Classification = {
@@ -293,6 +299,36 @@ function normalizeSegment(segment: string): string {
 }
 
 /**
+ * The paths a command **writes to**, as opposed to the ones it merely reads (PE-09). Copying out
+ * of a read-only area into the project is the whole point of an area, so "this command writes
+ * somewhere" is not precise enough: `cp /workspace/sources/x ./sources/x` reads the first path and
+ * writes the second. Redirect targets, and the destination of the copy-shaped commands, are the
+ * write targets; everything else on the line is a read.
+ */
+const COPY_LIKE = /^(cp|mv|rsync|install|ln|scp)\b/i;
+/** Commands whose every path argument is a thing they change: removals and in-place edits. */
+const CHANGES_EVERY_ARG = /^(rm|rmdir|unlink|shred|truncate|mkdir|touch|chmod|chown|tee|sed\s+-i)\b/i;
+
+export function writeTargets(command: string): string[] {
+  const targets: string[] = [];
+  for (const segment of splitSegments(command)) {
+    for (const match of segment.matchAll(/>>?\s*("([^"]+)"|'([^']+)'|([^\s;|&]+))/g)) {
+      const target = match[2] ?? match[3] ?? match[4];
+      if (target) targets.push(target);
+    }
+    const args = argPaths(segment);
+    if (CHANGES_EVERY_ARG.test(segment)) {
+      targets.push(...args);
+      continue;
+    }
+    if (!COPY_LIKE.test(segment)) continue;
+    const last = args[args.length - 1];
+    if (last) targets.push(last);
+  }
+  return targets;
+}
+
+/**
  * Paths a shell command touches: redirect targets and absolute-looking arguments. Used to
  * enforce PE-02 on commands, where the ACP request carries no `locations`.
  */
@@ -397,6 +433,23 @@ export class Classifier {
     });
   }
 
+  /**
+   * Does the request write to *this particular path*? "The command writes somewhere" is not
+   * precise enough once a project may read an area (PE-09): `cp <area>/x ./x` writes into the
+   * project and only reads the area. A path the ACP request itself declared is judged by the tool
+   * kind, as before; a path found inside a command is a write only when it is a write target.
+   */
+  private writesTo(input: ClassifyInput, candidates: string[], target: string): boolean {
+    const declared = (input.paths ?? []).some(
+      (p) => path.resolve(input.projectPath, p) === path.resolve(input.projectPath, target),
+    );
+    if (declared || candidates.length === 0) return this.looksLikeWriting(input, candidates);
+    const resolved = path.resolve(input.projectPath, target);
+    return candidates
+      .flatMap((candidate) => writeTargets(candidate))
+      .some((written) => path.resolve(input.projectPath, written) === resolved);
+  }
+
   /** True when `target` resolves inside `root`. Relative paths resolve against root. */
   static isInside(root: string, target: string): boolean {
     const base = path.resolve(root);
@@ -426,6 +479,20 @@ export class Classifier {
     }
     if (resolved === path.join(workspace, "vault.yaml")) {
       return { class: "credentials", reason: `path is the credentials vault: ${target}` };
+    }
+
+    // A directory this project was explicitly allowed to read (PE-09). Checked after the two
+    // absolute prohibitions above and before anything else, so an area can never be declared over
+    // the system's own configuration even if a row said so.
+    for (const area of input.readAreas ?? []) {
+      if (!Classifier.isInside(area, resolved)) continue;
+      if (!writing) {
+        return { class: "project_read", reason: `read of a declared area: ${target}` };
+      }
+      return {
+        class: "outside_workspace",
+        reason: `an area is read-only; writing to ${target} is not allowed (PE-09)`,
+      };
     }
 
     const knowledgeRoot = path.join(workspace, "knowledge");
@@ -533,7 +600,7 @@ export class Classifier {
     ];
     const escaping = declaredPaths.find((p) => !Classifier.isInside(input.projectPath, p));
     if (escaping) {
-      return this.classifyEscape(input, escaping, this.looksLikeWriting(input, candidates));
+      return this.classifyEscape(input, escaping, this.writesTo(input, candidates, escaping));
     }
 
     if (candidates.length > 0) {

@@ -190,6 +190,24 @@ function addProjectContext(db: Db): void {
   }
 }
 
+/**
+ * Version 5 (PE-09): the directories of the workspace a project may read, outside its own.
+ * Declared per project, unique per path, and recorded with who declared them — a widened boundary
+ * is a decision, not a setting.
+ */
+const PROJECT_AREAS_SQL = `
+CREATE TABLE project_areas (
+  id         TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  path       TEXT NOT NULL,
+  note       TEXT,
+  added_by   TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (project_id, path)
+);
+CREATE INDEX ix_project_areas ON project_areas(project_id);
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial schema", up: applyInitialSchema },
   {
@@ -205,6 +223,7 @@ export const MIGRATIONS: Migration[] = [
     foreignKeys: "off",
   },
   { version: 4, name: "project context brief", up: addProjectContext },
+  { version: 5, name: "project read-only areas", up: PROJECT_AREAS_SQL },
 ];
 
 /** The marker migration 4 writes, and the panel looks for (PM-09). */

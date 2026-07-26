@@ -15,6 +15,7 @@ import { SettingsRepo } from "./settings.js";
 import { PhasesRepo } from "./phases.js";
 import { ProjectKnowledgeRepo } from "./knowledge.js";
 import { VaultAuditRepo } from "./vault-audit.js";
+import { AreasRepo } from "./areas.js";
 
 export type Repos = {
   db: Db;
@@ -30,6 +31,8 @@ export type Repos = {
   phases: PhasesRepo;
   projectKnowledge: ProjectKnowledgeRepo;
   vaultAudit: VaultAuditRepo;
+  /** Read-only workspace areas per project (PE-09). */
+  areas: AreasRepo;
 };
 
 export function createRepos(db: Db): Repos {
@@ -47,6 +50,7 @@ export function createRepos(db: Db): Repos {
     phases: new PhasesRepo(db),
     projectKnowledge: new ProjectKnowledgeRepo(db),
     vaultAudit: new VaultAuditRepo(db),
+    areas: new AreasRepo(db),
   };
 }
 
@@ -63,4 +67,5 @@ export {
   PhasesRepo,
   ProjectKnowledgeRepo,
   VaultAuditRepo,
+  AreasRepo,
 };

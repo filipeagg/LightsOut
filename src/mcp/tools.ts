@@ -555,6 +555,8 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
           id: base.manifest.id,
           name: base.manifest.name,
           kind: base.manifest.kind,
+          /** `hard` means the agent may not decide against it (KB-11); `advisory` is context. */
+          enforcement: base.manifest.enforcement,
           description: base.manifest.description,
           tags: base.manifest.tags,
           updated: base.manifest.updated ?? null,
@@ -689,13 +691,16 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
     "write_knowledge",
     "Create a knowledge base or edit its manifest (KB-01). `source` points it at a folder " +
       "already in the workspace, which then stays the source of truth for its documents; pass " +
-      "null to unlink and go back to the base's own folder (KB-08).",
+      "null to unlink and go back to the base's own folder (KB-08). `enforcement: hard` makes it " +
+      "binding: agents may not decide against it, and a decision that would opens a doubt only " +
+      "the user can settle (KB-11).",
     {
       baseId: z.string().min(1),
       name: z.string().min(1).optional(),
       kind: z
         .enum(["technical", "functional", "organisational", "market", "other"])
         .optional(),
+      enforcement: z.enum(["advisory", "hard"]).optional(),
       description: z.string().optional(),
       tags: z.array(z.string().min(1)).optional(),
       owner: z.string().min(1).optional(),
@@ -722,6 +727,7 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       kind: z
         .enum(["technical", "functional", "organisational", "market", "other"])
         .optional(),
+      enforcement: z.enum(["advisory", "hard"]).optional(),
       description: z.string().optional(),
       tags: z.array(z.string().min(1)).optional(),
       owner: z.string().min(1).optional(),

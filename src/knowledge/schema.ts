@@ -15,6 +15,14 @@ export const knowledgeKindSchema = z.enum([
   "other",
 ]);
 
+/**
+ * What the agent may do about the base, as opposed to what is in it (KB-11, DESIGN §17.4).
+ * `advisory` is context to weigh; `hard` is a decision already taken — a design system, a strict
+ * technology directive — that an agent may not overrule on its own judgement. Separate from `kind`
+ * because a design system is technical *and* binding, and one field cannot say both.
+ */
+export const enforcementSchema = z.enum(["advisory", "hard"]);
+
 export const knowledgeManifestSchema = z
   .object({
     /** Must equal the directory name; the loader checks it. */
@@ -24,6 +32,8 @@ export const knowledgeManifestSchema = z
       .regex(/^[a-z0-9][a-z0-9-]*$/, "base id must be lowercase alphanumeric with -"),
     name: z.string().min(1),
     kind: knowledgeKindSchema,
+    /** Advisory unless said otherwise: a base becomes binding deliberately, never by default. */
+    enforcement: enforcementSchema.default("advisory"),
     description: z.string().default(""),
     tags: z.array(z.string().min(1)).default([]),
     owner: z.string().optional(),
@@ -47,6 +57,7 @@ export const knowledgeManifestSchema = z
   .strict();
 
 export type KnowledgeKind = z.infer<typeof knowledgeKindSchema>;
+export type Enforcement = z.infer<typeof enforcementSchema>;
 export type KnowledgeManifest = z.infer<typeof knowledgeManifestSchema>;
 
 export type RejectedBase = { dir: string; error: string };

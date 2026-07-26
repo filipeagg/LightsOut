@@ -105,7 +105,11 @@ describe("migration 2", () => {
 
     const result = migrate(legacy);
     expect(result.from).toBe(1);
-    expect(result.applied).toEqual(["2:phases, knowledge, vault audit"]);
+    // Both rebuilds of `doubts` run, one after the other, on a database that has data in it.
+    expect(result.applied).toEqual([
+      "2:phases, knowledge, vault audit",
+      "3:hard rule doubts and knowledge enforcement",
+    ]);
 
     const after = createRepos(legacy);
     expect(after.doubts.get(doubt.id)?.ref).toBe(doubt.ref);

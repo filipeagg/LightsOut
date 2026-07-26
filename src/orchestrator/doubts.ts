@@ -69,7 +69,8 @@ export type RaiseDoubtInput = {
   project: ProjectRow;
   task: TaskRow;
   runId: string;
-  kind: "functional" | "permission";
+  /** `hard_rule` is the one kind that never sees the advisor and never auto-continues (KB-11b). */
+  kind: "functional" | "permission" | "hard_rule";
   context: string;
   blocks: string;
   options: DoubtOption[];
@@ -119,6 +120,11 @@ export class DoubtService {
 
   /** Ask the other engine. Returns undefined when the advisor must be skipped. */
   private async secondOpinion(input: RaiseDoubtInput): Promise<AdvisorResult | undefined> {
+    // A hard rule exists because a person decided something (KB-11b). Asking the other engine
+    // whether breaking it is reasonable would be exactly the failure the flag prevents, so the
+    // advisor is not consulted at all — not consulted and overridden, not consulted for the
+    // record. This is the only doubt kind that gets no second opinion.
+    if (input.kind === "hard_rule") return undefined;
     if (!isReversible(input.actionClass)) return undefined;
     if (input.options.length < 2) return undefined;
 
@@ -166,6 +172,10 @@ export class DoubtService {
    * recommendation and be confident enough. Everything else opens the doubt.
    */
   private agrees(input: RaiseDoubtInput, advisor: AdvisorResult | undefined): boolean {
+    // Belt as well as braces: `secondOpinion` already refuses to consult on a hard rule, and this
+    // makes the guarantee independent of that — a hard-rule doubt cannot auto-continue even if
+    // some future caller hands one an advisor result.
+    if (input.kind === "hard_rule") return false;
     if (!advisor?.ok) return false;
     if (!input.recommendation) return false;
     const threshold = input.derivedRecommendation
@@ -191,7 +201,10 @@ export class DoubtService {
 
   async raise(input: RaiseDoubtInput): Promise<RaiseDoubtResult> {
     const docs = new ProjectDocs(this.repos, input.project);
+    // The budget counts provisional decisions, and a hard rule can never produce one, so counting
+    // it would only let earlier auto-continues change what this doubt reports (KB-11b).
     const exhausted =
+      input.kind !== "hard_rule" &&
       this.autoContinuesSoFar(input.project.id, input.task.id) >= DoubtService.MAX_AUTO_CONTINUE;
     if (exhausted) {
       this.repos.events.append({

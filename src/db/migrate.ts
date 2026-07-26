@@ -125,12 +125,53 @@ CREATE TABLE vault_audit (
 CREATE INDEX ix_vault_audit_run ON vault_audit(run_id, id);
 `;
 
+/**
+ * Version 3: the `hard_rule` doubt kind (KB-11b, §17.4), and `enforcement` on the knowledge
+ * attachment so the panel and `project_status` can say which of a project's bases are binding
+ * without re-reading every manifest.
+ *
+ * Same rebuild as version 2, for the same reason: a CHECK constraint can only grow by rebuilding
+ * the table, and `decisions` points at `doubts`.
+ */
+const HARD_RULES_SQL = `
+CREATE TABLE doubts_v3 (
+  id             TEXT PRIMARY KEY,
+  ref            TEXT NOT NULL,
+  project_id     TEXT NOT NULL REFERENCES projects(id),
+  task_id        TEXT NOT NULL REFERENCES tasks(id),
+  run_id         TEXT REFERENCES runs(id),
+  kind           TEXT NOT NULL CHECK (kind IN ('functional','permission','gate','hard_rule')),
+  status         TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','answered','closed')),
+  context        TEXT NOT NULL,
+  blocks         TEXT NOT NULL,
+  options        TEXT NOT NULL CHECK (json_valid(options)),
+  recommendation TEXT,
+  second_opinion TEXT CHECK (second_opinion IS NULL OR json_valid(second_opinion)),
+  answer         TEXT,
+  created_at     TEXT NOT NULL,
+  answered_at    TEXT,
+  UNIQUE (project_id, ref)
+);
+INSERT INTO doubts_v3 SELECT * FROM doubts;
+DROP TABLE doubts;
+ALTER TABLE doubts_v3 RENAME TO doubts;
+CREATE INDEX ix_doubts_open ON doubts(status) WHERE status = 'open';
+
+ALTER TABLE project_knowledge ADD COLUMN enforcement TEXT NOT NULL DEFAULT 'advisory';
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial schema", up: applyInitialSchema },
   {
     version: 2,
     name: "phases, knowledge, vault audit",
     up: PHASE9_SQL,
+    foreignKeys: "off",
+  },
+  {
+    version: 3,
+    name: "hard rule doubts and knowledge enforcement",
+    up: HARD_RULES_SQL,
     foreignKeys: "off",
   },
 ];

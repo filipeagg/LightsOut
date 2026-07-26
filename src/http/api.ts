@@ -302,6 +302,8 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
           id: base.manifest.id,
           name: base.manifest.name,
           kind: base.manifest.kind,
+          /** Whether the base binds the agent or merely informs it (KB-11). */
+          enforcement: base.manifest.enforcement,
           description: base.manifest.description,
           tags: base.manifest.tags,
           owner: base.manifest.owner ?? null,

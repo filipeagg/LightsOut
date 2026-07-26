@@ -931,8 +931,8 @@ Single `index.html`, no build step, hash routes:
 | `#/p/<id>/history` | Past runs (WP-06). |
 | `#/p/<id>/knowledge` | Attached bases, attach and detach. |
 | `#/agents` | Agent library: builtins and workspace copies, enabled toggles, and the editor — engine, model, reasoning, instructions, policy pack, deliverable, tags (AP-06). |
-| `#/templates` | Template library and the phase editor: reorder, add, remove, pick the agent per phase, edit phase instructions (TP-04). |
-| `#/knowledge` | Knowledge bases, their manifests and documents. |
+| `#/templates` | Template library, **New template**, and the editor: id (on a new one), name, description, `requires_writable_knowledge`, plus the phase list — reorder, add, remove, pick the agent per phase, edit phase instructions (TP-04). Saving under a builtin's id writes the workspace copy that shadows it. |
+| `#/knowledge` | Knowledge bases, their manifests and documents, and each base's **authority**: advisory or hard rules (KB-11). |
 | `#/vault` | Vault entries, write-only value fields (VT-03). |
 | `#/health` | Container, database, engines, disk. |
 | `#/setup` | The first-run wizard, repeatable later (§14.3). |
@@ -1272,11 +1272,17 @@ knowledge/legacy-core/
 id: legacy-core           # must equal the directory name
 name: Legacy core
 kind: technical           # technical | functional | organisational | market | other
+enforcement: advisory     # advisory (default) | hard  — see §17.4
 description: How the legacy core is structured and what its invariants are.
 tags: [core, legacy, sql-server]
 owner: platform@example.com
 updated: 2026-07-25
 ```
+
+`kind` says what sort of fact the base holds; `enforcement` says what the agent may do about it.
+They are separate on purpose: a design system is `kind: technical` and `enforcement: hard`, while
+an analysis of a legacy system is technical and advisory. Collapsing them into one field would have
+forced a choice between describing the content and describing its authority.
 
 `index.md` is a table of contents with one line per document saying what is in it. It is always
 injected in full, whatever the budget, because it is what lets an agent ask for the right
@@ -1387,6 +1393,56 @@ backstop if the mount is ever wrong.
 The curation project's pack, `curate`, is the only one whose `knowledge_write` verdict is
 `allow`, and the runner narrows it further: the grant applies to the single base id recorded
 `writable=1` for that project, not to `knowledge/` at large.
+
+### 17.4 Hard rules (KB-11)
+
+A base with `enforcement: hard` holds decisions that have already been taken: a design system, a
+strict technology directive, a mandatory architectural constraint. The difference from advisory
+knowledge is not how important it is, it is who may overrule it.
+
+**Injection (KB-11a).** Hard rules go **first**, ahead of advisory knowledge and ahead of the
+project's own docs, under a header that says what they are and what the agent must do about them:
+
+```
+# Binding rules — you may not decide against these
+
+These are not context to weigh. They were decided before this task and are not being reopened
+here. If completing the task would require contradicting one of them, that decision is not yours
+to take: stop, and end your turn with the result sentinel carrying `hardRule`.
+
+--- knowledge: design-system (hard rule · technical) — spacing.md ---
+…
+```
+
+Advisory bases keep the header they have: `--- knowledge: <id> (<kind>) — <file> ---`. Hard-rule
+documents are injected **in full, ahead of everything, and are not budgeted** (§17.2): a binding
+rule dropped to save characters would leave the agent bound by something it was never shown. One
+that cannot be read is stated as unreadable rather than passed over silently.
+
+**The doubt (KB-11b).** A sentinel whose doubt payload carries `hardRule` opens a doubt of kind
+`hard_rule`. It is
+the one kind that **skips the advisor entirely** and can never auto-continue, however confident
+anything is:
+
+- `secondOpinion` is not called, so no `advisor.consulted` event exists for it.
+- It does not count against `MAX_AUTO_CONTINUE`: a budget for provisional decisions has nothing to
+  say about a doubt that can never be one.
+- The doubt records which rule and which document, so the answer is about a specific rule rather
+  than a general impulse.
+
+The reason for skipping the advisor is not cost. A hard rule exists because a person decided
+something; letting the other engine agree that breaking it is reasonable would be exactly the
+failure mode the flag is there to prevent.
+
+**Writability (KB-11c).** A hard-rule base is never the writable one, whatever a template declares
+at launch. The runner drops it from the writable slot and records why. An agent that can edit the
+rules binding it is not bound by them.
+
+**What this does and does not guarantee (KB-11d).** Nothing parses a design system to detect a
+violation — enforcement is by instruction and self-report. What the machinery guarantees is
+narrower and still worth having: a violation the agent *does* declare cannot be waved through by
+the advisor, by the auto-continue budget, or by anything other than the user answering it. Said
+plainly here because a reader who assumed otherwise would trust the flag further than it deserves.
 
 ## 18. Credentials vault (VT-01..06, phase 9)
 

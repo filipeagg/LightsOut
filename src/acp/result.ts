@@ -17,6 +17,11 @@ export const doubtPayloadSchema = z
       .array(z.object({ id: z.string().min(1), text: z.string().min(1) }).strict())
       .min(2),
     recommendation: z.string().min(1).optional(),
+    /**
+     * `<base>/<document>` of the binding rule the agent would have to break (KB-11b). Its presence
+     * is what makes this a `hard_rule` doubt: no advisor, no auto-continue, a human or nothing.
+     */
+    hardRule: z.string().min(1).optional(),
   })
   .strict();
 

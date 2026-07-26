@@ -21,6 +21,7 @@ import type { TemplatesLoader } from "../templates/loader.js";
 import type { KnowledgeLoader } from "../knowledge/loader.js";
 import type { Vault } from "../vault/vault.js";
 import { agentSource } from "../agents/writer.js";
+import { ENGINE_MODELS } from "../agents/models.js";
 
 export type ApiDeps = {
   config: Config;
@@ -32,18 +33,6 @@ export type ApiDeps = {
   knowledge?: KnowledgeLoader;
   vault?: Vault;
 };
-
-/** Accepted model and reasoning values per engine (AP-08). Static until the engines publish one. */
-const ENGINE_MODELS = {
-  claude: {
-    models: ["opus", "sonnet", "haiku"],
-    reasoning: ["none", "low", "medium", "high"],
-  },
-  codex: {
-    models: ["gpt-5-codex", "gpt-5", "o4-mini"],
-    reasoning: ["minimal", "low", "medium", "high"],
-  },
-} as const;
 
 async function envelope(
   reply: FastifyReply,
@@ -69,8 +58,16 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
     return row;
   };
 
-  app.get("/api/overview", async (_request, reply) =>
-    envelope(reply, async () => overviewView(views, await health.engines())),
+  app.get("/api/overview", async (request, reply) =>
+    envelope(reply, async () => {
+      // `?archived=true` is how the panel reaches an archived project to unarchive it (PM-08).
+      const query = z
+        .object({ archived: z.enum(["true", "false"]).optional() })
+        .parse(request.query ?? {});
+      return overviewView(views, await health.engines(), {
+        includeArchived: query.archived === "true",
+      });
+    }),
   );
 
   app.get("/api/projects", async (request, reply) =>

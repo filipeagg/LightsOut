@@ -151,6 +151,34 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
     async ({ projectId }) => projectStatusView(deps, project(projectId)),
   );
 
+  tool(
+    "archive_project",
+    "Archive a project: it drops out of the lists and refuses new launches, but nothing is " +
+      "removed. Reversible — call it again with archived=false (PM-08).",
+    { projectId: z.string().min(1), archived: z.boolean().optional() },
+    async ({ projectId, archived }) => {
+      const row = actions.archiveProject("mcp", projectId, archived ?? true);
+      return { project: { id: row.id, archived: row.archived === 1 } };
+    },
+  );
+
+  tool(
+    "delete_project",
+    "Delete a project for good: its rows and, unless keepFiles is set, its folder in the " +
+      "workspace. Irreversible, refused while a run is active, and `confirm` must be the " +
+      "project id (PM-08).",
+    {
+      projectId: z.string().min(1),
+      confirm: z.string().min(1),
+      keepFiles: z.boolean().optional(),
+    },
+    async ({ projectId, confirm, keepFiles }) =>
+      actions.deleteProject("mcp", projectId, {
+        confirm,
+        ...(keepFiles !== undefined ? { keepFiles } : {}),
+      }),
+  );
+
   tool("list_agents", "Agent profiles, valid and rejected (AP-02).", {}, async () => {
     const snapshot = agents.current();
     return {

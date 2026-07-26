@@ -78,6 +78,7 @@ Priority levels: MUST (pilot fails without it), SHOULD (build if cheap, else bac
 - PM-05 MUST. Push policy: local git always allowed; push to the project remote only after a green verify; configurable per project; force push never.
 - PM-06 MUST. Curated knowledge bases are attachable to a project and injected as context. Superseded in detail by section 14 (KB).
 - PM-07 MUST. A project records which template it was created from, its phase list and the knowledge bases attached at creation, so its status is explainable without reading its files.
+- PM-08 MUST. A project can be retired in two steps, both from the panel and from MCP. Archiving hides it from the lists and refuses new launches while keeping every row and every file; it is reversible. Permanent deletion removes its rows and, unless the caller asks to keep them, its files under the workspace. Neither is allowed while a run is active. Permanent deletion is confirmed by naming the project (WP-11) and is recorded as an event that outlives the project.
 
 ## 8. MC — MCP server (control interface)
 

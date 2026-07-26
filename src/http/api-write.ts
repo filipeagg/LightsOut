@@ -337,6 +337,31 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
       return actions.writeDoc("panel", id, input.doc, input.content);
     }),
   );
+
+  // --- Retiring a project (PM-08) ------------------------------------------
+
+  app.post("/api/projects/:id/archived", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = idParam.parse(request.params);
+      const { archived } = body(
+        z.object({ archived: z.boolean().default(true) }),
+        request.body,
+      );
+      return { project: actions.archiveProject("panel", id, archived) };
+    }),
+  );
+
+  /** Irreversible, so the body has to name the project (WP-11). */
+  app.delete("/api/projects/:id", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = idParam.parse(request.params);
+      const input = body(
+        z.object({ confirm: z.string().min(1), keepFiles: z.boolean().optional() }),
+        request.body,
+      );
+      return actions.deleteProject("panel", id, input);
+    }),
+  );
 }
 
 /** Resolve a phase by its ulid, so the route can name the project it belongs to. */

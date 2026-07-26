@@ -37,6 +37,19 @@ body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px
 :focus-visible{outline:none;box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--accent-fg)}
 a{color:inherit;text-decoration:none}
 button{font:inherit;color:inherit;cursor:pointer}
+input,select,textarea{
+  font:400 14px/20px var(--sans);color:var(--fg);background:var(--surface-2);
+  border:1px solid var(--line-2);border-radius:var(--r-sm);padding:9px 12px;width:100%;
+  transition:border-color .15s var(--ease)
+}
+select{height:40px;padding:0 12px;appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23777b84' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 11px center;padding-right:32px}
+input{height:40px}
+input:hover,select:hover,textarea:hover{border-color:var(--line-3)}
+input::placeholder,textarea::placeholder{color:var(--fg-3)}
+textarea{font-family:var(--mono);font-size:13px;line-height:20px;resize:vertical;min-height:64px}
+input[type=checkbox]{width:auto;height:auto;accent-color:var(--accent)}
 code,.mono{font-family:var(--mono);font-size:13px}
 code{color:var(--fg-2)}
 
@@ -84,6 +97,8 @@ h1 em,h2 em{font-style:normal;color:var(--fg-3)}
 .btn.sm{height:32px;padding:0 10px;font-size:13px}
 .btn svg{width:15px;height:15px;flex:0 0 15px}
 .btn.sm svg{width:14px;height:14px;flex:0 0 14px}
+.btn.danger{color:var(--red-fg);border-color:var(--red-line);background:transparent}
+.btn.danger:hover{background:var(--red-bg);border-color:var(--red);color:var(--red-fg)}
 .btn:disabled,.btn:disabled:hover{background:var(--surface-2);border-color:var(--line);color:var(--fg-3);cursor:not-allowed}
 .pill{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;font-size:13px;
   border-radius:var(--r-sm);border:1px solid var(--line-2);background:var(--surface-2);color:var(--fg-2);white-space:nowrap}
@@ -216,11 +231,13 @@ const ICON = {
 /** Everything the views read. Replaced wholesale, never patched in place. */
 const store = {
   overview: null, project: null, history: null, agents: null, health: null,
-  templates: null, knowledge: null, vault: null, phases: null, error: "",
+  templates: null, knowledge: null, vault: null, phases: null, models: null, error: "",
 };
 /** Which row has its editor open. Panel-local: the server has no opinion about it. */
 let editing = null;
 let route = { name: "/", id: null, tab: null };
+/** Whether the project list includes archived projects (PM-08). Panel-local, like `editing`. */
+let showArchived = false;
 let stream = null;
 let runListener = null;
 let timeline = [];
@@ -268,6 +285,31 @@ async function act(method, path, payload) {
 /** A destructive button names the object it is about to remove (WP-11). */
 function confirmed(what) {
   return window.confirm(`Delete ${what}? This cannot be undone from here.`);
+}
+
+/* ---------- retiring a project (PM-08) ---------- */
+
+async function archiveProject(id, archived) {
+  await act("POST", `/api/projects/${encodeURIComponent(id)}/archived`, { archived });
+  if (archived) location.hash = "#/projects";
+}
+
+/**
+ * Deleting a project is the one action that destroys work, so it is not a yes/no box: the id has
+ * to be typed back, which is the same `confirm` the API demands (WP-11, PM-08).
+ */
+async function deleteProject(id) {
+  const typed = window.prompt(
+    `This deletes ${id} for good: its whole history and its folder in the workspace.\n\n` +
+      `Type the project id to confirm:`,
+  );
+  if (typed === null) return;
+  if (typed.trim() !== id) {
+    store.error = `"${typed}" is not ${id}; nothing was deleted`;
+    return paint();
+  }
+  await act("DELETE", `/api/projects/${encodeURIComponent(id)}`, { confirm: id });
+  location.hash = "#/projects";
 }
 
 const field = (id) => {
@@ -387,7 +429,7 @@ function runCard(run) {
     ${last ? `<div class="note" style="margin-top:16px"><span class="mono">${esc(last.type)}</span>
       — ${esc(JSON.stringify(last.payload).slice(0, 200))}</div>` : ""}
     <div class="row" style="margin-top:16px">
-      <button class="danger" onclick="abortRun('${esc(run.id)}')">Abort the chain</button>
+      <button class="btn danger" onclick="abortRun('${esc(run.id)}')">Abort the chain</button>
     </div>
   </div>`;
 }
@@ -444,7 +486,7 @@ function answerForm(doubt) {
     <div class="row wrap" style="gap:8px">
       ${doubt.options
         .map(
-          (o) => `<button class="${o.id === doubt.recommendation ? "primary" : ""}"
+          (o) => `<button class="btn${o.id === doubt.recommendation ? " primary" : ""}"
             onclick="answerDoubt('${esc(doubt.id)}','${esc(o.id)}')">${esc(o.id)} — ${esc(o.text)}</button>`,
         )
         .join("")}
@@ -518,8 +560,8 @@ function newProjectForm() {
         : ""}
     </div>
     <div class="row" style="gap:8px;margin-top:12px">
-      <button class="primary" onclick="createProjectFromPanel()">Create</button>
-      <button onclick="editing=null;paint()">Cancel</button>
+      <button class="btn primary" onclick="createProjectFromPanel()">Create</button>
+      <button class="btn" onclick="editing=null;paint()">Cancel</button>
     </div>
   </div>`;
 }
@@ -540,7 +582,9 @@ function viewProjects() {
   if (!o) return `<div class="empty">Loading…</div>`;
   const header = `<h1>Projects <em>${o.projects.length}</em></h1>
     <div class="row" style="margin-bottom:16px">
-      <button class="primary" onclick="editing='new-project';paint()">New project</button>
+      <button class="btn primary" onclick="editing='new-project';paint()">New project</button>
+      <button class="btn" onclick="showArchived=!showArchived;load()">
+        ${showArchived ? "Hide archived" : "Show archived"}</button>
     </div>
     ${editing === "new-project" ? newProjectForm() : ""}`;
   if (o.projects.length === 0) {
@@ -558,7 +602,8 @@ function viewProjects() {
     <div class="card"><table>
       <thead><tr><th>Project</th><th>Status</th><th>Progress</th><th>Doubts</th><th>Last activity</th></tr></thead>
       <tbody>${o.projects.map((p) => `<tr onclick="location.hash='#/p/${encodeURIComponent(p.id)}'" style="cursor:pointer">
-        <td><b>${esc(p.name)}</b><div class="tiny muted mono">${esc(p.path)}</div></td>
+        <td><b>${esc(p.name)}</b>${p.archived ? ` <span class="pill amber">archived</span>` : ""}
+          <div class="tiny muted mono">${esc(p.path)}</div></td>
         <td>${statusPill(p.status)}</td>
         <td style="min-width:160px">${bar(p)}
           <div class="tiny muted" style="margin-top:6px">${p.chain ? esc(p.chain.title) : "—"}</div></td>
@@ -610,11 +655,11 @@ function phaseList() {
       <td>${statusPill(p.status === "done" ? "ok" : p.status)}</td>
       <td class="row" style="gap:6px;justify-content:flex-end">
         ${canLaunch
-          ? `<button class="tiny primary" onclick="editing='launch:${esc(p.id)}';paint()">
+          ? `<button class="btn sm primary" onclick="editing='launch:${esc(p.id)}';paint()">
                ${p.status === "pending" ? "Launch" : "Re-launch"}</button>`
           : ""}
         ${p.optional && p.status === "pending"
-          ? `<button class="tiny" onclick="act('POST','/api/phases/${esc(p.id)}/skip')">Skip</button>`
+          ? `<button class="btn sm" onclick="act('POST','/api/phases/${esc(p.id)}/skip')">Skip</button>`
           : ""}
       </td></tr>`;
         return editing === `launch:${p.id}`
@@ -622,8 +667,8 @@ function phaseList() {
               <label class="tiny">What are you asking for this time? (optional)<br>
                 <textarea id="ph-input" rows="4" style="width:100%"></textarea></label>
               <div class="row" style="gap:8px;margin-top:12px">
-                <button class="primary" onclick="launchPhase('${esc(p.id)}')">Launch ${esc(p.title)}</button>
-                <button onclick="editing=null;paint()">Cancel</button>
+                <button class="btn primary" onclick="launchPhase('${esc(p.id)}')">Launch ${esc(p.title)}</button>
+                <button class="btn" onclick="editing=null;paint()">Cancel</button>
               </div></div></td></tr>`
           : row;
       })
@@ -663,9 +708,9 @@ function viewProjectKnowledge() {
           : `<span class="tiny muted">—</span>`}</td>
         <td class="row" style="gap:6px;justify-content:flex-end">
           ${here
-            ? `<button class="tiny" onclick="act('DELETE','/api/projects/${encodeURIComponent(s.project.id)}/knowledge/${encodeURIComponent(b.id)}')">Detach</button>`
-            : `<button class="tiny" onclick="act('POST','/api/projects/${encodeURIComponent(s.project.id)}/knowledge',{baseId:'${esc(b.id)}'})">Attach</button>
-               <button class="tiny" onclick="act('POST','/api/projects/${encodeURIComponent(s.project.id)}/knowledge',{baseId:'${esc(b.id)}',writable:true})">Attach writable</button>`}
+            ? `<button class="btn sm" onclick="act('DELETE','/api/projects/${encodeURIComponent(s.project.id)}/knowledge/${encodeURIComponent(b.id)}')">Detach</button>`
+            : `<button class="btn sm" onclick="act('POST','/api/projects/${encodeURIComponent(s.project.id)}/knowledge',{baseId:'${esc(b.id)}'})">Attach</button>
+               <button class="btn sm" onclick="act('POST','/api/projects/${encodeURIComponent(s.project.id)}/knowledge',{baseId:'${esc(b.id)}',writable:true})">Attach writable</button>`}
         </td></tr>`;
         })
         .join("")}</tbody></table></div>`;
@@ -683,6 +728,14 @@ function viewProject() {
       <span class="pill">push: ${esc(p.pushPolicy)}</span>
       ${p.verifyCmd ? `<span class="pill code">verify: ${esc(p.verifyCmd)}</span>` : ""}
       ${p.remote ? `<span class="pill code">${esc(p.remote)}</span>` : ""}
+      ${p.archived ? `<span class="pill amber">archived</span>` : ""}
+    </div>
+    <div class="row wrap" style="margin-bottom:24px">
+      <button class="btn sm" onclick="archiveProject('${esc(p.id)}',${p.archived ? "false" : "true"})">
+        ${p.archived ? "Unarchive" : "Archive"}</button>
+      <button class="btn sm danger" onclick="deleteProject('${esc(p.id)}')">Delete this project</button>
+      <span class="tiny muted">Archiving hides it and keeps everything. Deleting removes its
+        history and its folder in the workspace, for good (PM-08).</span>
     </div>
     ${s.run ? runCard(s.run) : `<div class="card"><div class="empty">No run in flight. Next: ${esc(s.state.next || "nothing queued")}</div></div>`}
     ${s.doubts.length ? `<h2>Open doubts <em>${s.doubts.length}</em></h2>${s.doubts.map(doubtCard).join("")}` : ""}
@@ -746,6 +799,31 @@ const sourcePill = (source) =>
  * The agent editor (AP-06..08). Saving a builtin writes a workspace copy that shadows it, so
  * the button says so rather than pretending the shipped file is being edited.
  */
+/**
+ * The per-engine catalog of AP-08, with whatever the profile already carries folded in so
+ * opening the editor cannot silently move a profile onto a different model. Falls back to the
+ * engine list alone if the catalog has not arrived yet.
+ */
+function modelChoices(engine, current) {
+  const catalog = store.models && store.models.engines ? store.models.engines[engine] : null;
+  const models = catalog ? catalog.models.slice() : [];
+  if (current && !models.includes(current)) models.unshift(current);
+  return models;
+}
+
+function modelOptions(engine, current) {
+  return modelChoices(engine, current)
+    .map((m) => `<option ${m === current ? "selected" : ""}>${esc(m)}</option>`)
+    .join("");
+}
+
+/** Repaint the model select when the engine changes: the two lists are not interchangeable. */
+function onEngineChange(engineId, modelId) {
+  const engine = document.getElementById(engineId).value;
+  const select = document.getElementById(modelId);
+  select.innerHTML = modelOptions(engine, select.value);
+}
+
 function agentEditor(p, packs) {
   const engines = ["claude", "codex"];
   const reasonings = ["", "minimal", "low", "medium", "high"];
@@ -753,10 +831,12 @@ function agentEditor(p, packs) {
     <div class="card pad" style="margin:8px 0">
       <div class="row wrap" style="gap:16px;margin-bottom:12px">
         <label class="tiny">Name<br><input id="ag-name" value="${esc(p.name || p.id)}"></label>
-        <label class="tiny">Engine<br><select id="ag-engine">${engines
-          .map((e) => `<option ${e === p.engine ? "selected" : ""}>${e}</option>`)
-          .join("")}</select></label>
-        <label class="tiny">Model<br><input id="ag-model" value="${esc(p.model || "")}"></label>
+        <label class="tiny">Engine<br>
+          <select id="ag-engine" onchange="onEngineChange('ag-engine','ag-model')">${engines
+            .map((e) => `<option ${e === p.engine ? "selected" : ""}>${e}</option>`)
+            .join("")}</select></label>
+        <label class="tiny">Model<br>
+          <select id="ag-model">${modelOptions(p.engine, p.model || "")}</select></label>
         <label class="tiny">Reasoning<br><select id="ag-reasoning">${reasonings
           .map((r) => `<option ${r === (p.reasoning || "") ? "selected" : ""}>${r}</option>`)
           .join("")}</select></label>
@@ -769,11 +849,11 @@ function agentEditor(p, packs) {
         <textarea id="ag-instructions" rows="10" style="width:100%">${esc(p.instructions || "")}</textarea>
       </label>
       <div class="row" style="gap:8px;margin-top:12px">
-        <button class="primary" onclick="saveAgent('${esc(p.id)}')">
+        <button class="btn primary" onclick="saveAgent('${esc(p.id)}')">
           ${p.source === "builtin" ? "Save as a workspace copy" : "Save"}</button>
-        <button onclick="editing=null;paint()">Cancel</button>
+        <button class="btn" onclick="editing=null;paint()">Cancel</button>
         ${p.source === "workspace"
-          ? `<button class="danger" onclick="deleteAgent('${esc(p.id)}')">Delete the copy</button>`
+          ? `<button class="btn danger" onclick="deleteAgent('${esc(p.id)}')">Delete the copy</button>`
           : ""}
       </div>
     </div></td></tr>`;
@@ -787,8 +867,8 @@ function viewAgents() {
       Editing a builtin writes a workspace copy that shadows it; deleting the copy brings the
       builtin back (AP-06, §2).</p>
     <div class="row" style="margin-bottom:16px">
-      <button class="primary" onclick="editing='new-agent';paint()">New profile</button>
-      <button onclick="act('POST','/api/agents/reload')">Reload from disk</button>
+      <button class="btn primary" onclick="editing='new-agent';paint()">New profile</button>
+      <button class="btn" onclick="act('POST','/api/agents/reload')">Reload from disk</button>
     </div>
     ${editing === "new-agent" ? newAgentForm(a.packs) : ""}
     <div class="card"><table>
@@ -804,9 +884,9 @@ function viewAgents() {
         <td class="tiny">${sourcePill(p.source)}</td>
         <td class="row" style="gap:6px;justify-content:flex-end">
           ${p.valid
-            ? `<button class="tiny" onclick="act('POST','/api/agents/${encodeURIComponent(p.id)}/enabled',{enabled:${!p.enabled}})">
+            ? `<button class="btn sm" onclick="act('POST','/api/agents/${encodeURIComponent(p.id)}/enabled',{enabled:${!p.enabled}})">
                  ${p.enabled ? "Disable" : "Enable"}</button>
-               <button class="tiny" onclick="editing='${esc(p.id)}';paint()">Edit</button>`
+               <button class="btn sm" onclick="editing='${esc(p.id)}';paint()">Edit</button>`
             : `<span class="pill red"><span class="sdot"></span>rejected</span>`}
           ${p.enabled === false ? `<span class="pill amber"><span class="sdot"></span>disabled</span>` : ""}
         </td>
@@ -823,7 +903,11 @@ function newAgentForm(packs) {
     <div class="row wrap" style="gap:16px">
       <label class="tiny">Id<br><input id="ag-new-id" placeholder="my-builder"></label>
       <label class="tiny">Name<br><input id="ag-new-name" placeholder="My builder"></label>
-      <label class="tiny">Engine<br><select id="ag-new-engine"><option>claude</option><option>codex</option></select></label>
+      <label class="tiny">Engine<br>
+        <select id="ag-new-engine" onchange="onEngineChange('ag-new-engine','ag-new-model')">
+          <option>claude</option><option>codex</option></select></label>
+      <label class="tiny">Model<br>
+        <select id="ag-new-model">${modelOptions("claude", "")}</select></label>
       <label class="tiny">Policy pack<br><select id="ag-new-policy">${packs
         .map((k) => `<option>${esc(k)}</option>`)
         .join("")}</select></label>
@@ -831,8 +915,8 @@ function newAgentForm(packs) {
     <label class="tiny">Instructions<br>
       <textarea id="ag-new-instructions" rows="6" style="width:100%"></textarea></label>
     <div class="row" style="gap:8px;margin-top:12px">
-      <button class="primary" onclick="createAgent()">Create</button>
-      <button onclick="editing=null;paint()">Cancel</button>
+      <button class="btn primary" onclick="createAgent()">Create</button>
+      <button class="btn" onclick="editing=null;paint()">Cancel</button>
     </div>
   </div>`;
 }
@@ -844,6 +928,7 @@ async function createAgent() {
     id,
     name: field("ag-new-name") || id,
     engine: field("ag-new-engine"),
+    model: field("ag-new-model"),
     policy: field("ag-new-policy"),
     instructions: $("ag-new-instructions").value,
   });
@@ -891,9 +976,9 @@ function viewTemplates() {
           ${tpl.requiresWritableKnowledge ? `<span class="pill amber">needs a writable base</span>` : ""}
           <div class="tiny muted">${esc(tpl.description || "")}</div></div>
         <div class="row" style="gap:6px">
-          <button class="tiny" onclick="editing='${esc(tpl.id)}';paint()">Edit phases</button>
+          <button class="btn sm" onclick="editing='${esc(tpl.id)}';paint()">Edit phases</button>
           ${tpl.source === "workspace"
-            ? `<button class="tiny danger" onclick="deleteTemplate('${esc(tpl.id)}')">Delete</button>`
+            ? `<button class="btn sm danger" onclick="deleteTemplate('${esc(tpl.id)}')">Delete</button>`
             : ""}
         </div>
       </div>
@@ -924,9 +1009,9 @@ function templateEditor(tpl) {
         JSON.stringify(tpl.phases.map(cleanPhase), null, 2),
       )}</textarea></label>
     <div class="row" style="gap:8px;margin-top:12px">
-      <button class="primary" onclick="saveTemplate('${esc(tpl.id)}')">
+      <button class="btn primary" onclick="saveTemplate('${esc(tpl.id)}')">
         ${tpl.source === "builtin" ? "Save as a workspace copy" : "Save"}</button>
-      <button onclick="editing=null;paint()">Cancel</button>
+      <button class="btn" onclick="editing=null;paint()">Cancel</button>
     </div>
   </div>`;
 }
@@ -967,7 +1052,7 @@ function viewKnowledge() {
       with its base and its kind, because a preference and a constraint are not the same
       thing (KB-02).</p>
     <div class="row" style="margin-bottom:16px">
-      <button class="primary" onclick="editing='new-base';paint()">New base</button>
+      <button class="btn primary" onclick="editing='new-base';paint()">New base</button>
     </div>
     ${editing === "new-base"
       ? `<div class="card pad" style="margin-bottom:16px">
@@ -982,8 +1067,8 @@ function viewKnowledge() {
           </div>
           <label class="tiny">Description<br><input id="kb-description" style="width:100%"></label>
           <div class="row" style="gap:8px;margin-top:12px">
-            <button class="primary" onclick="createBase()">Create</button>
-            <button onclick="editing=null;paint()">Cancel</button>
+            <button class="btn primary" onclick="createBase()">Create</button>
+            <button class="btn" onclick="editing=null;paint()">Cancel</button>
           </div>
         </div>`
       : ""}
@@ -997,8 +1082,8 @@ function viewKnowledge() {
           <div class="tiny muted">${b.documents.length} document(s)${
             b.updated ? ` · updated ${esc(b.updated)}` : ""}</div></div>
         <div class="row" style="gap:6px">
-          <button class="tiny" onclick="editing='doc:${esc(b.id)}';paint()">Add a document</button>
-          <button class="tiny danger" onclick="deleteBase('${esc(b.id)}')">Delete</button>
+          <button class="btn sm" onclick="editing='doc:${esc(b.id)}';paint()">Add a document</button>
+          <button class="btn sm danger" onclick="deleteBase('${esc(b.id)}')">Delete</button>
         </div>
       </div>
       <div class="tiny" style="margin-top:8px">${b.documents
@@ -1009,8 +1094,8 @@ function viewKnowledge() {
             <label class="tiny">File name<br><input id="kb-doc-file" placeholder="data-model.md"></label>
             <label class="tiny">Content<br><textarea id="kb-doc-body" rows="10" style="width:100%"></textarea></label>
             <div class="row" style="gap:8px;margin-top:12px">
-              <button class="primary" onclick="saveDoc('${esc(b.id)}')">Save the document</button>
-              <button onclick="editing=null;paint()">Cancel</button>
+              <button class="btn primary" onclick="saveDoc('${esc(b.id)}')">Save the document</button>
+              <button class="btn" onclick="editing=null;paint()">Cancel</button>
             </div></div>`
         : ""}
     </div>`,
@@ -1054,7 +1139,7 @@ function viewVault() {
       one: the panel can set a token and can tell you whether one is set, and that is all
       (VT-03).</p>
     <div class="row" style="margin-bottom:16px">
-      <button class="primary" onclick="editing='new-entry';paint()">New entry</button>
+      <button class="btn primary" onclick="editing='new-entry';paint()">New entry</button>
     </div>
     ${editing === "new-entry" ? vaultForm({ id: "", label: "", auth: "none", fields: [] }, true) : ""}
     ${v.entries
@@ -1069,8 +1154,8 @@ function viewVault() {
             .map((f) => `<code>${esc(f.name)}</code> ${f.present ? "set" : "<b>empty</b>"}`)
             .join(" · ") || "<span class='muted'>no fields</span>"}</div></div>
         <div class="row" style="gap:6px">
-          <button class="tiny" onclick="editing='${esc(e.id)}';paint()">Edit</button>
-          <button class="tiny danger" onclick="deleteEntry('${esc(e.id)}')">Delete</button>
+          <button class="btn sm" onclick="editing='${esc(e.id)}';paint()">Edit</button>
+          <button class="btn sm danger" onclick="deleteEntry('${esc(e.id)}')">Delete</button>
         </div>
       </div>
       ${editing === e.id ? vaultForm(e, false) : ""}
@@ -1100,8 +1185,8 @@ function vaultForm(entry, isNew) {
         (entry.fields || []).map((f) => `${f.name}=`).join("\n"),
       )}</textarea></label>
     <div class="row" style="gap:8px;margin-top:12px">
-      <button class="primary" onclick="saveEntry(${isNew ? "null" : `'${esc(entry.id)}'`})">Save</button>
-      <button onclick="editing=null;paint()">Cancel</button>
+      <button class="btn primary" onclick="saveEntry(${isNew ? "null" : `'${esc(entry.id)}'`})">Save</button>
+      <button class="btn" onclick="editing=null;paint()">Cancel</button>
     </div>
   </div>`;
 }
@@ -1229,6 +1314,9 @@ async function load() {
       watchRun(store.project.run ? store.project.run.id : null);
     } else if (route.name === "/agents") {
       store.agents = await api("/api/agents");
+      // AP-08: the editor offers models from this catalog and never a free-text box, so it is
+      // fetched with the profiles rather than lazily inside the editor.
+      if (!store.models) store.models = await api("/api/agents/models");
     } else if (route.name === "/templates") {
       store.templates = await api("/api/templates");
     } else if (route.name === "/knowledge") {
@@ -1238,7 +1326,7 @@ async function load() {
     } else if (route.name === "/health") {
       store.health = await api("/health");
     } else {
-      store.overview = await api("/api/overview");
+      store.overview = await api(`/api/overview${showArchived ? "?archived=true" : ""}`);
       // The project list needs the templates to offer them in the create form (WP-10).
       if (route.name === "/projects" && !store.templates) {
         store.templates = await api("/api/templates").catch(() => null);

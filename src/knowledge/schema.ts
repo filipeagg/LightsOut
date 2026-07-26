@@ -83,9 +83,24 @@ export function resolveSource(
   if (!dir.startsWith(root + sep)) {
     return { error: `source escapes the workspace: ${source}` };
   }
+  // `knowledge/` itself is refused, and so is a folder directly inside it: that is a base
+  // directory, and a base whose source is another base's directory would shadow its documents.
+  // Deeper is allowed, because that is how a documentation tree gets split into the parts a
+  // project actually needs — `knowledge/company/product/technical` as one base and not the rest
+  // (KB-08, KB-10).
   const knowledge = pathResolve(workspace, "knowledge");
-  if (dir === knowledge || dir.startsWith(knowledge + sep)) {
-    return { error: "source cannot point inside knowledge/; that is where the bases live" };
+  if (dir === knowledge) {
+    return { error: "source cannot be knowledge/ itself; that is where the bases live" };
+  }
+  if (dir.startsWith(knowledge + sep)) {
+    const inside = dir.slice(knowledge.length + 1).split(sep).filter(Boolean);
+    if (inside.length === 1) {
+      return {
+        error:
+          `${cleaned} is a base directory, not a source. Adopt it as a base in place, or point ` +
+          `at a folder inside it.`,
+      };
+    }
   }
   return { dir };
 }

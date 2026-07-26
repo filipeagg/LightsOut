@@ -232,7 +232,7 @@ const ICON = {
 const store = {
   overview: null, project: null, history: null, agents: null, health: null,
   templates: null, knowledge: null, vault: null, phases: null, models: null, folders: null,
-  error: "",
+  error: "", notice: "",
 };
 /** Which row has its editor open. Panel-local: the server has no opinion about it. */
 let editing = null;
@@ -275,11 +275,19 @@ async function write(method, path, payload) {
   return body;
 }
 
-/** Run a mutation, show what it said if it refused, and re-read the view either way. */
+/**
+ * Run a mutation, say what happened either way, and re-read the view.
+ *
+ * The confirmation is not decoration. A form that closes and shows nothing is indistinguishable
+ * from a form that failed silently, and "it didn't save" was a real report against exactly that.
+ * Now every mutation ends in a sentence: what changed, or why it was refused.
+ */
 async function act(method, path, payload) {
+  store.error = "";
+  store.notice = "";
   try {
-    store.error = "";
-    await write(method, path, payload);
+    const body = await write(method, path, payload);
+    store.notice = describeResult(method, path, body);
   } catch (err) {
     store.error = err.message;
   }
@@ -288,6 +296,34 @@ async function act(method, path, payload) {
   editingJson = false;
   sourcePick = null;
   await load();
+}
+
+/** One line naming what the server actually did, read from what it sent back. */
+function describeResult(method, path, body) {
+  if (body.base) {
+    const where = body.inPlace
+      ? ` — the folder itself is now the base`
+      : body.base.source
+        ? ` — reading from ${body.base.source}`
+        : "";
+    return `Saved the knowledge base ${body.base.id}${where}.`;
+  }
+  if (body.manifest) {
+    const where = body.inPlace
+      ? `the folder itself is now the base`
+      : `it reads from ${body.manifest.source || "its own folder"}`;
+    return `Created the knowledge base ${body.manifest.id}: ${where}.`;
+  }
+  if (body.agent) return `Saved the agent ${body.agent.id}.`;
+  if (body.template) return `Saved the template ${body.template.id}.`;
+  if (body.project) return `Saved the project ${body.project.id || body.project.name}.`;
+  if (body.file) return `Wrote ${body.file}.`;
+  if (body.deleted) return "Deleted.";
+  if (body.detached) return "Detached.";
+  if (body.revealedBuiltin !== undefined) {
+    return body.revealedBuiltin ? "Deleted the copy; the builtin is back." : "Deleted.";
+  }
+  return method === "DELETE" ? "Deleted." : "Saved.";
 }
 
 /** A destructive button names the object it is about to remove (WP-11). */
@@ -1193,7 +1229,6 @@ function viewKnowledge() {
     <div class="row" style="margin-bottom:16px">
       <button class="btn primary" onclick="editBase('new-base')">New base</button>
     </div>
-    ${adoptableCard(k)}
     ${editing === "new-base" ? baseForm(null) : ""}
     ${k.bases
       .map(
@@ -1220,45 +1255,6 @@ function viewKnowledge() {
     </div>`,
       )
       .join("")}`;
-}
-
-/**
- * Folders under `knowledge/` that hold documents and no manifest (KB-10). They used to appear as
- * red rejected bases, which told someone who had just dropped their documentation in there that
- * they had done something wrong. They had not: the manifest is ours to write, not theirs.
- */
-function adoptableCard(k) {
-  const folders = (k.adoptable || []).filter((f) => f.documents > 0);
-  if (folders.length === 0) return "";
-  return `<div class="card pad" style="margin-bottom:16px;border-color:var(--accent)">
-    <h3>Folders ready to become a base</h3>
-    <p class="tiny muted" style="margin:6px 0 12px">These hold documents but no
-      <code>knowledge.yaml</code>, so nothing reads them yet. Adopting one writes that file into
-      the folder — and an index only if it has none. Nothing is moved or overwritten.</p>
-    ${folders
-      .map(
-        (f) => `<div class="between" style="padding:6px 0">
-        <div><code>${esc(f.path)}</code>
-          <span class="tiny muted">${f.documents} document(s)${
-            f.hasIndex ? " · has an index already" : ""
-          }</span></div>
-        <button class="btn sm primary" onclick="adoptFolder('${esc(f.path)}','${esc(f.suggestedId)}')">
-          Adopt as a base</button>
-      </div>`,
-      )
-      .join("")}
-  </div>`;
-}
-
-/** Open the create form with the folder preselected, so adoption goes through the same one. */
-function adoptFolder(folderPath, suggestedId) {
-  sourcePick = folderPath;
-  editing = "new-base";
-  paint();
-  const id = $("kb-id");
-  if (id) id.value = suggestedId;
-  const name = $("kb-name");
-  if (name && !name.value) name.value = suggestedId;
 }
 
 /**
@@ -1315,13 +1311,13 @@ function baseForm(b) {
       <label class="tiny">Tags<br><input id="kb-tags" value="${esc((base.tags || []).join(", "))}" placeholder="erp, legacy"></label>
     </div>
     <label class="tiny">Description<br><input id="kb-description" value="${esc(base.description || "")}" style="width:100%"></label>
-    <div class="micro" style="margin-top:16px">Read documents from</div>
+    <div class="micro" style="margin-top:16px">Where the documents are</div>
+    <p class="tiny muted" style="margin:4px 0 8px">Pick any folder in the workspace — a whole tree
+      or one branch of it, so a base can be just the part a project needs. Or leave the first
+      option and this base holds its own documents, written here. Only the workspace is listed: a
+      browser cannot hand over a folder path, and the container's filesystem <em>is</em> the
+      workspace (RT-02), so a folder elsewhere on the computer is absent rather than forbidden.</p>
     ${folderTree(base, folders, known)}
-    <p class="tiny muted" style="margin-top:8px">A folder here stays the source of truth: drop a
-      <code>.md</code> or <code>.txt</code> in it and the next session sees it. Only the workspace
-      is listed, and not out of caution — a browser cannot hand over a folder path, and the
-      container's filesystem <em>is</em> the workspace (RT-02), so a folder elsewhere on the
-      computer is absent rather than forbidden. A linked base cannot be the writable one (KB-05).</p>
     <div class="row" style="gap:8px;margin-top:12px">
       <button class="btn primary" onclick="saveBase(${isNew ? "null" : `'${esc(base.id)}'`})">
         ${isNew ? "Create" : "Save"}</button>
@@ -1386,21 +1382,25 @@ function folderTree(base, folders, known) {
  * because "adopt" writes a file into a folder that belongs to the user.
  */
 function adoptHint(chosen, folders) {
-  if (!chosen) return "";
+  if (!chosen) {
+    return `<p class="tiny muted" style="margin-top:8px">This base will hold its own documents:
+      write or upload them here once it exists.</p>`;
+  }
   const folder = folders.find((f) => f.path === chosen);
   if (!folder) return "";
   if (folder.baseId) {
     return `<p class="tiny" style="margin-top:8px;color:var(--amber-fg)">
-      <code>${esc(chosen)}</code> already is the base <code>${esc(folder.baseId)}</code>.</p>`;
+      <code>${esc(chosen)}</code> already is the base <code>${esc(folder.baseId)}</code>. Pick a
+      folder inside it to make a base out of just that part.</p>`;
   }
   const where = folder.adoptInPlace
     ? `a <code>knowledge.yaml</code> is written into <code>${esc(chosen)}</code> itself and the
        folder becomes the base — nothing moves`
     : `a base is created in <code>knowledge/&lt;id&gt;</code> that reads from
        <code>${esc(chosen)}</code>; that folder is not touched`;
-  return `<p class="tiny muted" style="margin-top:8px">On Create: ${where}. Its
-    ${folder.documents} document(s), subfolders included, become readable to any project this base
-    is attached to. An existing index is kept as it is.</p>`;
+  return `<p class="tiny" style="margin-top:8px;color:var(--fg-2)">On Create: ${where}. Its
+    <b>${folder.documents} document(s)</b>, subfolders included, become readable to any project
+    this base is attached to. An existing index is kept as it is.</p>`;
 }
 
 /**
@@ -1660,9 +1660,14 @@ function paint() {
   const render = RENDER[route.name] ?? (() => `<div class="empty">Not found: ${esc(location.hash)}</div>`);
   // The timeline is the one thing the user scrolls while it is being repainted every second.
   const scrolled = $("timeline") ? $("timeline").scrollTop : null;
-  $("view").innerHTML = store.error
-    ? `<div class="note bad" style="margin-bottom:24px">${esc(store.error)}</div>${render()}`
-    : render();
+  // A refusal and a confirmation are both messages the user asked for by pressing a button, so
+  // both sit above the view rather than one being a banner and the other nothing at all.
+  const banner = store.error
+    ? `<div class="note bad" style="margin-bottom:24px">${esc(store.error)}</div>`
+    : store.notice
+      ? `<div class="note good" style="margin-bottom:24px">${esc(store.notice)}</div>`
+      : "";
+  $("view").innerHTML = banner + render();
   if (scrolled !== null && $("timeline")) $("timeline").scrollTop = scrolled;
 
   const active = route.name === "/p" ? "/projects" : route.name;
@@ -1712,7 +1717,10 @@ async function load() {
         store.templates = await api("/api/templates").catch(() => null);
       }
     }
-    store.error = "";
+    // Deliberately not clearing `store.error` here. `act()` sets it and then calls this to
+    // re-read, so clearing it on a successful read threw away the refusal the user needed to
+    // see — a create that the server had rejected looked exactly like a create that did nothing.
+    // Stale messages are cleared on navigation instead, where they belong.
   } catch (err) {
     store.error = err.message;
   }
@@ -1804,6 +1812,11 @@ setInterval(() => {
 
 window.addEventListener("hashchange", () => {
   route = parseRoute();
+  // Navigating away is what clears a message: it belonged to the view that produced it.
+  store.error = "";
+  store.notice = "";
+  editing = null;
+  sourcePick = null;
   void load();
 });
 

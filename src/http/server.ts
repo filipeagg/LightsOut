@@ -8,7 +8,7 @@
  */
 import path from "node:path";
 import { readFile } from "node:fs/promises";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 import type { Config } from "../config.js";
 import type { Bus } from "../bus.js";
 import type { HealthProbe } from "../health.js";
@@ -111,12 +111,22 @@ export async function createHttpServer(deps: ServerDeps): Promise<FastifyInstanc
     });
   }
 
+  /**
+   * The panel is served with `no-store`. There is no build step and no content hash in the file
+   * name (ST-04), so a cached `index.html` is a panel from a previous image talking to the current
+   * API — which is exactly how a browser ends up rendering `[object Object]` from a shape the old
+   * code never expected. It is one small file over loopback; there is nothing to gain by caching
+   * it and a confusing failure to lose.
+   */
+  const noStore = (reply: FastifyReply): FastifyReply =>
+    reply.header("cache-control", "no-store, must-revalidate");
+
   app.get("/*", async (request, reply) => {
     const file = resolvePanelFile(request.url.split("?")[0] ?? "/");
     if (!file) return reply.code(400).send({ error: "bad path" });
     try {
       const body = await readFile(file);
-      return reply
+      return noStore(reply)
         .type(MIME[path.extname(file).toLowerCase()] ?? "application/octet-stream")
         .send(body);
     } catch {
@@ -124,9 +134,9 @@ export async function createHttpServer(deps: ServerDeps): Promise<FastifyInstanc
     }
   });
 
-  app.get("/", async (request, reply) => {
+  app.get("/", async (_request, reply) => {
     try {
-      return reply
+      return noStore(reply)
         .type("text/html; charset=utf-8")
         .send(await readFile(path.join(PANEL_DIR, "index.html")));
     } catch {

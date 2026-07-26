@@ -31,13 +31,13 @@ const write = async (relative: string, body: string) => {
 
 describe("resolveSource (KB-08)", () => {
   it("accepts a folder inside the workspace", () => {
-    const result = resolveSource(workspace, "docs/acmeerp");
-    expect(result).toEqual({ dir: path.resolve(workspace, "docs/acmeerp") });
+    const result = resolveSource(workspace, "docs/platform");
+    expect(result).toEqual({ dir: path.resolve(workspace, "docs/platform") });
   });
 
   it("normalises separators and a trailing slash", () => {
-    expect(resolveSource(workspace, "./docs\\acmeerp/")).toEqual({
-      dir: path.resolve(workspace, "docs/acmeerp"),
+    expect(resolveSource(workspace, "./docs\\platform/")).toEqual({
+      dir: path.resolve(workspace, "docs/platform"),
     });
   });
 
@@ -78,39 +78,39 @@ describe("document formats (KB-08)", () => {
 
 describe("a linked base", () => {
   it("reads its documents from the folder and keeps its own index", async () => {
-    await write("docs/acmeerp/data-model.md", "# tables");
-    await write("docs/acmeerp/rules.txt", "no negative stock");
-    await write("docs/acmeerp/diagram.png", "not text");
+    await write("docs/platform/data-model.md", "# tables");
+    await write("docs/platform/rules.txt", "no negative stock");
+    await write("docs/platform/diagram.png", "not text");
 
     const loader = new KnowledgeLoader(workspace);
     const writer = new KnowledgeWriter(loader);
     await loader.load();
-    await writer.putManifest("acmeerp", {
-      name: "Acmeerp docs",
+    await writer.putManifest("platform", {
+      name: "Platform docs",
       kind: "technical",
-      source: "docs/acmeerp",
+      source: "docs/platform",
     });
 
-    const base = loader.getOrThrow("acmeerp");
-    expect(base.source).toBe("docs/acmeerp");
-    expect(base.dir).toBe(path.join(workspace, "knowledge", "acmeerp"));
-    expect(base.docsDir).toBe(path.resolve(workspace, "docs/acmeerp"));
+    const base = loader.getOrThrow("platform");
+    expect(base.source).toBe("docs/platform");
+    expect(base.dir).toBe(path.join(workspace, "knowledge", "platform"));
+    expect(base.docsDir).toBe(path.resolve(workspace, "docs/platform"));
     expect(base.documents.map((d) => d.file)).toEqual(["data-model.md", "rules.txt"]);
-    expect(base.index).toContain("Acmeerp docs");
-    expect(await loader.readDocument("acmeerp", "data-model.md")).toBe("# tables");
+    expect(base.index).toContain("Platform docs");
+    expect(await loader.readDocument("platform", "data-model.md")).toBe("# tables");
   });
 
   it("sees a file dropped into the folder on the next load", async () => {
-    await write("docs/acmeerp/one.md", "one");
+    await write("docs/platform/one.md", "one");
     const loader = new KnowledgeLoader(workspace);
     const writer = new KnowledgeWriter(loader);
     await loader.load();
-    await writer.putManifest("acmeerp", { name: "D", kind: "technical", source: "docs/acmeerp" });
-    expect(loader.getOrThrow("acmeerp").documents).toHaveLength(1);
+    await writer.putManifest("platform", { name: "D", kind: "technical", source: "docs/platform" });
+    expect(loader.getOrThrow("platform").documents).toHaveLength(1);
 
-    await write("docs/acmeerp/two.md", "two");
+    await write("docs/platform/two.md", "two");
     await loader.load();
-    expect(loader.getOrThrow("acmeerp").documents.map((d) => d.file)).toEqual([
+    expect(loader.getOrThrow("platform").documents.map((d) => d.file)).toEqual([
       "one.md",
       "two.md",
     ]);
@@ -130,31 +130,31 @@ describe("a linked base", () => {
   });
 
   it("will not let a document be deleted through it", async () => {
-    await write("docs/acmeerp/one.md", "one");
+    await write("docs/platform/one.md", "one");
     const loader = new KnowledgeLoader(workspace);
     const writer = new KnowledgeWriter(loader);
     await loader.load();
-    await writer.putManifest("acmeerp", { name: "D", kind: "technical", source: "docs/acmeerp" });
+    await writer.putManifest("platform", { name: "D", kind: "technical", source: "docs/platform" });
 
-    await expect(writer.removeDocument("acmeerp", "one.md")).rejects.toThrow(/delete the file there/);
+    await expect(writer.removeDocument("platform", "one.md")).rejects.toThrow(/delete the file there/);
     // Deleting the base leaves the linked folder alone: it pointed at it, it never owned it.
-    await writer.remove("acmeerp", []);
+    await writer.remove("platform", []);
     await loader.load();
-    expect(loader.get("acmeerp")).toBeUndefined();
+    expect(loader.get("platform")).toBeUndefined();
     expect(await loader.list()).toHaveLength(0);
-    await write("docs/acmeerp/still-here.md", "yes");
+    await write("docs/platform/still-here.md", "yes");
   });
 
   it("unlinks back to its own folder when source is null", async () => {
-    await write("docs/acmeerp/one.md", "one");
+    await write("docs/platform/one.md", "one");
     const loader = new KnowledgeLoader(workspace);
     const writer = new KnowledgeWriter(loader);
     await loader.load();
-    await writer.putManifest("acmeerp", { name: "D", kind: "technical", source: "docs/acmeerp" });
-    expect(loader.getOrThrow("acmeerp").documents).toHaveLength(1);
+    await writer.putManifest("platform", { name: "D", kind: "technical", source: "docs/platform" });
+    expect(loader.getOrThrow("platform").documents).toHaveLength(1);
 
-    await writer.putManifest("acmeerp", { source: null });
-    const base = loader.getOrThrow("acmeerp");
+    await writer.putManifest("platform", { source: null });
+    const base = loader.getOrThrow("platform");
     expect(base.source).toBeUndefined();
     expect(base.docsDir).toBe(base.dir);
     expect(base.documents).toHaveLength(0);
@@ -163,11 +163,11 @@ describe("a linked base", () => {
 
 describe("listWorkspaceFolders (KB-08)", () => {
   it("walks the whole tree in render order and hides LightsOut's own folders", async () => {
-    await write("docs/acmeerp/2026/q1.md", "q1");
-    await write("docs/acmeerp/a.md", "a");
-    await write("docs/acmeerp/notes.txt", "n");
-    await write("docs/acmeerp/diagram.png", "not text");
-    await write("docs/margaret/b.md", "b");
+    await write("docs/platform/2026/q1.md", "q1");
+    await write("docs/platform/a.md", "a");
+    await write("docs/platform/notes.txt", "n");
+    await write("docs/platform/diagram.png", "not text");
+    await write("docs/reports/b.md", "b");
     await write("notes/c.md", "c");
     await write("knowledge/base/knowledge.yaml", "name: x\nkind: other\n");
     await write("projects/p1/README.md", "p");
@@ -178,18 +178,18 @@ describe("listWorkspaceFolders (KB-08)", () => {
     // Depth first, alphabetical, so the list reads as the tree renders — no depth limit.
     expect(folders.map((f) => f.path)).toEqual([
       "docs",
-      "docs/acmeerp",
-      "docs/acmeerp/2026",
-      "docs/margaret",
+      "docs/platform",
+      "docs/platform/2026",
+      "docs/reports",
       "notes",
     ]);
 
-    const acmeerp = folders.find((f) => f.path === "docs/acmeerp")!;
-    expect(acmeerp.name).toBe("acmeerp");
-    expect(acmeerp.depth).toBe(1);
+    const platform = folders.find((f) => f.path === "docs/platform")!;
+    expect(platform.name).toBe("platform");
+    expect(platform.depth).toBe(1);
     // Only text files it holds directly: what linking here would actually give an agent.
-    expect(acmeerp.documents).toBe(2);
-    expect(acmeerp.hasChildren).toBe(true);
+    expect(platform.documents).toBe(2);
+    expect(platform.hasChildren).toBe(true);
 
     const docs = folders.find((f) => f.path === "docs")!;
     expect(docs.depth).toBe(0);

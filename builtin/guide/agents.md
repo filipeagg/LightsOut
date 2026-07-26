@@ -6,7 +6,7 @@ meta.tools: list_agents, write_agent, set_agent_enabled, delete_agent, reload_ag
 ## what_an_agent_is
 
 definition: a profile, not a process. Engine, model, reasoning level, policy pack, instructions and a declared deliverable.
-layering: ten profiles ship in the image; a file with the same id in workspace/agents/ shadows the builtin wholesale (TP-04).
+layering: eleven profiles ship in the image (ten that do work, plus the internal permission-judge); a file with the same id in workspace/agents/ shadows the builtin wholesale (TP-04).
 edit_a_builtin: write_agent with its id clones it into the workspace with your changes. The builtin returns if the copy is deleted.
 
 ## fields

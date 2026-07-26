@@ -40,6 +40,8 @@ export type EventType =
   | "doubt.opened"
   | "doubt.answered"
   | "advisor.consulted"
+  /** The permission judge answered (PE-11, DESIGN §6.5b). */
+  | "judge.verdict"
   | "verify.start"
   | "verify.result"
   | "git.commit"

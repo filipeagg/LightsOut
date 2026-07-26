@@ -194,7 +194,7 @@ describe("agents loader", () => {
     const loader = new AgentsLoader(workspace);
     const report = await loader.load();
     // 10 builtin profiles and 7 builtin packs, with builder and default shadowed (§2).
-    expect(report).toMatchObject({ loaded: 10, packs: 7, fromWorkspace: 1, rejected: [] });
+    expect(report).toMatchObject({ loaded: 11, packs: 7, fromWorkspace: 1, rejected: [] });
     expect(loader.profileOrThrow("builder").engine).toBe("claude");
     expect(loader.profile("builder")?.policy).toBe("default");
     expect(loader.pack("default")?.rules[0]?.verdict).toBe("allow");
@@ -208,7 +208,7 @@ describe("agents loader", () => {
 
     const loader = new AgentsLoader(workspace);
     const report = await loader.load();
-    expect(report.loaded).toBe(11); // 10 builtin + good.yaml
+    expect(report.loaded).toBe(12); // 11 builtin + good.yaml
     expect(report.rejected.map((r) => r.file).sort()).toEqual([
       "bad-engine.yaml",
       "bad-extra.yaml",
@@ -232,7 +232,7 @@ describe("agents loader", () => {
     const loader = new AgentsLoader(workspace);
     const report = await loader.load();
     expect(report.rejected.map((r) => r.file)).toEqual(["broken.yaml"]);
-    expect(report.loaded).toBe(10); // builder shadowed, broken rejected
+    expect(report.loaded).toBe(11); // builder shadowed, broken rejected
     expect(loader.instructionsFor(loader.profileOrThrow("builder"))).toBe(
       "HOUSE RULES\n\nOWN RULES",
     );
@@ -241,7 +241,7 @@ describe("agents loader", () => {
   it("serves the builtin library when the workspace has no profiles (BA-01)", async () => {
     const loader = new AgentsLoader(workspace);
     const report = await loader.load();
-    expect(report.loaded).toBe(10);
+    expect(report.loaded).toBe(11);
     expect(report.fromWorkspace).toBe(0);
     expect(report.packs).toBe(7);
     expect(report.rejected).toEqual([]);
@@ -262,7 +262,7 @@ describe("agents loader", () => {
     await writeAgent("builder.yaml", "name: Mine\nengine: codex\ninstructions: LOCAL\n");
     const loader = new AgentsLoader(workspace);
     const report = await loader.load();
-    expect(report.loaded).toBe(10);
+    expect(report.loaded).toBe(11);
     expect(report.fromWorkspace).toBe(1);
     const builder = loader.profileOrThrow("builder");
     expect(builder.name).toBe("Mine");

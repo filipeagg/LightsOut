@@ -629,6 +629,53 @@ ACP session/request_permission ──▶ classify.ts ──▶ engine.evaluate()
 
 While `waiting_human`, both watchdogs are suspended (the session is idle by design) and a slow clock (`LO_PERMISSION_WAIT_HOURS`) applies instead.
 
+### 6.5b The permission judge (PE-11)
+
+**Why, after PE-09 and PE-10.** Widening the classifier covers what we already know; learning covers
+what a human has already answered. Neither helps the *first* time an unrecognised command appears at
+three in the morning, and that is the case that costs eleven minutes of a chain to count lines.
+
+So before a `require_human` verdict becomes a doubt, one closed question goes to a judge:
+
+```
+agent    permission-judge   (claude / haiku / low, policy `advisor`: read-only, terminal denied)
+input    the command, the class the policy gave it and why, the project directory, the read-only
+         areas, the write scopes, and the two questions it must answer
+output   {"verdict":"allow"|"escalate","risk":"none"|"low"|"high","reason":"…","concerns":[…]}
+timeout  LO_JUDGE_TIMEOUT_MS (20 s). Slow is the same as unsure.
+```
+
+The two questions, and they are the whole prompt's point: **can this damage the system** (the
+container, the engines' configuration, credentials, anything outside the project) and **can this
+damage the user's work** (source, documents, git history, the knowledge base)? A command that can do
+neither is allowed; anything else escalates.
+
+**What it may decide, and nothing else:**
+
+| class | judge | why |
+|---|---|---|
+| `other` | yes | the classifier did not recognise it; this is where the noise lives |
+| `delete` | yes, only when every target resolves inside the project | `rm -rf build` is housekeeping; a deletion elsewhere is not the judge's to make |
+| `deps_install`, `network` | no | they change the build environment or leave the machine (ST-03) |
+| `credentials`, `publish_external`, `outside_workspace`, force push | no | the hard floor of PE-03, unchanged and unreachable from here |
+
+**Failure is a human, always.** A timeout, a crash, an unparseable answer, a `risk: high`, an
+engine that is not authenticated — every one of them opens the doubt exactly as before. The judge
+can only ever *shorten* the path to allow; it cannot lengthen the path to deny.
+
+**What an allow leaves behind:** a `provisional` decision row with the judge's reason (PE-06), a
+`perm.verdict` event carrying `judge: allow, risk: none`, an audit row, and a learned shape (PE-10)
+marked `added_by: judge` — so the same shape is free next time, listed separately from the ones a
+human allowed, and revocable with `forget_learned_allow`.
+
+**Order of the gate**, from cheapest to most expensive:
+
+1. the classifier (§7.1) — microseconds
+2. a learned shape (PE-10) — one indexed read
+3. the judge (this section) — one cheap turn, ~2 s
+4. the advisor (§8.2) — the other engine, for the doubts that are decisions rather than risks
+5. the human
+
 ### 6.6 Watchdogs (SR-04)
 
 Per run: hard timer (`quick`→`LO_TIMEOUT_QUICK_MIN`, `full`→`LO_TIMEOUT_FULL_MIN`, task override allowed) and inactivity timer re-armed on every persisted event. Expiry: `session/cancel`, grace 10 s, `SIGTERM` the adapter, status `timeout`/`stuck`, recovery info persisted (acp_session id enables resume where supported, SR-06).
@@ -1793,7 +1840,9 @@ rather than a confusing 401.
 
 ## 19. The builtin agent library (BA-01..06, phase 9)
 
-Ten profiles in `builtin/agents/`, with the policy packs they need in `builtin/policies/`.
+Eleven profiles in `builtin/agents/`, with the policy packs they need in `builtin/policies/`. Ten do
+work; the eleventh, `permission-judge` (claude / haiku / low, `advisor` pack), is internal and is
+never launched as a phase — it answers the gate question of §6.5b.
 Defaults below; every one is overridable per installation, per project and per launch (BA-03).
 
 | id | Engine / reasoning | Policy | Deliverable | What it is for |

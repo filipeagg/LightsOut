@@ -41,6 +41,8 @@ export type HumanGate = (request: {
   title: string;
   reason: string;
   options: PermissionOption[];
+  /** The paths the request named, when it named any: the judge needs them (PE-11). */
+  paths?: string[];
 }) => Promise<{ optionId: string } | { reject: true; explanation: string }>;
 
 export type RunSessionDeps = {
@@ -387,6 +389,7 @@ export class RunSession {
         title: toolCall.title ?? command ?? "action",
         reason: decision.reason,
         options: params.options,
+        ...(paths.length ? { paths } : {}),
       });
       if ("optionId" in answer) {
         return { outcome: { outcome: "selected", optionId: answer.optionId } };

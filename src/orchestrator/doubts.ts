@@ -19,6 +19,7 @@ import { consultAdvisor, otherEngine, type AdvisorResult } from "../acp/advisor.
 import { ProjectDocs } from "../projects/docs.js";
 import { ProjectGit } from "../projects/git.js";
 import { commandShape } from "../policy/classify.js";
+import { consultJudge, judgeAllows, judgeable, JUDGE_AGENT_ID } from "./judge.js";
 
 /** Irreversible or sensitive classes never auto-continue: they skip the advisor (DO-03). */
 const IRREVERSIBLE: ReadonlySet<ActionClass> = new Set<ActionClass>([
@@ -383,6 +384,90 @@ export class DoubtService {
   }
 
   /**
+   * The permission judge (PE-11, DESIGN §6.5b): does this command risk the system or the user's
+   * work? Only `other` and a deletion confined to the project are its to decide, and only an
+   * explicit low-risk allow counts. Returns true when the action may proceed without a human.
+   *
+   * An allow is recorded three ways: a provisional decision (so it is in DECISIONS.md like every
+   * other automatic call), an event, and a learned shape (PE-10) so the second time is free.
+   */
+  private async judge(input: {
+    project: ProjectRow;
+    task: TaskRow;
+    runId: string;
+    actionClass: string;
+    title: string;
+    reason: string;
+    paths?: string[];
+    readAreas?: string[];
+    writeScopes?: string[];
+  }): Promise<boolean> {
+    // Nothing here may break the gate: a judge that throws is a judge that abstains.
+    let profile;
+    try {
+      profile = this.agents.profile?.(JUDGE_AGENT_ID);
+    } catch {
+      return false;
+    }
+    if (!profile?.enabled) return false;
+    if (
+      !judgeable({
+        actionClass: input.actionClass as ActionClass,
+        projectPath: input.project.path,
+        command: input.title,
+        paths: input.paths,
+      })
+    ) {
+      return false;
+    }
+
+    const result = await consultJudge({
+      actionClass: input.actionClass as ActionClass,
+      title: input.title,
+      reason: input.reason,
+      projectPath: input.project.path,
+      ...(input.readAreas?.length ? { readAreas: input.readAreas } : {}),
+      ...(input.writeScopes?.length ? { writeScopes: input.writeScopes } : {}),
+      adapterCommand: this.adapterCommand(profile.engine),
+    });
+
+    const allowed = judgeAllows(result);
+    this.repos.events.append({
+      runId: input.runId,
+      type: "judge.verdict",
+      payload: {
+        class: input.actionClass,
+        allowed,
+        ...(result.ok
+          ? { risk: result.answer.risk, reason: result.answer.reason.slice(0, 200) }
+          : { error: result.error.slice(0, 200) }),
+        durationMs: result.durationMs,
+      },
+    });
+    if (!allowed || !result.ok) return false;
+
+    const shape = commandShape(input.title);
+    this.repos.decisions.record({
+      projectId: input.project.id,
+      taskId: input.task.id,
+      kind: "provisional",
+      question: `${input.actionClass}: ${input.title.slice(0, 200)}`,
+      choice: "allowed by the permission judge",
+      rationale: `${result.answer.reason} (risk: ${result.answer.risk})`,
+    });
+    if (shape) {
+      this.repos.learned.add({
+        shape,
+        sample: input.title.slice(0, 300),
+        actionClass: input.actionClass,
+        learnedFrom: `judge:${input.runId}`,
+        addedBy: "judge",
+      });
+    }
+    return true;
+  }
+
+  /**
    * Permission gate (DESIGN §6.5, §8.4): a `require_human` verdict opens a permission doubt
    * and holds the ACP response until someone answers or the slow clock expires. The waiting
    * promise is registered so `answer()` can resolve it from another call.
@@ -396,6 +481,12 @@ export class DoubtService {
     title: string;
     reason: string;
     options: PermissionOption[];
+    /** Paths the request named, when it named any: the judge needs them for a deletion (PE-11). */
+    paths?: string[];
+    /** Directories this project may read outside itself (PE-09), for the judge's context. */
+    readAreas?: string[];
+    /** Where this pack confines writes (§19), for the judge's context. */
+    writeScopes?: string[];
     /** Override the slow clock; only tests use this. */
     waitMs?: number;
     /** Override the database poll interval; only tests use this. */
@@ -405,6 +496,13 @@ export class DoubtService {
     const allowOption = input.options.find(
       (o) => o.kind === "allow_once" || o.kind === "allow_always",
     );
+
+    // PE-11: one cheap closed question before a person is woken. It can only shorten the path to
+    // allow — every failure, doubt or high risk falls through to the doubt below.
+    if (allowOption) {
+      const settled = await this.judge(input).catch(() => false);
+      if (settled) return { optionId: allowOption.optionId };
+    }
     const doubtOptions: DoubtOption[] = [
       { id: "A", text: `Allow: ${input.title}` },
       { id: "B", text: "Refuse and let the agent adapt or stop" },

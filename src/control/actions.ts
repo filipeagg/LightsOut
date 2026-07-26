@@ -256,6 +256,33 @@ export class Actions {
     return { chainId: chain.id, aborted };
   }
 
+  /**
+   * Restart a chain that stopped (OR-05). The counterpart to the pause: a chain interrupted by a
+   * container restart or a failed task had no way back before this, which left a project visibly
+   * stuck with no action that could unstick it.
+   */
+  resumeChain(
+    actor: Actor,
+    input: { chainId?: string; projectId?: string },
+  ): { chainId: string; requeued: string[]; started: boolean } {
+    const { repos } = this.deps;
+    const chainId =
+      input.chainId ??
+      (() => {
+        if (!input.projectId) throw new Error("give chainId or projectId");
+        this.requireNotArchived(input.projectId);
+        const chain = repos.chains.latestForProject(input.projectId);
+        if (!chain) throw new Error(`no chain for project ${input.projectId}`);
+        return chain.id;
+      })();
+    const result = this.deps.orchestrator.resumeChain(chainId);
+    repos.events.append({
+      type: "chain.state",
+      payload: { chainId: result.chainId, status: "active", reason: "resumed", actor },
+    });
+    return result;
+  }
+
   async answerDoubt(
     actor: Actor,
     input: { doubtId: string; choice: string; note?: string; projectId?: string },

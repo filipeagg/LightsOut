@@ -160,11 +160,36 @@ export class Orchestrator {
     if (this.locks.isLocked(project.id) || this.locks.atCapacity) return false;
     if (!this.repos.tasks.nextQueued(chain.id)) return false;
 
-    const driver = this.drive(project.id, chain.id).finally(() => {
-      this.driving.delete(chain.id);
-    });
+    // `drive` is started, not awaited, so its rejection has nowhere to go: without this catch an
+    // error anywhere in the chain loop is an unhandled rejection, and Node kills the process by
+    // default. That is how one dead adapter took the whole orchestrator down and left the chain
+    // paused with no explanation. Nothing here may throw.
+    const driver = this.drive(project.id, chain.id)
+      .catch((err: unknown) => this.driveCrashed(project.id, chain.id, err))
+      .finally(() => {
+        this.driving.delete(chain.id);
+      });
     this.driving.set(chain.id, driver);
     return true;
+  }
+
+  /**
+   * Last resort: the chain loop itself failed. Pause the chain and say why, so the state the user
+   * sees is "paused because X" rather than a chain that stopped moving for no visible reason.
+   */
+  private driveCrashed(projectId: string, chainId: string, err: unknown): void {
+    const detail = err instanceof Error ? err.message : String(err);
+    try {
+      this.repos.chains.setStatus(chainId, "paused");
+      this.repos.events.append({
+        type: "chain.state",
+        payload: { chainId, projectId, status: "paused", reason: "chain loop failed", detail },
+      });
+      this.bus.emit("overview");
+    } catch {
+      // The database is the last thing standing; if it is gone too, stderr is all we have.
+    }
+    console.error(`[chain:${chainId}] loop failed: ${detail}`);
   }
 
   /** Wait for every in-flight chain: used by graceful shutdown. */
@@ -199,14 +224,56 @@ export class Orchestrator {
       const acquired = this.locks.tryAcquire(projectId, task.id);
       if (!acquired) return; // another driver holds the project, or we are at capacity
 
+      // One task's failure stops this chain, not the loop and not the process. `runTask` does
+      // more than run the agent — git, the verify gate, the managed docs — and any of those can
+      // throw for reasons that have nothing to do with the next chain waiting its turn.
       let keepGoing = false;
       try {
         keepGoing = await this.runTask(project, chain, task);
+      } catch (err) {
+        this.taskCrashed(project, chain, task, err);
+        return;
       } finally {
         this.locks.release(projectId);
       }
       if (!keepGoing) return;
     }
+  }
+
+  /**
+   * A task threw instead of returning an outcome. Fail the task, pause the chain and record the
+   * reason on the task's own timeline, so the failure is visible where the user is already
+   * looking rather than only in the container log.
+   */
+  private taskCrashed(project: ProjectRow, chain: ChainRow, task: TaskRow, err: unknown): void {
+    const detail = err instanceof Error ? err.message : String(err);
+    try {
+      // The run row may still be open if the throw happened before the runner finished it.
+      for (const run of this.repos.runs.listByTask(task.id)) {
+        if (run.status !== "running" && run.status !== "waiting_human") continue;
+        this.repos.runs.finish(run.id, {
+          status: "error",
+          exitReason: `task failed outside the run: ${detail}`,
+          summary: null,
+          error: detail,
+        });
+      }
+      this.repos.tasks.setStatus(task.id, "error");
+      this.repos.chains.setStatus(chain.id, "paused");
+      this.repos.events.append({
+        type: "task.state",
+        payload: { taskId: task.id, status: "error", reason: "task failed", detail },
+      });
+      this.repos.events.append({
+        type: "chain.state",
+        payload: { chainId: chain.id, status: "paused", reason: "task failed", detail },
+      });
+      this.bus.emit("overview");
+    } catch {
+      // Nothing left to report with.
+    }
+    console.error(`[task:${task.id}] failed: ${detail}`);
+    void this.closePhase(task.id);
   }
 
   /** Returns true when the chain should continue with the next task. */
@@ -445,5 +512,42 @@ export class Orchestrator {
     });
     this.bus.emit("overview");
     return aborted;
+  }
+
+  /**
+   * Put a paused chain back to work (OR-05). Nothing is retried silently — this is only ever the
+   * answer to someone asking for it — but until now there was no way to ask: a chain paused by a
+   * container restart or a failed task was a dead end, with its tasks stuck `interrupted` and no
+   * action anywhere that could move them. Tasks that did not finish are queued again; tasks that
+   * ended `ok` are left alone, so resuming never redoes completed work.
+   */
+  resumeChain(chainId: string): { chainId: string; requeued: string[]; started: boolean } {
+    const chain = this.repos.chains.getOrThrow(chainId);
+    if (chain.status === "active") {
+      return { chainId: chain.id, requeued: [], started: this.driving.has(chain.id) };
+    }
+    if (chain.status === "completed") throw new Error(`chain ${chain.id} is already completed`);
+
+    const requeued: string[] = [];
+    for (const task of this.repos.tasks.listByChain(chain.id)) {
+      if (task.status === "ok" || task.status === "queued" || task.status === "running") continue;
+      this.repos.tasks.setStatus(task.id, "queued");
+      requeued.push(task.id);
+      this.repos.events.append({
+        type: "task.state",
+        payload: { taskId: task.id, status: "queued", reason: "chain resumed" },
+      });
+    }
+
+    this.repos.chains.setStatus(chain.id, "active");
+    this.repos.events.append({
+      type: "chain.state",
+      payload: { chainId: chain.id, status: "active", reason: "resumed", tasks: requeued.length },
+    });
+    this.bus.emit("overview");
+
+    const project = this.repos.projects.getOrThrow(chain.project_id);
+    const started = this.tryDrive(project, this.repos.chains.getOrThrow(chain.id));
+    return { chainId: chain.id, requeued, started };
   }
 }

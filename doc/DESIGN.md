@@ -776,6 +776,7 @@ two surfaces are skins, and a skin that is missing a control is a fork in slow m
 | `launch_chain` | `{projectId, title, tasks:[{title,spec,agentId,level?,verify?}]}` | `{chainId, taskIds, started:bool, queued:bool}` | fire-and-forget (MC-06) |
 | `launch_task` | `{projectId, title, spec, agentId, level?, verify?, chainId?}` | `{taskId, runId?, queued}` | appends to chain if given |
 | `abort_run` | `{runId?, chainId?}` | `{aborted:[ids]}` | OR-06 |
+| `resume_chain` | `{projectId?, chainId?}` | `{chainId, requeued:[ids], started:bool}` | OR-05. The counterpart to the pause: queues the tasks that did not finish and leaves `ok` ones alone. Never automatic — a chain paused by a container restart or a failed task had no way back before this |
 | `list_doubts` | `{projectId?, status?:'open'}` | `{doubts:[{id,ref,projectId,taskTitle,kind,context,blocks,options,recommendation,secondOpinion?,ageMin}]}` | Desktop renders options as buttons (MC-03) |
 | `answer_doubt` | `{doubtId, choice, note?}` | `{resumed:bool, runId?}` | DO-04; `doubtId` accepts the ulid or the `ref` (`D-3`) when `projectId` context is unambiguous |
 | `get_history` | `{projectId?, limit?:20, before?}` | `{runs:[{id,task,engine,model,status,startedAt,durationS,costUsd?,summary}], totals:{byStatus,costUsd}}` | OB-05 |
@@ -793,7 +794,17 @@ Behavioral notes: `launch_*` returns within ~1 s (run starts async); `project_st
 
 ### 11.2 Recovery pass
 
-`UPDATE runs SET status='interrupted', exit_reason='container restart' WHERE status IN ('running','waiting_human')` + matching task/chain updates + one `system` event each, including the stored `acp_session` for manual resume. Doubts stay open across restarts (they live in the DB).
+`UPDATE runs SET status='interrupted', exit_reason='container restart' WHERE status IN ('running','waiting_human')` + matching task/chain updates + one `system` event each, including the stored `acp_session` for manual resume. Doubts stay open across restarts (they live in the DB). "Manual resume" is `resume_chain` / `POST /api/projects/:id/resume` (§10.2): without it the recovery pass is a dead end, leaving tasks `interrupted` and no action able to move them.
+
+### 11.2b Failure containment
+
+Nothing a single run does may end the process, because the process is every other project's chain too. Three layers, outermost last:
+
+- **The runner** wraps `session.start()`. Whatever escapes becomes an `error` outcome and travels the ordinary failure path — run finished, task failed, chain paused, reason on the timeline — so a dead adapter costs one run.
+- **The chain loop** catches around `runTask` (which also does git, the verify gate and the managed docs) and around `drive` itself. `drive` is started and not awaited, so an uncaught rejection there has nowhere to go: that catch is what stands between a library rejecting a promise and a process exit.
+- **`index.ts`** registers `unhandledRejection` and `uncaughtException` handlers that log the stack, record a `system` event and **do not exit**. Node's default is to kill the process, which for an unattended orchestrator is the worst available response. This is a safety net, not a licence: every rejection it catches is a bug to fix where it happens.
+
+This is written down because the alternative was observed — an `EPIPE` on an adapter became `Error: ACP connection closed`, rejected the driver promise nobody had a `catch` on, killed the container, and left the user with a chain paused and no stated reason.
 
 ### 11.3 Auth expiry mid-run
 
@@ -880,6 +891,7 @@ POST   /api/projects/:id/phases      → add an ad-hoc phase (TP-08)
 POST   /api/phases/:phaseId/launch   → launch or re-launch (TP-07)
 POST   /api/phases/:phaseId/skip     → skip an optional phase
 POST   /api/runs/:id/abort           → abort the run (OR-06)
+POST   /api/projects/:id/resume      → put the project's paused chain back to work (OR-05)
 POST   /api/doubts/:id/answer        → answer a doubt (DO-04)
 POST   /api/projects/:id/doc         → write a file under the project's doc/ (MC-04 rules apply)
 POST   /api/projects/:id/archived    → archive or unarchive the project (PM-08)

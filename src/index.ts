@@ -215,6 +215,27 @@ async function main(): Promise<void> {
   };
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
   process.on("SIGINT", () => void shutdown("SIGINT"));
+
+  // 8. Last line of defence (RT-07). Node's default for an unhandled rejection is to kill the
+  // process, and for a system meant to run unattended that is the worst possible response to a
+  // library rejecting a promise nobody awaited: every other project's chain dies with it and the
+  // user is left with a container that restarted and a chain paused for no stated reason. This is
+  // not a licence to let errors go unhandled — each one is a bug to fix where it happens — but
+  // the orchestrator staying up is worth more than a clean exit.
+  const survive = (kind: string) => (err: unknown) => {
+    const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    console.error(`[${kind}] ${detail}`);
+    try {
+      repos.events.append({
+        type: "system",
+        payload: { reason: kind, detail: detail.split("\n").slice(0, 4).join(" | ") },
+      });
+    } catch {
+      // The database is what we would have used to report this. Stderr already has it.
+    }
+  };
+  process.on("unhandledRejection", survive("unhandledRejection"));
+  process.on("uncaughtException", survive("uncaughtException"));
 }
 
 main().catch((err: unknown) => {

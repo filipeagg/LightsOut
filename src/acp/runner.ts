@@ -201,7 +201,30 @@ export class TaskRunner {
       ...(input.onStderr ? { onStderr: input.onStderr } : {}),
     });
 
-    const outcome = await session.start();
+    // `session.start()` contains its own failures, but the ACP SDK can also reject a promise
+    // this code never awaits — a transport that closes mid-request rejects everything pending —
+    // and an unhandled rejection is fatal to the whole process by default. So the call is
+    // wrapped: whatever escapes becomes an `error` outcome and travels down the ordinary failure
+    // path, which finishes the run, fails the task, pauses the chain and records recovery info.
+    // A dead adapter must cost one run, never the orchestrator (OR-05, RT-07).
+    let outcome: RunOutcome;
+    try {
+      outcome = await session.start();
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      this.repos.events.append({
+        runId: run.id,
+        type: "system",
+        payload: { reason: "adapter failure", detail },
+      });
+      outcome = {
+        status: "error",
+        summary: "",
+        exitReason: `adapter failure: ${detail}`,
+        sentinelMissing: true,
+        ...(session.acpSession ? { acpSession: session.acpSession } : {}),
+      };
+    }
 
     this.repos.runs.finish(run.id, {
       status: outcome.status,

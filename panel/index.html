@@ -484,6 +484,11 @@ async function abortRun(runId) {
   await act("POST", `/api/runs/${encodeURIComponent(runId)}/abort`);
 }
 
+/** Put a paused chain back to work (OR-05). Finished tasks are left alone, so this is safe to press. */
+async function resumeChain(projectId) {
+  await act("POST", `/api/projects/${encodeURIComponent(projectId)}/resume`);
+}
+
 /* ---------- chain steps ---------- */
 function chainSteps(chain) {
   if (!chain) return `<div class="empty">No chain has been launched on this project yet.</div>`;
@@ -781,13 +786,13 @@ function viewProject() {
       <span class="tiny muted">Archiving hides it and keeps everything. Deleting removes its
         history and its folder in the workspace, for good (PM-08).</span>
     </div>
-    ${s.run ? runCard(s.run) : `<div class="card"><div class="empty">No run in flight. Next: ${esc(s.state.next || "nothing queued")}</div></div>`}
+    ${s.run ? runCard(s.run) : stoppedCard(s)}
     ${s.doubts.length ? `<h2>Open doubts <em>${s.doubts.length}</em></h2>${s.doubts.map(doubtCard).join("")}` : ""}
     <h2>Phases</h2>
     ${phaseList()}
     <h2>Chain</h2>
     <div class="card pad">${chainSteps(s.chain)}</div>
-    ${s.run ? `<h2>Timeline</h2><div class="card pad"><div class="timeline" id="timeline">${timelineRows()}</div></div>` : ""}
+    ${timelineSection(s)}
     <h2>State</h2>
     <div class="card pad"><dl class="kv">
       <dt>Phase</dt><dd>${esc(s.state.phase)}</dd>
@@ -797,6 +802,45 @@ function viewProject() {
            <span class="tiny muted">${esc(sinceIso(s.state.lastDecision.at))}</span>`
         : "—"}</dd>
     </dl></div>`;
+}
+
+/**
+ * What replaces the run card when nothing is running. "No run in flight" on its own is the least
+ * useful thing the panel can say about a chain that stopped: this says how the last run ended,
+ * in its own words, and offers the one action that moves the project forward.
+ */
+function stoppedCard(s) {
+  const paused = s.chain && (s.chain.status === "paused" || s.chain.status === "aborted");
+  const last = s.lastRun;
+  const reason = last ? (last.error || last.exitReason || "") : "";
+  return `<div class="card pad">
+    <div class="row wrap" style="justify-content:space-between;align-items:flex-start;gap:16px">
+      <div>
+        <div><b>No run in flight.</b> Next: ${esc(s.state.next || "nothing queued")}</div>
+        ${last ? `<div class="tiny muted" style="margin-top:8px">
+          Last run ended <b>${esc(last.status)}</b>${last.finishedAt ? ` ${esc(sinceIso(last.finishedAt))}` : ""}
+          on ${esc(last.engine)} — ${esc(last.task)}</div>
+          ${reason ? `<div class="code tiny" style="margin-top:8px">${esc(reason)}</div>` : ""}`
+        : `<div class="tiny muted" style="margin-top:8px">No run has been recorded yet.</div>`}
+      </div>
+      ${paused ? `<button class="btn sm primary" onclick="resumeChain('${esc(s.project.id)}')">Resume chain</button>` : ""}
+    </div>
+    ${paused ? `<div class="tiny muted" style="margin-top:12px">Resuming queues the tasks that did
+      not finish and leaves the finished ones alone (OR-05).</div>` : ""}
+  </div>`;
+}
+
+/**
+ * The timeline of the live run, or of the last one that ended. A finished run's events were
+ * already stored and served; there was simply no way to look at them.
+ */
+function timelineSection(s) {
+  if (s.run) {
+    return `<h2>Timeline</h2><div class="card pad"><div class="timeline" id="timeline">${timelineRows()}</div></div>`;
+  }
+  if (!s.lastRun) return "";
+  return `<h2>Timeline <span class="tiny muted">last run</span></h2>
+    <div class="card pad"><div class="timeline" id="timeline">${timelineRows()}</div></div>`;
 }
 
 function timelineRows() {
@@ -1692,7 +1736,15 @@ async function load() {
         store.history = await api(`/api/projects/${id}/history?limit=50`);
       }
       if (route.tab === "knowledge") store.knowledge = await api("/api/knowledge");
-      watchRun(store.project.run ? store.project.run.id : null);
+      // Live run if there is one, otherwise the last one that ended: its events were already
+      // stored and served, and until now nothing in the panel could reach them.
+      watchRun(
+        store.project.run
+          ? store.project.run.id
+          : store.project.lastRun
+            ? store.project.lastRun.id
+            : null,
+      );
     } else if (route.name === "/agents") {
       store.agents = await api("/api/agents");
       // AP-08: the editor offers models from this catalog and never a free-text box, so it is

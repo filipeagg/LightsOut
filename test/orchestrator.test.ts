@@ -58,6 +58,28 @@ describe("run locks", () => {
 });
 
 describe("recovery", () => {
+  it("puts a phase left running back to pending, so the panel stops claiming it is working", () => {
+    const { project, tasks } = seedChain();
+    const task = tasks[0]!;
+    repos.runs.start({ taskId: task.id, engine: "claude" });
+    const phase = repos.phases.create({
+      projectId: project.id,
+      position: 1,
+      phaseId: "analyse",
+      title: "Read the system until you understand it",
+      agentId: "codebase-analyst",
+      instructions: "read",
+    });
+    repos.phases.markRunning(phase.id, task.id);
+    expect(repos.phases.getOrThrow(phase.id).status).toBe("running");
+
+    recoverInterrupted(repos);
+
+    // This is what the user saw: a phase row reading "running" with no run in flight.
+    expect(repos.phases.getOrThrow(phase.id).status).toBe("pending");
+    expect(repos.tasks.getOrThrow(task.id).status).toBe("interrupted");
+  });
+
   it("marks orphaned runs interrupted and pauses their chains (RT-07)", () => {
     const { chain, tasks } = seedChain();
     const run = repos.runs.start({
@@ -374,6 +396,83 @@ describe("chain loop", () => {
 
     expect(repos.chains.getOrThrow(launch.chainId).status).toBe("completed");
     expect(ran).toHaveLength(3); // first (again), first, second
+  });
+
+  it("survives a runner that throws instead of returning an outcome", async () => {
+    // The real failure: an adapter died, the ACP SDK rejected a promise, and because `drive` is
+    // started and not awaited the rejection killed the whole process. One task may fail; the
+    // orchestrator must stay up and say why.
+    const ran: string[] = [];
+    const { project, orch } = await orchestrator("", ran);
+    const exploding = {
+      run: async (input: { task: { id: string } }) => {
+        ran.push(input.task.id);
+        const run = repos.runs.start({ taskId: input.task.id, engine: "claude" });
+        repos.tasks.setStatus(input.task.id, "running");
+        void run;
+        throw new Error("ACP connection closed");
+      },
+    };
+    (orch as unknown as { runner: unknown }).runner = exploding;
+
+    const launch = orch.launchChain({
+      projectId: project.id,
+      title: "boom",
+      tasks: ["first", "second"].map((t) => ({ title: t, spec: t, agentId: "builder" })),
+    });
+    // The promise the orchestrator holds must resolve, never reject.
+    await expect(orch.idle()).resolves.toBeUndefined();
+
+    expect(ran).toHaveLength(1); // the second task was never started
+    expect(repos.chains.getOrThrow(launch.chainId).status).toBe("paused");
+    expect(repos.tasks.getOrThrow(launch.taskIds[0]!).status).toBe("error");
+    // The open run row is closed, so nothing is left looking alive.
+    const run = repos.runs.listByTask(launch.taskIds[0]!)[0]!;
+    expect(run.status).toBe("error");
+    expect(run.error).toContain("ACP connection closed");
+    // And the reason is on the timeline, not only in the container log.
+    const reasons = repos.events.listAfter(0, 200).map((e) => JSON.stringify(e.payload));
+    expect(reasons.some((p) => p.includes("ACP connection closed"))).toBe(true);
+  });
+
+  it("puts a paused chain back to work without redoing finished tasks (OR-05)", async () => {
+    const ran: string[] = [];
+    const { project, orch } = await orchestrator("", ran);
+    const launch = orch.launchChain({
+      projectId: project.id,
+      title: "interrupted",
+      tasks: ["first", "second"].map((t) => ({ title: t, spec: t, agentId: "builder" })),
+    });
+    await orch.idle();
+    expect(repos.chains.getOrThrow(launch.chainId).status).toBe("completed");
+
+    // Simulate what a container restart leaves behind: the second task interrupted, chain paused.
+    repos.tasks.setStatus(launch.taskIds[1]!, "interrupted");
+    repos.chains.setStatus(launch.chainId, "paused");
+    ran.length = 0;
+
+    const resumed = orch.resumeChain(launch.chainId);
+    expect(resumed.requeued).toEqual([launch.taskIds[1]]);
+    expect(resumed.started).toBe(true);
+    await orch.idle();
+
+    expect(ran).toEqual([launch.taskIds[1]]); // the finished task was left alone
+    expect(repos.chains.getOrThrow(launch.chainId).status).toBe("completed");
+  });
+
+  it("refuses to resume a completed chain and is a no-op on an active one", async () => {
+    const ran: string[] = [];
+    const { project, orch } = await orchestrator("", ran);
+    const launch = orch.launchChain({
+      projectId: project.id,
+      title: "done",
+      tasks: [{ title: "only", spec: "only", agentId: "builder" }],
+    });
+    await orch.idle();
+    expect(() => orch.resumeChain(launch.chainId)).toThrow(/already completed/);
+
+    repos.chains.setStatus(launch.chainId, "active");
+    expect(orch.resumeChain(launch.chainId).requeued).toEqual([]);
   });
 
   it("queues instead of rejecting when the project is busy (OR-08, SR-07)", async () => {

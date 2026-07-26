@@ -388,6 +388,15 @@ export class RunSession {
     }
   }
 
+  /**
+   * The ACP session id, once the adapter has given us one. Exposed so a caller that has to
+   * synthesize an outcome after a failure can still record where the work was, which is what
+   * makes a resume possible (RT-07).
+   */
+  get acpSession(): string | undefined {
+    return this.acpSessionId;
+  }
+
   async start(): Promise<RunOutcome> {
     const { repos, project, task, run, profile } = this.deps;
 

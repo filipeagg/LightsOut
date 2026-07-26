@@ -50,6 +50,16 @@ export class ChainsRepo {
       .get(projectId) as ChainRow | undefined;
   }
 
+  /**
+   * The newest chain of a project whatever its status. `activeForProject` cannot answer for a
+   * paused chain, which is exactly the one a resume needs to find.
+   */
+  latestForProject(projectId: string): ChainRow | undefined {
+    return this.db
+      .prepare("SELECT * FROM chains WHERE project_id = ? ORDER BY created_at DESC LIMIT 1")
+      .get(projectId) as ChainRow | undefined;
+  }
+
   setStatus(id: string, status: ChainStatus): ChainRow {
     this.db.prepare("UPDATE chains SET status = ? WHERE id = ?").run(status, id);
     return this.getOrThrow(id);

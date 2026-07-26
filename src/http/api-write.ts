@@ -341,6 +341,13 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
     }),
   );
 
+  app.post("/api/projects/:id/resume", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = idParam.parse(request.params);
+      return actions.resumeChain("panel", { projectId: id });
+    }),
+  );
+
   app.post("/api/doubts/:id/answer", async (request, reply) =>
     envelope(reply, async () => {
       const { id } = idParam.parse(request.params);

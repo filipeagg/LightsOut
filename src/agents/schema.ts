@@ -23,6 +23,13 @@ export const agentProfileSchema = z
     tags: z.array(z.string().min(1)).default([]),
     /** Read-only advisory profile used for second opinions (SR-08). */
     advisor: z.boolean().default(false),
+    /**
+     * A disabled profile stays in the library, and in the templates that name it, but cannot
+     * be launched and makes those templates unusable until it comes back (AP-07).
+     */
+    enabled: z.boolean().default(true),
+    /** What a task run on this profile is expected to leave behind (BA-04). */
+    deliverable: z.string().min(1).optional(),
   })
   .strict();
 

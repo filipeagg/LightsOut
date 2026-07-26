@@ -20,7 +20,7 @@ import type { TemplatesLoader } from "../templates/loader.js";
 import type { KnowledgeLoader } from "../knowledge/loader.js";
 import type { Vault } from "../vault/vault.js";
 import type { ProjectRow } from "../db/types.js";
-import { createProject } from "../projects/scaffold.js";
+import type { Actions } from "../control/actions.js";
 import { askEngine } from "../acp/advisor.js";
 import { conflict, failure, invalid, notFound, success, toolResult } from "./envelope.js";
 // One read model for both surfaces: the panel renders these exact shapes (DESIGN §12.0).
@@ -33,6 +33,8 @@ export type McpDeps = {
   health: HealthProbe;
   orchestrator: Orchestrator;
   doubts: DoubtService;
+  /** Every mutation goes through here, with actor='mcp' (§12.0). */
+  actions: Actions;
   /** Phase 9 material. Optional so a process without it still serves the phase 6 tools. */
   templates?: TemplatesLoader;
   knowledge?: KnowledgeLoader;
@@ -49,7 +51,7 @@ function docPath(project: ProjectRow, doc: string): string {
 }
 
 export function registerTools(server: McpServer, deps: McpDeps): void {
-  const { repos, orchestrator, agents, doubts } = deps;
+  const { repos, orchestrator, agents, doubts, actions } = deps;
 
   const project = (id: string): ProjectRow => {
     const row = repos.projects.get(id);
@@ -121,27 +123,18 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       writableKnowledge: z.string().optional(),
     },
     async (args) => {
-      const result = await createProject(
-        repos,
-        deps.config.workspace,
-        {
-          name: args.name,
-          ...(args.remote !== undefined ? { remote: args.remote } : {}),
-          ...(args.verify !== undefined ? { verify: args.verify } : {}),
-          ...(args.push !== undefined ? { push: args.push } : {}),
-          ...(args.defaultAgent !== undefined ? { defaultAgent: args.defaultAgent } : {}),
-          ...(args.template !== undefined ? { template: args.template } : {}),
-          ...(args.knowledge !== undefined ? { knowledge: args.knowledge } : {}),
-          ...(args.writableKnowledge !== undefined
-            ? { writableKnowledge: args.writableKnowledge }
-            : {}),
-        },
-        {
-          ...(deps.templates ? { templates: deps.templates } : {}),
-          ...(deps.knowledge ? { knowledge: deps.knowledge } : {}),
-          ...(deps.phases ? { phases: deps.phases } : {}),
-        },
-      );
+      const result = await actions.createProject("mcp", {
+        name: args.name,
+        ...(args.remote !== undefined ? { remote: args.remote } : {}),
+        ...(args.verify !== undefined ? { verify: args.verify } : {}),
+        ...(args.push !== undefined ? { push: args.push } : {}),
+        ...(args.defaultAgent !== undefined ? { defaultAgent: args.defaultAgent } : {}),
+        ...(args.template !== undefined ? { template: args.template } : {}),
+        ...(args.knowledge !== undefined ? { knowledge: args.knowledge } : {}),
+        ...(args.writableKnowledge !== undefined
+          ? { writableKnowledge: args.writableKnowledge }
+          : {}),
+      });
       return {
         project: { id: result.project.id, path: result.project.path },
         created: result.created,
@@ -185,8 +178,8 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
   });
 
   tool("reload_agents", "Re-read profiles and policy packs from the workspace (AP-03).", {}, async () => {
-    const report = await agents.load();
-    return { loaded: report.loaded, packs: report.packs, rejected: report.rejected };
+    const report = await actions.reloadAgents("mcp");
+    return { ...report, rejected: agents.current().rejected };
   });
 
   tool(
@@ -237,10 +230,8 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       verify: z.string().optional(),
       chainId: z.string().optional(),
     },
-    async (args) => {
-      project(args.projectId);
-      agents.profileOrThrow(args.agentId);
-      const launch = orchestrator.launchTask({
+    async (args) =>
+      actions.launchTask("mcp", {
         projectId: args.projectId,
         title: args.title,
         spec: args.spec,
@@ -248,14 +239,7 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
         ...(args.level ? { level: args.level } : {}),
         ...(args.verify !== undefined ? { verifyCmd: args.verify } : {}),
         ...(args.chainId ? { chainId: args.chainId } : {}),
-      });
-      return {
-        taskId: launch.taskIds[0],
-        chainId: launch.chainId,
-        queued: launch.queued,
-        started: launch.started,
-      };
-    },
+      }),
   );
 
   tool(
@@ -264,15 +248,10 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
     { runId: z.string().optional(), chainId: z.string().optional() },
     async ({ runId, chainId }) => {
       if (!runId && !chainId) throw invalid("give runId or chainId");
-      const chain = chainId
-        ? repos.chains.getOrThrow(chainId)
-        : (() => {
-            const run = repos.runs.get(runId as string);
-            if (!run) throw notFound(`run not found: ${runId}`);
-            const task = repos.tasks.getOrThrow(run.task_id);
-            return repos.chains.getOrThrow(task.chain_id);
-          })();
-      return { aborted: orchestrator.abortChain(chain.id), chainId: chain.id };
+      return actions.abortRun("mcp", {
+        ...(runId ? { runId } : {}),
+        ...(chainId ? { chainId } : {}),
+      });
     },
   );
 
@@ -299,15 +278,13 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       note: z.string().optional(),
       projectId: z.string().optional(),
     },
-    async (args) => {
-      const result = await orchestrator.answerDoubt({
+    async (args) =>
+      actions.answerDoubt("mcp", {
         doubtId: args.doubtId,
         choice: args.choice,
         ...(args.note !== undefined ? { note: args.note } : {}),
         ...(args.projectId !== undefined ? { projectId: args.projectId } : {}),
-      });
-      return { ref: result.ref, resumed: result.resumed };
-    },
+      }),
   );
 
   tool(
@@ -356,13 +333,10 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
     "Read one of the project's managed documents.",
     { projectId: z.string().min(1), doc: z.enum(DOC_NAMES) },
     async ({ projectId, doc }) => {
-      const row = project(projectId);
       try {
-        const file = docPath(row, doc);
-        const content = await readFile(file, "utf8");
-        return { content, doc, path: file };
-      } catch {
-        throw notFound(`${doc}.md does not exist in ${row.id}`);
+        return { ...(await actions.readDoc(projectId, doc)), doc };
+      } catch (err) {
+        throw notFound(err instanceof Error ? err.message : String(err));
       }
     },
   );
@@ -376,12 +350,7 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       if (activeRunFor(deps, row.id)) {
         throw conflict(`a run is active on ${row.id}; try again when it finishes`);
       }
-      await writeFile(docPath(row, doc), content, "utf8");
-      repos.events.append({
-        type: "system",
-        payload: { reason: "doc written", projectId: row.id, doc },
-      });
-      return { written: true, doc };
+      return actions.writeDoc("mcp", row.id, doc, content);
     },
   );
 
@@ -489,7 +458,7 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       input: z.string().optional(),
     },
     async ({ projectId, phase, input }) =>
-      need(deps.phases, "phases").launchPhase("mcp", project(projectId).id, phase, input),
+      actions.launchPhase("mcp", project(projectId).id, phase, input),
   );
 
   tool(
@@ -497,11 +466,7 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
     "Skip an optional phase and start the next pending one (TP-07).",
     { projectId: z.string().min(1), phase: z.string().min(1) },
     async ({ projectId, phase }) => {
-      const skipped = await need(deps.phases, "phases").skipPhase(
-        "mcp",
-        project(projectId).id,
-        phase,
-      );
+      const skipped = await actions.skipPhase("mcp", project(projectId).id, phase);
       return { phaseId: skipped.id, ref: skipped.phase_id, status: skipped.status };
     },
   );
@@ -520,7 +485,7 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       gate: z.enum(["auto", "human"]).optional(),
     },
     async (args) => {
-      const added = need(deps.phases, "phases").addAdhoc("mcp", project(args.projectId).id, {
+      const added = actions.addPhase("mcp", project(args.projectId).id, {
         title: args.title,
         agentId: args.agentId,
         instructions: args.instructions,

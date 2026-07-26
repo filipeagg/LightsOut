@@ -23,6 +23,7 @@ import { PhaseService } from "./orchestrator/phases.js";
 import { TemplatesLoader } from "./templates/loader.js";
 import { KnowledgeLoader } from "./knowledge/loader.js";
 import { Vault } from "./vault/vault.js";
+import { Actions } from "./control/actions.js";
 import { LoginFlows } from "./setup/login-flows.js";
 
 async function readVersion(): Promise<string> {
@@ -151,6 +152,18 @@ async function main(): Promise<void> {
     onGateAnswered: (doubt, choice) => phases.onGateAnswered(doubt, choice),
   });
 
+  // 5e. The one entry point both surfaces mutate through (§12.0).
+  const actions = new Actions({
+    config,
+    repos,
+    agents,
+    orchestrator,
+    templates,
+    knowledge,
+    vault,
+    phases,
+  });
+
   // 5c. Interactive engine logins driven from the browser (SU-04).
   const loginFlows = new LoginFlows(health);
 
@@ -174,6 +187,7 @@ async function main(): Promise<void> {
       knowledge,
       vault,
       phases,
+      actions,
       version,
     },
   });

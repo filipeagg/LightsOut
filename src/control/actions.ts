@@ -77,10 +77,15 @@ export class Actions {
     return row;
   }
 
-  private changed(kind: string, id: string, actor: Actor): void {
+  /**
+   * The configuration audit trail. `op` matters: a trail that only says "knowledge/efemis
+   * changed" cannot answer "was it deleted, and by whom" — which is exactly the question asked
+   * when a base went missing, and the reason the answer took a database query and a guess.
+   */
+  private changed(kind: string, id: string, actor: Actor, op: "write" | "delete" = "write"): void {
     this.deps.repos.events.append({
       type: "config.changed",
-      payload: { kind, id, actor },
+      payload: { kind, id, actor, op },
     });
   }
 
@@ -388,7 +393,7 @@ export class Actions {
 
   async deleteAgent(actor: Actor, id: string): Promise<{ revealedBuiltin: boolean }> {
     const result = await this.agentWriter.remove(id);
-    this.changed("agent", id, actor);
+    this.changed("agent", id, actor, "delete");
     return { revealedBuiltin: result.revealedBuiltin };
   }
 
@@ -414,7 +419,7 @@ export class Actions {
 
   async deleteTemplate(actor: Actor, id: string): Promise<{ revealedBuiltin: boolean }> {
     const result = await this.need(this.templateWriter, "templates").remove(id);
-    this.changed("template", id, actor);
+    this.changed("template", id, actor, "delete");
     return { revealedBuiltin: result.revealedBuiltin };
   }
 
@@ -448,7 +453,7 @@ export class Actions {
     file: string,
   ): Promise<{ deleted: true }> {
     await this.need(this.knowledgeWriter, "knowledge").removeDocument(baseId, file);
-    this.changed("knowledge", baseId, actor);
+    this.changed("knowledge", `${baseId}/${file}`, actor, "delete");
     return { deleted: true };
   }
 
@@ -496,7 +501,7 @@ export class Actions {
       )
       .map((project) => project.id);
     await this.need(this.knowledgeWriter, "knowledge").remove(baseId, attached);
-    this.changed("knowledge", baseId, actor);
+    this.changed("knowledge", baseId, actor, "delete");
     return { deleted: true };
   }
 
@@ -515,7 +520,7 @@ export class Actions {
 
   async deleteVaultEntry(actor: Actor, entryId: string): Promise<{ deleted: boolean }> {
     const deleted = await this.need(this.deps.vault, "vault").remove(entryId);
-    this.changed("vault", entryId, actor);
+    this.changed("vault", entryId, actor, "delete");
     return { deleted };
   }
 }

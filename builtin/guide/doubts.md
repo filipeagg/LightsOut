@@ -17,6 +17,14 @@ auto_continue: if it agrees with the agent's recommendation above LO_ADVISOR_CON
 never_auto: irreversible classes (delete, push, credentials, publishing, outside the workspace), dependency installs, network, and anything naming a hard rule.
 cap: MAX_AUTO_CONTINUE per task, so an agent and an advisor cannot agree in a loop.
 
+## what_your_answer_teaches
+
+allow: the command's shape is remembered and the same shape never asks again (PE-10).
+never_remembered: credentials and publish_external — a wrong memory there cannot be taken back.
+consequence: in those two classes the same question can come back; the doubt then says when you
+answered it before and what you said, so it is a confirmation rather than a decision (DO-07).
+review: list_learned_allows shows them with a use count; forget_learned_allow drops one.
+
 ## answering
 
 answer_doubt { doubtId | ref, choice, note? }

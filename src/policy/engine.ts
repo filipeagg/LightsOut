@@ -17,6 +17,7 @@ import {
 import {
   NEVER_ALLOW,
   NEVER_BELOW_HUMAN,
+  NEVER_LEARNED,
   type ActionClass,
   type PolicyPack,
   type Verdict,
@@ -188,15 +189,15 @@ export class PolicyEngine {
       };
     }
 
-    // PE-10: an unmatched command whose shape a person has already allowed does not ask again.
-    // Only `other` — a class the classifier did understand is the packs' business, and the hard
-    // floor is never reached from here because `other` is not on it.
-    if (classification.class === "other" && this.learned) {
+    // PE-10: a command whose shape a person has already allowed does not ask again. Every class
+    // except the two where a wrong memory cannot be taken back — a credential and a publication
+    // are asked every time — and except `outside_workspace`, which can never be allowed at all.
+    if (!NEVER_LEARNED.has(classification.class) && this.learned) {
       const command = [input.command, ...(input.commands ?? [])].find((c) => c?.trim());
       const shape = command ? commandShape(command) : "";
       if (shape && this.learned(shape)) {
         return {
-          class: "other",
+          class: classification.class,
           verdict: "allow",
           ruleSource: "default",
           reason: `${classification.reason}; allowed by a human before, remembered as: ${shape}`,

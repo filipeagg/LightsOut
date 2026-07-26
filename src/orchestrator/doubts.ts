@@ -13,7 +13,7 @@ import type { Bus } from "../bus.js";
 import type { Repos } from "../db/repos/index.js";
 import type { AgentsLoader } from "../agents/loader.js";
 import type { DoubtOption, DoubtRow, Engine, ProjectRow, TaskRow } from "../db/types.js";
-import type { ActionClass } from "../policy/schema.js";
+import { NEVER_LEARNED, type ActionClass } from "../policy/schema.js";
 import type { PermissionOption } from "@agentclientprotocol/sdk";
 import { consultAdvisor, otherEngine, type AdvisorResult } from "../acp/advisor.js";
 import { ProjectDocs } from "../projects/docs.js";
@@ -513,6 +513,16 @@ export class DoubtService {
     // advisor can settle it instead of waking a human for a read of the repository (§8.2).
     const derived = derivedPermissionRecommendation(input.actionClass);
 
+    // The title of a permission request is the command itself (§7.1), which is what makes an
+    // allow teachable (PE-10) and lets the doubt say whether this was asked before (DO-07).
+    const shape = commandShape(input.title);
+    const before = shape ? this.repos.doubts.lastAnsweredWithShape(shape) : undefined;
+    const priorLine = before
+      ? `\n\nAsked before: ${before.ref} on ${before.answered_at?.slice(0, 16) ?? "?"} was answered ` +
+        `"${(before.answer ?? "").slice(0, 80)}". Same command shape. This is a confirmation, ` +
+        `not a new decision — and if the class allowed it, it would not be asking again (PE-10).`
+      : "";
+
     const raised = await this.raise({
       project: input.project,
       task: input.task,
@@ -520,10 +530,8 @@ export class DoubtService {
       kind: "permission",
       engine: input.engine,
       actionClass: input.actionClass,
-      // The title of a permission request is the command itself (§7.1), which is what makes an
-      // allow teachable (PE-10).
-      actionShape: commandShape(input.title),
-      context: `The agent asked to do something the policy sends to a human: ${input.title}\n\nPolicy said: ${input.reason}`,
+      actionShape: shape,
+      context: `The agent asked to do something the policy sends to a human: ${input.title}\n\nPolicy said: ${input.reason}${priorLine}`,
       blocks: `Task "${input.task.title}" cannot continue past this action.`,
       options: doubtOptions,
       recommendation: derived,
@@ -622,13 +630,14 @@ export class DoubtService {
     this.bus.emit("doubt", { doubtId: doubt.id });
     this.bus.emit("overview");
 
-    // PE-10: a human allowing an unmatched command is teaching, not just answering. The shape is
-    // remembered so the same kind of command never stops a chain again; anything the classifier
-    // did understand is the packs' business and is not learned here.
+    // PE-10: a human allowing a command is teaching, not just answering, and the same question
+    // must not come back. Every class learns except the two where a mistaken memory is worst —
+    // a credential and a publication are asked every time, however often you say yes.
     if (
       doubt.kind === "permission" &&
       input.choice === "A" &&
-      doubt.action_class === "other" &&
+      doubt.action_class &&
+      !NEVER_LEARNED.has(doubt.action_class as ActionClass) &&
       doubt.action_shape
     ) {
       const learned = this.repos.learned.add({

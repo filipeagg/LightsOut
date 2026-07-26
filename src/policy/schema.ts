@@ -92,3 +92,16 @@ export const NEVER_BELOW_HUMAN: ReadonlySet<ActionClass> = new Set<ActionClass>(
   "credentials",
   "publish_external",
 ]);
+
+/**
+ * Classes whose allows are never remembered (PE-10). Everything else is: a person who read the
+ * command and said yes should not be asked the same thing again — the second identical question is
+ * a defect, not diligence. These two are the exception because a wrong memory leaks a secret or
+ * publishes something, and neither can be taken back. `outside_workspace` is here for a different
+ * reason: it can never be allowed at all (PE-03).
+ */
+export const NEVER_LEARNED: ReadonlySet<ActionClass> = new Set<ActionClass>([
+  "credentials",
+  "publish_external",
+  "outside_workspace",
+]);

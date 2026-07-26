@@ -213,8 +213,43 @@ const SCRIPT_BODY_FAMILIES: [ActionClass, RegExp, string][] = [
   ],
 ];
 
-/** Absolute paths and parent traversals inside a script body: PE-02 does not stop at the shell. */
-const SCRIPT_BODY_PATHS = /(^|['"\s(])(\/[A-Za-z0-9._][^\s'")]*|\.\.\/[^\s'")]+)/g;
+/**
+ * Filesystem paths inside a script body: PE-02 does not stop at the shell (§7.1c).
+ *
+ * Only paths that mean something to *this* filesystem count. `"/plantation/query"` is an API
+ * route, and treating it as an escape denied every script that talks to an HTTP API — under the
+ * hard floor, so nothing could rescue it. A URL's path is not a path.
+ */
+const SYSTEM_ROOTS =
+  "etc|usr|bin|sbin|lib|lib64|var|root|home|proc|sys|dev|tmp|opt|data|boot|mnt|media|srv|run|workspace";
+
+/**
+ * The character devices every shell command uses. `2>/dev/null` appears in half the commands ever
+ * written and damages nothing; treating it as an escape denied them all (§7.1c).
+ */
+const HARMLESS_DEVICES = /^\/dev\/(null|zero|stdin|stdout|stderr|tty|urandom|random|fd\/\d+)$/;
+
+/**
+ * Is this string a path *on this filesystem*, as opposed to a URL route, an API path or a word
+ * with slashes? Only the real roots count. `/plantation/query` is an endpoint; `/etc/passwd` is a
+ * file. Getting this wrong denied every script that talks to an HTTP API, under the hard floor
+ * where nothing could rescue it.
+ */
+export function looksLikeFilesystemPath(value: string): boolean {
+  const clean = value.trim().replace(/^['"]|['"]$/g, "");
+  if (!clean) return false;
+  if (HARMLESS_DEVICES.test(clean)) return false;
+  if (clean.startsWith("../") || clean.includes("/../")) return true;
+  if (!clean.startsWith("/")) return true; // relative: resolved against the project by the caller
+  return new RegExp(`^/(?:${SYSTEM_ROOTS})(?:/|$)`).test(clean);
+}
+const SCRIPT_BODY_PATHS = new RegExp(
+  `(^|['"\\s(])((?:/(?:${SYSTEM_ROOTS})(?:/[^\\s'")]*)?)|\\.\\./[^\\s'")]+)`,
+  "g",
+);
+
+/** Everything between `http(s)://` and the next quote or space: a URL, not a filesystem path. */
+const URLS = /\bhttps?:\/\/[^\s'"`)]+/g;
 
 export type ScriptBody = { source: "file" | "inline"; target?: string; text: string };
 
@@ -354,6 +389,8 @@ function normalizeSegment(segment: string): string {
   out = out.replace(/^[({\s]+/, "").replace(/[)}\s;]+$/, "");
   out = out.replace(/^!\s*/, "");
   out = out.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)\s+)+/, "");
+  // `2>/dev/null` is not a write, and leaving it in made every quiet read look like one (§7.1c).
+  out = stripDevNull(out);
   // `if [ … ]`, `then echo …`, `for f in …`: the keyword is not the command being run.
   for (let guard = 0; guard < 3 && SHELL_KEYWORDS.test(out); guard += 1) {
     out = out.replace(SHELL_KEYWORDS, "").trim();
@@ -375,6 +412,11 @@ function normalizeSegment(segment: string): string {
  * A segment that only sets a shell variable (`R=/some/path`). It runs nothing and changes nothing
  * outside the shell, but as an unmatched word it used to drag a whole pipeline into `other`.
  */
+/** `2>/dev/null` is not a write, and leaving it in made every quiet read look like one (§7.1c). */
+export function stripDevNull(value: string): string {
+  return value.replace(/(?:\d+|&)?>>?\s*\/dev\/(?:null|stdout|stderr)\b/g, " ").trim();
+}
+
 export function isAssignmentOnly(segment: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)$/.test(segment.trim());
 }
@@ -427,7 +469,9 @@ export function pathsInCommand(command: string): string[] {
     const target = match[2];
     if (target) found.push(target);
   }
-  return found;
+  // …and only the ones that mean something to this filesystem. An API route in a comment
+  // (`# GET /plantation`) and `2>/dev/null` are not paths anyone can damage (§7.1c).
+  return found.filter((target) => looksLikeFilesystemPath(target));
 }
 
 /** Path-like literals in a script body: quoted relative paths that carry an extension. */
@@ -687,7 +731,9 @@ export class Classifier {
       };
     }
 
-    for (const match of body.text.matchAll(SCRIPT_BODY_PATHS)) {
+    // URLs first: their paths are not this machine's paths (§7.1c).
+    const withoutUrls = body.text.replace(URLS, " ");
+    for (const match of withoutUrls.matchAll(SCRIPT_BODY_PATHS)) {
       const target = match[2];
       if (!target) continue;
       if (!Classifier.isInside(input.projectPath, path.resolve(input.projectPath, target))) {
@@ -728,7 +774,9 @@ export class Classifier {
       // Every command a chain actually runs, plus the raw strings: a matcher shipped by a pack
       // may well have been written against a whole command line.
       const parts = candidates.flatMap((c) => splitSegments(c));
-      const segments = [...candidates, ...parts];
+      // The raw line is kept because a pack's matcher may have been written against a whole
+      // command line — with the harmless redirects removed, as in the split parts (§7.1c).
+      const segments = [...candidates.map(stripDevNull), ...parts];
 
       // Housekeeping inside the scratch directory is not a deletion (PE-08): an agent that
       // tidies up after itself must not need a human. Only when every segment is a removal and

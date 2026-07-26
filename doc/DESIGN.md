@@ -857,6 +857,31 @@ an agent a token for an API and then denying the call was the contradiction that
 allowlist of RT-05 when the proxy is enabled; with it disabled the grant is the whole network, and
 this section says so rather than implying otherwise.
 
+### 7.1c A path is a path on *this* filesystem, and nothing else
+
+Running the user's own goal end to end — "download the crops of company 42 from EFEMIS and save
+them to Excel" — found three more, and all three were the same mistake in different clothes: text
+that looks like a path is not a path.
+
+| in the command | was | why it was wrong |
+|---|---|---|
+| `# GET /plantation (alternative to /query)` in a heredoc | `outside_workspace`, denied | an API route in a *comment*. Under the hard floor, so nothing could rescue it — and it denied **every script that talks to an HTTP API** |
+| `cat doc/PLAN.md 2>/dev/null` | `outside_workspace`, then `project_write` | `/dev/null` is in half the commands ever written, and a redirect to it is not a write |
+| `BASE + '/plantation/query'` in a script body | `outside_workspace`, denied | the same thing one layer down, in the body scan |
+
+`looksLikeFilesystemPath()` is now the single answer: a path counts when it starts with a real root
+(`/etc`, `/usr`, `/var`, `/home`, `/workspace`, …), when it is a `../` traversal, or when it is
+relative and therefore resolved against the project. `/plantation/query` is none of those.
+`/dev/null` and its siblings are exempt by name, and `2>/dev/null` is stripped before matching so a
+quiet read stays a read. URLs are removed from a script body before it is scanned at all.
+
+**What this cost, and what it bought.** Before: the task could not finish, and the walls arrived one
+at a time over several runs. After, on a fresh project with one launch and **no doubts at all**: the
+agent installed `openpyxl` into the scratch space, probed the live API, wrote
+`scripts/descargar_cultivos.py`, ran it against production (`POST /user/authorization`, then
+`POST /plantation/query` with `Company: 42`, count 169), and wrote `output/cultivos_42.xlsx` —
+header plus 169 rows, 76 columns — then read it back to check it. Three minutes.
+
 ### 7.4 What the classifier does not know, and how it stops asking twice (PE-10)
 
 **The failure.** A chain stopped for eleven minutes on this:

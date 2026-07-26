@@ -84,6 +84,42 @@ describe("script_exec (PE-07)", () => {
     expect(classify(`python3 ${escape}`).class).toBe("outside_workspace");
   });
 
+  it("does not mistake an API route or /dev/null for a filesystem path", () => {
+    // Both denied real work under the hard floor: an endpoint mentioned in a comment, and the
+    // redirect every second shell command uses.
+    expect(
+      classify(`python3 - <<'PY'\n# GET /plantation (alternative to /query)\nprint(1)\nPY`).class,
+    ).not.toBe("outside_workspace");
+    expect(classify(`cat doc/PLAN.md 2>/dev/null`).class).toBe("project_read");
+    expect(classify(`ls -la 2>/dev/null | head`).class).toBe("project_read");
+    // A real escape is still an escape — and the escape wins over the class, as PE-02 says.
+    expect(classify(`cat /etc/passwd`).class).toBe("outside_workspace");
+    expect(classify(`ls /usr/lib`).class).toBe("outside_workspace");
+    expect(classify(`cat .env`).class).toBe("credentials");
+  });
+
+  it("does not mistake an API route for a filesystem path", () => {
+    // The bug that made every integration impossible: `/plantation/query` is a URL path, and
+    // treating it as an escape denied the script under the hard floor, where nothing can help.
+    const client = script(
+      "tools/client.py",
+      [
+        "import json, urllib.request",
+        "BASE = 'https://efemis-back.hispatec.com'",
+        "resp = urllib.request.urlopen(BASE + '/plantation/query')",
+        "json.dump(json.load(resp), open('output/cultivos.json', 'w'))",
+      ].join("\n"),
+    );
+    // It reaches the network — that is the honest class — and it is not an escape.
+    expect(classify(`python3 ${client}`).class).toBe("network");
+
+    const noNetwork = script(
+      "tools/routes.py",
+      "ROUTES = ['/plantation/query', '/user/authorization', '/api/v2/things']\nprint(len(ROUTES))\n",
+    );
+    expect(classify(`python3 ${noNetwork}`).class).toBe("script_exec");
+  });
+
   it("never reaches script_exec when the body cannot be read", () => {
     expect(classify("python3 tools/does-not-exist.py").class).toBe("other");
   });

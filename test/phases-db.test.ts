@@ -119,6 +119,7 @@ describe("migration 2", () => {
       "6:learned allows",
       "7:task capabilities",
       "8:task engine and model override",
+      "9:toolchain grants and the toolchain doubt kind",
     ]);
     // Migration 4 gives the legacy project a brief it can be told apart from a real one (PM-09).
     expect(

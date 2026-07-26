@@ -38,6 +38,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       git openssh-client ca-certificates tini python3 python3-pip python3-venv make g++ \
     && rm -rf /var/lib/apt/lists/*
 
+# ST-08: system packages a project asked for and the user approved. One file per project, each a
+# machine-first list of package names; the build installs the union. Empty by default, so a clean
+# checkout installs nothing extra. LightsOut writes these files but never runs this build — a
+# container that can rebuild its own image can replace itself with a different one.
+COPY toolchain.d/ /tmp/toolchain.d/
+RUN set -eu; \
+    pkgs="$(cat /tmp/toolchain.d/*.txt 2>/dev/null | grep -v '^\s*#' | grep -v '^\s*$' | sort -u | tr '\n' ' ')"; \
+    if [ -n "$pkgs" ]; then \
+      echo "toolchain.d requests: $pkgs"; \
+      apt-get update && apt-get install -y --no-install-recommends $pkgs \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi; \
+    rm -rf /tmp/toolchain.d
+
 # Engine CLIs and ACP adapters, pinned (see doc/DECISIONS.md).
 RUN npm install -g --no-audit --no-fund \
       @anthropic-ai/claude-code@2.1.219 \
@@ -65,8 +79,8 @@ COPY builtin/ ./builtin/
 # The credential directories must exist in the image and belong to app: Docker
 # initialises a named volume from the image path, so an absent path would be
 # created as root and the engines could not write their tokens (RT-03, RT-04).
-RUN mkdir -p /data /workspace /home/app/.claude /home/app/.codex \
-    && chown -R app:app /data /workspace /opt/lightsout /home/app
+RUN mkdir -p /data /workspace /toolchains /home/app/.claude /home/app/.codex \
+    && chown -R app:app /data /workspace /toolchains /opt/lightsout /home/app
 
 USER app
 # CLAUDE_CONFIG_DIR / CODEX_HOME point both engines entirely inside their mounted

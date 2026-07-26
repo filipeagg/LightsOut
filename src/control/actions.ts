@@ -40,6 +40,13 @@ import { existsSync } from "node:fs";
 import { activeRunFor } from "../views.js";
 import { validateArea } from "../projects/areas.js";
 import {
+  TOOLCHAIN_MANAGERS,
+  isRootManager,
+  isToolchainManager,
+  toolchainRoot,
+} from "../projects/toolchain.js";
+import type { ToolchainGrantRow } from "../db/repos/toolchain-grants.js";
+import {
   CAPABILITIES,
   checkCapabilities,
   explainMismatch,
@@ -177,11 +184,17 @@ export class Actions {
       type: "project.deleted",
       payload: { projectId: project.id, name: project.name, dir, keepFiles: !!opts.keepFiles, actor },
     });
+    // ST-07: the grants are a power over a directory that is about to stop existing, and a row
+    // pointing at a deleted project is a foreign key waiting to fail.
+    this.deps.repos.toolchainGrants.removeForProject(project.id);
     this.deps.repos.projects.remove(project.id);
 
     let filesRemoved = false;
     if (!opts.keepFiles) {
       await rm(dir, { recursive: true, force: true });
+      // The toolchain is build output of this project and nothing else; it goes with it. Kept
+      // when the user asked to keep the files, so an accidental delete loses nothing rebuildable.
+      await rm(toolchainRoot(project.id), { recursive: true, force: true }).catch(() => undefined);
       filesRemoved = true;
     }
     return { deleted: true, filesRemoved };
@@ -445,6 +458,60 @@ export class Actions {
       });
     }
     return launch;
+  }
+
+  /**
+   * The package managers a project may install into its own durable toolchain with (ST-07).
+   *
+   * Ordinarily granted by answering the permission doubt, which is where the user sees the actual
+   * command. This is the other two thirds: seeing what has been granted, and withdrawing it.
+   */
+  listToolchainGrants(projectId?: string): {
+    grants: ToolchainGrantRow[];
+    managers: string[];
+    root: string | null;
+  } {
+    if (projectId) this.project(projectId);
+    return {
+      grants: this.deps.repos.toolchainGrants.list(projectId),
+      managers: [...TOOLCHAIN_MANAGERS],
+      root: projectId ? toolchainRoot(projectId) : null,
+    };
+  }
+
+  grantToolchain(
+    actor: Actor,
+    projectId: string,
+    manager: string,
+    note?: string,
+  ): ToolchainGrantRow {
+    this.project(projectId);
+    if (isRootManager(manager)) {
+      throw new Error(
+        `${manager} needs root and cannot be granted here (ST-08): it is asked for with a ` +
+          `toolchain doubt, approved by you, and applied by rebuilding the image yourself`,
+      );
+    }
+    if (!isToolchainManager(manager)) {
+      throw new Error(
+        `unknown package manager: ${manager} (one of ${TOOLCHAIN_MANAGERS.join(", ")})`,
+      );
+    }
+    const grant = this.deps.repos.toolchainGrants.add({
+      projectId,
+      manager,
+      ...(note !== undefined ? { note } : {}),
+      grantedBy: actor,
+    });
+    this.changed("toolchain_grant", `${projectId}:${manager}`, actor, "write");
+    return grant;
+  }
+
+  revokeToolchainGrant(actor: Actor, projectId: string, manager: string): { revoked: boolean } {
+    const removed = this.deps.repos.toolchainGrants.remove(projectId, manager);
+    if (!removed) return { revoked: false };
+    this.changed("toolchain_grant", `${projectId}:${manager}`, actor, "delete");
+    return { revoked: true };
   }
 
   /** The engines, models and reasoning levels a launch or a profile may name (AP-08, AP-09). */

@@ -16,6 +16,14 @@ export const ACTION_CLASSES = [
   "git_local",
   "git_push",
   "deps_install",
+  /**
+   * Installing into this project's durable toolchain volume (ST-07, DESIGN §7.6). Its own class
+   * because it sits between the two that already exist: unlike `.lightsout/tmp/deps` it outlives
+   * the run, and unlike `deps_install` it touches nothing outside one project's own directory.
+   * Every pack asks a human for it, and the answer is remembered per project and per manager —
+   * which is why it cannot simply be `deps_install` with a nicer target.
+   */
+  "toolchain_install",
   "network",
   "delete",
   "outside_workspace",
@@ -104,4 +112,8 @@ export const NEVER_LEARNED: ReadonlySet<ActionClass> = new Set<ActionClass>([
   "credentials",
   "publish_external",
   "outside_workspace",
+  // ST-07: a toolchain install *is* remembered, but per project and per package manager, not by
+  // command shape. A shape is system-wide, and `npm install <str>` allowed for one project would
+  // silently authorise every other one. The grant table is the memory here (§7.6).
+  "toolchain_install",
 ]);

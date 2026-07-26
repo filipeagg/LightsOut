@@ -26,6 +26,7 @@ import { guide, TOPIC_ORDER } from "./guide.js";
 import { CAPABILITIES } from "../policy/capabilities.js";
 import { modelCatalog } from "../agents/effective.js";
 import { ENGINE_IDS, REASONING_LEVELS } from "../agents/models.js";
+import { TOOLCHAIN_MANAGERS } from "../projects/toolchain.js";
 import { conflict, failure, invalid, notFound, success, toolResult } from "./envelope.js";
 // One read model for both surfaces: the panel renders these exact shapes (DESIGN §12.0).
 import { activeRunFor, doubtView, projectListItem, projectStatusView } from "../views.js";
@@ -601,6 +602,47 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
     "Forget a learned allow, by its shape or id: the next command of that shape asks again (PE-10).",
     { shape: z.string().min(1) },
     async ({ shape }) => actions.forgetLearnedAllow("mcp", shape),
+  );
+
+  tool(
+    "list_toolchain_grants",
+    "Which package managers each project may install into its own durable toolchain with " +
+      "(ST-07). A toolchain outlives the run, unlike .lightsout/tmp/deps, and is authorised once " +
+      "per project and per manager rather than at every install.",
+    { projectId: z.string().optional() },
+    async ({ projectId }) =>
+      actions.listToolchainGrants(...(projectId ? [projectId] : [])) as unknown as Record<
+        string,
+        unknown
+      >,
+  );
+
+  tool(
+    "grant_toolchain",
+    "Authorise a project to install into its own toolchain with this package manager (ST-07). " +
+      "Normally granted by answering the permission doubt, where the actual command is visible; " +
+      "this is for granting it ahead of time. apt and friends need root and are refused here — " +
+      "they go through a toolchain doubt and a rebuild you run yourself (ST-08).",
+    {
+      projectId: z.string().min(1),
+      manager: z.enum(TOOLCHAIN_MANAGERS as unknown as [string, ...string[]]),
+      note: z.string().optional(),
+    },
+    async ({ projectId, manager, note }) =>
+      actions.grantToolchain(
+        "mcp",
+        projectId,
+        manager,
+        ...(note !== undefined ? [note] : []),
+      ) as unknown as Record<string, unknown>,
+  );
+
+  tool(
+    "revoke_toolchain_grant",
+    "Withdraw a toolchain authorisation: the next install with that manager asks again (ST-07). " +
+      "What is already installed stays; this is about future installs, not a cleanup.",
+    { projectId: z.string().min(1), manager: z.string().min(1) },
+    async ({ projectId, manager }) => actions.revokeToolchainGrant("mcp", projectId, manager),
   );
 
   tool(

@@ -47,6 +47,9 @@ const READ_ONLY = new Set([
   // AP-09: the engines and models a launch may name. `list_agents` serves the same catalog and
   // `GET /api/agents/models` serves it to the panel, but it is a read either way.
   "modelCatalog",
+  // ST-07: what a project may install into its own toolchain with. `list_toolchain_grants` and
+  // `GET /api/projects/:id` both serve it, but it is a read.
+  "listToolchainGrants",
 ]);
 
 /**
@@ -87,6 +90,8 @@ const TOOL_FOR: Record<string, string> = {
   addArea: "add_area",
   removeArea: "remove_area",
   forgetLearnedAllow: "forget_learned_allow",
+  grantToolchain: "grant_toolchain",
+  revokeToolchainGrant: "revoke_toolchain_grant",
   resumeChain: "resume_chain",
   writeDoc: "write_doc",
   writeAgent: "write_agent",

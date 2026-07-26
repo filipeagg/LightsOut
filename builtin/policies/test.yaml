@@ -10,6 +10,7 @@ rules:
   - { class: network, verdict: allow, reason: "loopback only; egress is allowlisted (RT-05)" }
   - { class: git_local, verdict: allow }
   - { class: deps_install, verdict: require_human }
+  - { class: toolchain_install, verdict: require_human, reason: "a durable toolchain is authorised once per project and manager (ST-07)" }
   - { class: delete, verdict: require_human }
   - { class: git_push, verdict: deny }
   - { class: knowledge_write, verdict: deny }

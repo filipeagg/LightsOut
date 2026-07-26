@@ -15,6 +15,8 @@ import type { PolicyPack, ActionClass, Verdict } from "./schema.js";
 export const CAPABILITIES = [
   "network",
   "deps_install",
+  /** Installing into this project's durable toolchain (ST-07); authorised once, per manager. */
+  "toolchain_install",
   "execute",
   "write",
   "git",
@@ -28,6 +30,7 @@ export type Capability = (typeof CAPABILITIES)[number];
 const CLASS_OF: Record<Capability, ActionClass> = {
   network: "network",
   deps_install: "deps_install",
+  toolchain_install: "toolchain_install",
   execute: "exec_check",
   write: "project_write",
   git: "git_local",

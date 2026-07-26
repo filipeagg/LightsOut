@@ -18,6 +18,7 @@ rules:
   - { class: network, verdict: allow, reason: "the point of this agent; egress is allowlisted (RT-05)" }
   - { class: git_local, verdict: allow }
   - { class: deps_install, verdict: require_human, reason: "a dependency changes the build for every later run (ST-03); install into .lightsout/tmp/deps instead" }
+  - { class: toolchain_install, verdict: require_human, reason: "a durable toolchain is authorised once per project and manager (ST-07)" }
   - { class: delete, verdict: require_human }
   - { class: git_push, verdict: deny, reason: "pushing is the orchestrator's job (PM-05)" }
   - { class: knowledge_write, verdict: deny }

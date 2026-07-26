@@ -11,6 +11,7 @@ import type { ProjectRow, PushPolicy } from "../db/types.js";
 import { slugify } from "../ids.js";
 import { ProjectGit } from "./git.js";
 import { ensureScratch } from "./hygiene.js";
+import { ensureToolchain } from "./toolchain.js";
 import { CONFIG_FILE, readProjectConfig } from "./config.js";
 import type { TemplatesLoader } from "../templates/loader.js";
 import type { KnowledgeLoader } from "../knowledge/loader.js";
@@ -168,6 +169,10 @@ export async function createProject(
 
   // The scratch directory and its self-ignoring .gitignore, before the first commit (PE-08).
   await ensureScratch(projectPath);
+  // The durable toolchain directory (ST-07). Outside the project on purpose: it is build output,
+  // not source, and it must not reach the user's git history. Failing here is not fatal — a
+  // process running without the volume simply has no toolchain, and the classifier says so.
+  await ensureToolchain(id).catch(() => undefined);
 
   const git = new ProjectGit(projectPath);
   await git.init();

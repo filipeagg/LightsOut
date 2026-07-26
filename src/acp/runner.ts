@@ -252,6 +252,10 @@ export class TaskRunner {
         scriptScanBytes: this.config.scriptScanBytes,
         // PE-10: what a person already allowed at a gate, so the same shape does not ask again.
         learnedAllow: (shape) => this.repos.learned.shapes().has(shape),
+        // ST-07: which package managers this project is authorised to install into its own
+        // durable toolchain with. Read per evaluation, so a revocation takes effect mid-run.
+        toolchainGrant: (manager) =>
+          this.repos.toolchainGrants.managers(project.id).has(manager),
       },
     );
 

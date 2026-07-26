@@ -977,6 +977,69 @@ Storage is migration 6: `learned_allows(shape UNIQUE, sample, action_class, lear
 uses, last_used_at)`, plus `doubts.action_class` and `doubts.action_shape` so an answer knows what
 it is teaching. The verdict says so in its reason, and the audit row records `learned: <shape>`.
 
+### 7.6 A development environment that survives the run (ST-07, ST-08)
+
+Until now a project needing a tool the image does not ship had two answers, and both were bad.
+`pip install --target .lightsout/tmp/deps` works and is swept when the run ends (PE-08), so the
+next run installs it again — fine for one library, useless for a framework. And a real install
+into the image is `deps_install`, which asks a human every time and cannot be remembered, because
+ST-03's reason for the gate is exactly that a dependency outlives the run.
+
+The missing thing was a place that outlives the run *and* is still not the image.
+
+**`/toolchains`, a managed volume, one directory per project.** Created at scaffold, mounted in
+compose, and put on the run's environment by `runContext`:
+
+```
+PATH            <project-toolchain>/bin:<project-toolchain>/node_modules/.bin:$PATH
+NODE_PATH       <project-toolchain>/node_modules
+PYTHONPATH      <project-toolchain>/py:<project>/.lightsout/tmp/deps
+npm_config_prefix  <project-toolchain>
+```
+
+A volume rather than a directory in the workspace: it is build output, it is large, it is not
+something a person should find next to their source, and RT-02 exists so the workspace is *theirs*.
+`resolve_path` reports it as a container path with no host equivalent, honestly, rather than
+inventing one.
+
+**A new capability and a new action class, `toolchain_install`.** An install whose target resolves
+inside the project's toolchain directory classifies `toolchain_install`; the same command anywhere
+else is still `deps_install`. Every pack defaults it to `require_human` — including the packs that
+allow `deps_install`, because this one is durable and that one is not.
+
+**The authorisation is per project and per manager, and it is remembered.** Answering the doubt
+"allow" records a grant `(project, manager)` — `npm`, `pip`, `pnpm`, `uv`, `cargo`, `go` — and the
+same project never asks for that manager again. Deliberately *not* PE-10's system-wide learned
+shapes: a shape is a command, and this is a standing power over a durable directory of one project.
+`list_toolchain_grants` / `revoke_toolchain_grant` and a card in the panel; migration 9 stores
+`toolchain_grants(project_id, manager, granted_by, created_at, uses, last_used_at)`.
+
+What it still cannot do: write outside its own toolchain directory (the hard floor of PE-03 is
+unchanged), install a *package manager* (ST-03b — the image ships those), or touch another
+project's toolchain.
+
+**What needs root: asked, never done here (ST-08).** `apt`, and anything writing into the system
+prefix, is out of reach by construction and must not look like a permission problem. An agent that
+needs one raises `doubt.toolchain` with the machine-first request:
+
+```
+manager: apt
+package: libpq-dev
+reason: psycopg2 needs the postgres client headers to build
+alternative: none found in user space
+```
+
+That doubt behaves like `hard_rule`: **never sees the advisor, never auto-continues, never spends
+the auto-continue budget.** On approval LightsOut appends the line to
+`workspace/toolchain.d/<project>.txt` — read by the Dockerfile at build time — and answers with the
+exact command for the user's own terminal. The build is theirs to run: a container that can
+rebuild its own image is a container that can replace itself with a different one.
+
+**Rejected, and recorded in DECISIONS: mounting the Docker socket, or Docker-in-Docker.** It would
+make all of this automatic and it would hand an unattended agent the host — every other boundary in
+this document is decoration once the daemon is reachable. The cost of the alternative is one
+command the user runs themselves, occasionally.
+
 ## 8. Doubts and second opinion (DO-01..06)
 
 ### 8.1 Sources

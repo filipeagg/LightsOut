@@ -23,6 +23,7 @@ import {
   type Verdict,
 } from "./schema.js";
 import type { RuleSource } from "../db/types.js";
+import { managerOf } from "../projects/toolchain.js";
 
 export type EvaluateInput = ClassifyInput;
 
@@ -35,6 +36,8 @@ export type Decision = {
   floored: boolean;
   /** Set when a remembered human allow decided this (PE-10); the caller records the use. */
   learnedShape?: string;
+  /** Set when a per-project toolchain grant decided this (ST-07); the caller records the use. */
+  toolchainManager?: string;
   latencyMs: number;
 };
 
@@ -65,11 +68,22 @@ export class PolicyEngine {
    */
   private readonly learned: ((shape: string) => boolean) | undefined;
 
+  /**
+   * Package managers this project has been authorised to install into its own toolchain with
+   * (ST-07, §7.6). Separate from `learned` because the memory is per project, not system-wide.
+   */
+  private readonly toolchainGrant: ((manager: string) => boolean) | undefined;
+
   constructor(
     private readonly layers: PolicyLayers,
-    options: { scriptScanBytes?: number; learnedAllow?: (shape: string) => boolean } = {},
+    options: {
+      scriptScanBytes?: number;
+      learnedAllow?: (shape: string) => boolean;
+      toolchainGrant?: (manager: string) => boolean;
+    } = {},
   ) {
     this.learned = options.learnedAllow;
+    this.toolchainGrant = options.toolchainGrant;
     this.classifier = new Classifier(
       {
         ...(layers.default?.matchers ?? {}),
@@ -203,6 +217,25 @@ export class PolicyEngine {
           reason: `${classification.reason}; allowed by a human before, remembered as: ${shape}`,
           floored: false,
           learnedShape: shape,
+          latencyMs: performance.now() - startedAt,
+        };
+      }
+    }
+
+    // ST-07: the user authorised this project to install with this package manager, so the same
+    // project does not ask again. Scoped to the project and to the manager, and revocable on its
+    // own — the whole reason this is not a learned shape.
+    if (classification.class === "toolchain_install" && this.toolchainGrant) {
+      const command = [input.command, ...(input.commands ?? [])].find((c) => c?.trim());
+      const manager = command ? managerOf(command.trim()) : undefined;
+      if (manager && this.toolchainGrant(manager)) {
+        return {
+          class: classification.class,
+          verdict: "allow",
+          ruleSource: "project",
+          reason: `${classification.reason}; ${manager} is authorised for this project's toolchain (ST-07)`,
+          floored: false,
+          toolchainManager: manager,
           latencyMs: performance.now() - startedAt,
         };
       }

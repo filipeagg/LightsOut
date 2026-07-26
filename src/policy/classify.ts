@@ -8,6 +8,7 @@
 import { openSync, readSync, closeSync, statSync } from "node:fs";
 import path from "node:path";
 import type { ActionClass } from "./schema.js";
+import { installsIntoToolchain, managerOf } from "../projects/toolchain.js";
 
 /**
  * The project's scratch directory (PE-08, DESIGN §5.2b). Writes here are exempt from a pack's
@@ -38,6 +39,13 @@ export type ClassifyInput = {
   commands?: string[];
   /** Absolute path of the active project. */
   projectPath: string;
+  /**
+   * The project's id, and the root of its durable toolchain directory (ST-07, §7.6). Without them
+   * an install is judged the way it always was — `deps_install`, a human every time — which is the
+   * safe default and what a process with no toolchain volume should do.
+   */
+  projectId?: string | undefined;
+  toolchainsRoot?: string | undefined;
   /**
    * Absolute path of the workspace root (`/workspace`). Without it the workspace-aware rules
    * of §7.1 are skipped and every path outside the project is `outside_workspace`, which is
@@ -273,6 +281,7 @@ const COMMAND_ORDER: ActionClass[] = [
   "publish_external",
   "delete",
   "deps_install",
+  "toolchain_install",
   "git_push",
   "network",
   "exec_check",
@@ -821,6 +830,26 @@ export class Classifier {
               return {
                 class: "project_write",
                 reason: `install confined to ${SCRATCH_REL}, swept at the end of the run`,
+              };
+            }
+            if (
+              hit &&
+              cls === "deps_install" &&
+              input.projectId &&
+              installsIntoToolchain(
+                input.projectId,
+                input.projectPath,
+                segment,
+                input.toolchainsRoot,
+              )
+            ) {
+              // Into this project's own toolchain: durable, but confined to one project and
+              // authorised once rather than every run (ST-07, §7.6).
+              return {
+                class: "toolchain_install",
+                reason:
+                  `install into the toolchain of ${input.projectId} ` +
+                  `(${managerOf(segment) ?? "unknown manager"}), which outlives the run`,
               };
             }
             if (hit) {

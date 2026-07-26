@@ -264,6 +264,12 @@ export class TaskRunner {
             title: request.title,
             reason: request.reason,
             options: request.options,
+            // Context for the judge (PE-11): what it may read, and where it may write.
+            ...(request.paths?.length ? { paths: request.paths } : {}),
+            ...(readAreas.length ? { readAreas: readAreas.map((a) => a.relative) } : {}),
+            ...(agentPack?.write_scopes?.length
+              ? { writeScopes: agentPack.write_scopes }
+              : {}),
           })),
       ...(input.onStderr ? { onStderr: input.onStderr } : {}),
     });

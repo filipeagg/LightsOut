@@ -43,9 +43,30 @@ agents/, templates/, vault.yaml: always credentials, whatever the pack says.
 | curate | codebase-analyst | the only pack whose knowledge_write is allow, narrowed to the project's writable base |
 | advisor | second opinions | everything read-only; the terminal denied |
 
+## the_order_a_gate_is_answered_in
+
+step.1: the classifier (microseconds)
+step.2: a learned shape a human or the judge already allowed (one read) — PE-10
+step.3: the permission judge (~2 s) — PE-11
+step.4: the advisor, for doubts that are decisions rather than risks — DO-02
+step.5: you
+
+## the_permission_judge
+
+what: an internal agent (permission-judge, claude/haiku/low, read-only) asked one closed question
+before a gate wakes a person: can this damage the system, or the user's work?
+decides: only `other` (an unrecognised command) and `delete` whose targets are all inside the project.
+never: credentials, publishing, push, dependencies, network, anything outside the workspace — the
+hard floor of PE-03 is unreachable from here.
+fails_toward_the_human: a timeout, a crash, an unparseable answer or `risk: high` all open the doubt.
+leaves: a provisional decision with its reason, a `judge.verdict` event, and a learned shape so the
+same command is free next time.
+disable_it: set_agent_enabled { agentId: "permission-judge", enabled: false } — every gate then goes
+straight to you, as before.
+
 ## when_an_unknown_command_stops_a_chain
 
-cause: the class `other` — the classifier did not recognise the command — and `other` asks a human.
+cause: the class `other` — the classifier did not recognise the command — and the judge escalated it.
 first: answer the doubt. If you allow it, the **shape** of that command is remembered and the same
 kind of command never asks again (PE-10).
 shape: paths, quoted strings and numbers become placeholders; programs, flags and the pipeline stay.

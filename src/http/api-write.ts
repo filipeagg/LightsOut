@@ -409,6 +409,14 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
     }),
   );
 
+  // Learned allows (PE-10): forgetting one is the only mutation; they are created by answering.
+  app.delete("/api/learned/:shape", async (request, reply) =>
+    envelope(reply, async () => {
+      const { shape } = z.object({ shape: z.string().min(1) }).parse(request.params);
+      return actions.forgetLearnedAllow("panel", decodeURIComponent(shape));
+    }),
+  );
+
   // Read-only workspace areas (PE-09).
   app.post("/api/projects/:id/areas", async (request, reply) =>
     envelope(reply, async () => {

@@ -748,6 +748,48 @@ Pack matchers are merged onto the built-in table and matched against each segmen
 
 `evaluate(request)`: classify → look up the class in, in order, project override pack (`lightsout.yaml`), agent profile pack, `default` pack → first hit wins; record `rule_source`. Hard floor (PE-03, not overridable): `outside_workspace` can never resolve to allow; `credentials`, `publish_external` and force-push can never resolve below `require_human`. Every evaluation writes a `permission_audit` row (PE-04). Target latency < 5 ms (pure in-memory tables).
 
+### 7.4 What the classifier does not know, and how it stops asking twice (PE-10)
+
+**The failure.** A chain stopped for eleven minutes on this:
+
+```
+R=…/src/efemis_django-master; find $R/throttling $R/user -maxdepth 1 -name '*.py' | xargs wc -l
+```
+
+Counting lines. Two blind spots put it in `other`, and `other` is a human gate: nothing knew what
+`xargs` was, and a bare `R=/path` assignment matched nothing either — so a pipeline of reads was an
+unmatched command. `wc -l src/a.py` on its own was always `project_read`.
+
+**Both are fixed at the source.** Process wrappers (`xargs`, `time`, `nice`, `nohup`, `env`,
+`timeout`, `stdbuf`, `command`, `ionice`, `setsid`) are *stripped* with their own flags before
+matching, which is safer than listing them as read-only: `xargs rm` is then classified by `rm`. A
+segment that only sets a variable changes nothing and counts as read-only. The read-only table also
+grew the rest of a normal pipeline (`comm`, `join`, `paste`, `tr`, `rev`, `seq`, `ps`, `env`, …).
+
+**And the general case: the system learns.** Fixing the table only covers what is already known.
+When a human answers a permission gate with "allow" and the class was `other`, the *shape* of the
+command is remembered, and the same shape is allowed without a gate from then on:
+
+```
+commandShape("find /a/b -maxdepth 1 -name '*.py' | xargs wc -l")
+  → "find <path> -maxdepth <n> -name <str> | xargs wc -l"
+```
+
+Paths, quoted strings and numbers become placeholders; the programs, their flags and the pipeline
+survive. So the same *kind* of command passes and a different one still asks.
+
+| decision | why |
+|---|---|
+| only `other` is learnable | a class the classifier understood is the packs' business; `credentials`, `delete`, `network` and the rest never become automatic |
+| the hard floor is untouched | PE-03 is not consulted differently: `other` was never on it |
+| shapes are system-wide | the user asked for it: a shape allowed once is allowed everywhere, because the same person owns every project here |
+| every use is counted | an unused rule is easy to revoke, and a much-used one is a matcher somebody should write into a pack |
+| revocable from both surfaces | `list_learned_allows`, `forget_learned_allow`, `DELETE /api/learned/:shape` |
+
+Storage is migration 6: `learned_allows(shape UNIQUE, sample, action_class, learned_from, added_by,
+uses, last_used_at)`, plus `doubts.action_class` and `doubts.action_shape` so an answer knows what
+it is teaching. The verdict says so in its reason, and the audit row records `learned: <shape>`.
+
 ## 8. Doubts and second opinion (DO-01..06)
 
 ### 8.1 Sources

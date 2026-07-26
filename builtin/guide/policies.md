@@ -43,6 +43,19 @@ agents/, templates/, vault.yaml: always credentials, whatever the pack says.
 | curate | codebase-analyst | the only pack whose knowledge_write is allow, narrowed to the project's writable base |
 | advisor | second opinions | everything read-only; the terminal denied |
 
+## when_an_unknown_command_stops_a_chain
+
+cause: the class `other` — the classifier did not recognise the command — and `other` asks a human.
+first: answer the doubt. If you allow it, the **shape** of that command is remembered and the same
+kind of command never asks again (PE-10).
+shape: paths, quoted strings and numbers become placeholders; programs, flags and the pipeline stay.
+`find <path> -name <str> | wc -l` covers the same command over other files, and nothing else.
+scope: system-wide, only for `other`, never for credentials, deletions, network or the rest.
+wrappers: xargs, time, nice, nohup, env, timeout and friends are peeled before matching, so
+`find … | xargs rm` is judged as `rm` and `find … | xargs wc -l` as a read.
+review: list_learned_allows shows them with a use count; forget_learned_allow drops one. A shape
+used often is one to write into a pack matcher instead.
+
 ## changing_what_an_agent_may_do
 
 per_agent: write_agent with a different `policy`.

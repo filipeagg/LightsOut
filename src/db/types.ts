@@ -178,6 +178,9 @@ export type DoubtRow = {
   answer: string | null;
   created_at: string;
   answered_at: string | null;
+  /** Permission doubts only: the class the policy assigned and the command's shape (PE-10). */
+  action_class: string | null;
+  action_shape: string | null;
 };
 
 export type DecisionRow = {

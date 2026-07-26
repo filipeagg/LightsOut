@@ -524,6 +524,21 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
   );
 
   tool(
+    "list_learned_allows",
+    "Command shapes a human has already allowed at a permission gate, so they stop asking " +
+      "(PE-10). Most used first; a shape used often is one somebody should turn into a matcher.",
+    {},
+    async () => actions.listLearnedAllows(),
+  );
+
+  tool(
+    "forget_learned_allow",
+    "Forget a learned allow, by its shape or id: the next command of that shape asks again (PE-10).",
+    { shape: z.string().min(1) },
+    async ({ shape }) => actions.forgetLearnedAllow("mcp", shape),
+  );
+
+  tool(
     "list_areas",
     "The workspace directories this project may read outside its own (PE-09), with both the " +
       "container path and the one on this machine.",

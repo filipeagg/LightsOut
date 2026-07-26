@@ -37,6 +37,7 @@ const READ_ONLY = new Set([
   "listDocs",
   "readProjectDoc",
   "listAreas",
+  "listLearnedAllows",
   // MC-08: pure translation between the container's paths and the user's.
   "resolvePath",
   "agentSource",
@@ -78,6 +79,7 @@ const TOOL_FOR: Record<string, string> = {
   setProjectContext: "set_project_context",
   addArea: "add_area",
   removeArea: "remove_area",
+  forgetLearnedAllow: "forget_learned_allow",
   resumeChain: "resume_chain",
   writeDoc: "write_doc",
   writeAgent: "write_agent",

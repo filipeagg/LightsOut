@@ -86,14 +86,17 @@ describe("migration 2", () => {
       agentId: "builder",
       level: "quick",
     });
-    const doubt = legacyRepos.doubts.open({
-      projectId: "old",
-      taskId: task.id,
-      kind: "functional",
-      context: "which way",
-      blocks: "the rest",
-      options: [{ id: "A", text: "left" }],
-    });
+    // Raw SQL again: DoubtsRepo now writes action_class/action_shape, which migration 6 adds and
+    // a version-1 schema does not have. The point of this fixture is the old shape.
+    const doubtId = ulid();
+    legacy
+      .prepare(
+        `INSERT INTO doubts (id, ref, project_id, task_id, kind, status, context, blocks,
+                             options, created_at)
+         VALUES (?, 'D-1', 'old', ?, 'functional', 'open', 'which way', 'the rest', ?, ?)`,
+      )
+      .run(doubtId, task.id, JSON.stringify([{ id: "A", text: "left" }]), nowIso());
+    const doubt = legacyRepos.doubts.getOrThrow(doubtId);
     legacyRepos.decisions.record({
       projectId: "old",
       taskId: task.id,
@@ -111,6 +114,7 @@ describe("migration 2", () => {
       "3:hard rule doubts and knowledge enforcement",
       "4:project context brief",
       "5:project read-only areas",
+      "6:learned allows",
     ]);
     // Migration 4 gives the legacy project a brief it can be told apart from a real one (PM-09).
     expect(

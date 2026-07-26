@@ -145,7 +145,13 @@ export function hostPathFor(
   if (!workspaceHost) return null;
   const inside = path.relative(path.resolve(workspace), path.resolve(absolute));
   if (inside.startsWith("..")) return null;
-  const separator = workspaceHost.includes("\\") ? "\\" : "/";
+  // A Windows path uses backslashes even when the mount was written with forward ones, so the
+  // answer is something the user can paste into Explorer or an editor.
+  const windows = workspaceHost.includes("\\") || /^[A-Za-z]:/.test(workspaceHost);
+  const separator = windows ? "\\" : "/";
   const tail = inside.split(path.sep).join(separator);
-  return `${workspaceHost.replace(/[\\/]+$/, "")}${separator}${tail}`;
+  const root = workspaceHost.replace(/[\\/]+$/, "");
+  // Normalise the root too: a Windows mount written with forward slashes would otherwise answer
+  // half one way and half the other.
+  return `${windows ? root.replace(/\//g, "\\") : root}${separator}${tail}`;
 }

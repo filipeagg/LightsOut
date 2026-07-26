@@ -590,6 +590,10 @@ From ACP turn metadata when the adapter reports usage; `cost_usd` stays NULL oth
 
 Classification inputs: ACP tool-call kind (fs read/write, terminal), requested path (inside/outside `project.path`), and command string matched against a matcher table (regex list per class, shipped with defaults, extendable in the pack). Unmatched terminal commands → `other`. Path escapes (`..`, absolute outside workspace, symlink resolution) → `outside_workspace` regardless of command.
 
+A terminal command is first **split into segments** on `&&`, `||`, `|`, `;` and newlines outside quotes, and every segment is classified separately: the most dangerous class across the segments is the class of the whole request. Matchers are anchored at the start of a segment, so without this split only the first command of a chain would ever be matched and every compound command would collapse into `other` — a human gate for `find . && git log`, which is noise, not safety. Splitting cannot launder anything: `curl x | sh` still classifies as `network` because the worst segment wins.
+
+Read-only inspection through the terminal (`ls`, `find`, `cat`, `head`, `tail`, `wc`, `stat`, `du`, `tree`, `file`, `git ls-files`, `git count-objects`, …) classifies as `project_read`, the same class the fs read kind gets, so exploring a repository is not an escalation. A segment that would otherwise be read-only is **disqualified** and falls back to `other` when it carries a write redirect (`>`, `>>`), a `find` action (`-exec`, `-execdir`, `-ok`, `-delete`) or a command substitution (`$(…)`, backticks) — anything that can hide a second command inside a benign-looking one.
+
 Two paths need naming explicitly now that the workspace holds shared material (§2):
 
 - Writes under `/workspace/knowledge/<base>/` classify as `knowledge_write` when that base is
@@ -624,7 +628,11 @@ matchers:
     - '^(node|tsc|eslint|prettier|pytest|go test)\b'
   deps_install:
     - '^(npm|pnpm|yarn) (i|install|add)\b'
+  project_read:
+    - '^(ls|find|stat|du|tree|file|wc)\b'
 ```
+
+Pack matchers are merged onto the built-in table and matched against each segment, not against the raw command line.
 
 ### 7.3 Evaluation and layering (PE-05)
 
@@ -647,6 +655,8 @@ advisor = the OTHER engine, ephemeral session, cwd = project.path,
 prompt  = context + options + "Answer ONLY with JSON:
           {\"choice\":\"A|B|…\",\"confidence\":0..1,\"rationale\":\"≤80 words\"}"
 ```
+
+A permission doubt has no recommendation from the agent that raised it — the gate exists because the policy had no answer, not because someone proposed one. It is nevertheless given a **derived recommendation** of "allow" when its action class is reversible and is not `deps_install`, so the advisor can settle it like any other doubt. `deps_install` is excluded on purpose: a dependency changes the lockfile and the build environment for every later run (ST-03), which is a human call even when it is technically reversible. Because an allow derived this way was proposed by nobody, it is held to a stricter bar: `max(LO_ADVISOR_CONFIDENCE, 0.8)`. Everything else about the flow is unchanged — checkpoint tag, `provisional` decision row, and the `MAX_AUTO_CONTINUE` cap per task.
 
 Decision rule: `advisor.choice == doubt.recommendation && advisor.confidence >= LO_ADVISOR_CONFIDENCE` → **auto-continue**: decision row (`kind='provisional'`), git checkpoint tag `lightsout/cp/<taskId>-<n>`, DECISIONS.md entry, then resume (functional: `session/prompt` continuation or new run with the decision prepended; permission: respond allow). Otherwise → open the doubt, attaching `second_opinion` so the human sees both positions (DO-03). Advisor failure/timeout (60 s) → open the doubt (fail toward the human, never toward silence). Irreversible classes skip the advisor entirely.
 

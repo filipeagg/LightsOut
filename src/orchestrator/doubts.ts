@@ -33,6 +33,38 @@ export function isReversible(actionClass?: string): boolean {
   return !IRREVERSIBLE.has(actionClass as ActionClass);
 }
 
+/**
+ * Classes a permission gate may not settle on the advisor's word alone, even though they are
+ * reversible (DESIGN §8.2). A dependency rewrites the lockfile and the build environment for
+ * every later run (ST-03), so it stays a human call regardless of how confident the advisor is.
+ * `network` is here for the same reason in reverse: undoing the fetch does not undo what left
+ * the machine, so "reversible" is the wrong test for it.
+ */
+const NEVER_AUTO_ALLOWED: ReadonlySet<ActionClass> = new Set<ActionClass>([
+  "deps_install",
+  "network",
+]);
+
+/**
+ * Confidence a derived allow must clear. Higher than the functional threshold on purpose: a
+ * functional doubt has a recommendation from the agent doing the work, whereas here the allow
+ * was proposed by nobody and the advisor is the only voice for it.
+ */
+export const DERIVED_ALLOW_CONFIDENCE = 0.8;
+
+/**
+ * Whether a permission gate can be settled by the advisor instead of by a human. A gate exists
+ * because the policy had no answer, so nothing recommends allowing it — but for a reversible,
+ * non-dependency action, "allow" is the option worth asking the other engine about, and a
+ * confident agreement is a better answer than blocking an unattended chain on a read of the
+ * repository.
+ */
+export function derivedPermissionRecommendation(actionClass: string): string | null {
+  if (!isReversible(actionClass)) return null;
+  if (NEVER_AUTO_ALLOWED.has(actionClass as ActionClass)) return null;
+  return "A";
+}
+
 export type RaiseDoubtInput = {
   project: ProjectRow;
   task: TaskRow;
@@ -42,6 +74,11 @@ export type RaiseDoubtInput = {
   blocks: string;
   options: DoubtOption[];
   recommendation?: string | null;
+  /**
+   * True when the recommendation was derived by the gate rather than proposed by the agent
+   * (DESIGN §8.2). Such a recommendation must clear DERIVED_ALLOW_CONFIDENCE.
+   */
+  derivedRecommendation?: boolean;
   /** Action class for permission doubts; decides whether the advisor is consulted. */
   actionClass?: string;
   /** Engine that raised it, so the advisor is the other one. */
@@ -96,7 +133,13 @@ export class DoubtService {
         input.context,
         "",
         `What it blocks: ${input.blocks}`,
-        input.recommendation ? `The other agent recommends option ${input.recommendation}.` : "",
+        // Never attribute a derived recommendation to the agent: it proposed nothing, and an
+        // advisor told otherwise would be anchored on an opinion that does not exist.
+        input.derivedRecommendation
+          ? "Nobody has recommended an option. The policy had no rule for this action, so judge it on its own merits: answer A only if the action is safe and clearly within what the task needs."
+          : input.recommendation
+            ? `The other agent recommends option ${input.recommendation}.`
+            : "",
       ]
         .filter(Boolean)
         .join("\n"),
@@ -125,9 +168,11 @@ export class DoubtService {
   private agrees(input: RaiseDoubtInput, advisor: AdvisorResult | undefined): boolean {
     if (!advisor?.ok) return false;
     if (!input.recommendation) return false;
+    const threshold = input.derivedRecommendation
+      ? Math.max(this.config.advisorConfidence, DERIVED_ALLOW_CONFIDENCE)
+      : this.config.advisorConfidence;
     return (
-      advisor.answer.choice === input.recommendation &&
-      advisor.answer.confidence >= this.config.advisorConfidence
+      advisor.answer.choice === input.recommendation && advisor.answer.confidence >= threshold
     );
   }
 
@@ -346,6 +391,11 @@ export class DoubtService {
       { id: "B", text: "Refuse and let the agent adapt or stop" },
     ];
 
+    // Nobody proposed allowing this — the gate exists because the policy had no answer. But for
+    // a reversible, non-dependency action, "allow" is the option worth a second opinion, so the
+    // advisor can settle it instead of waking a human for a read of the repository (§8.2).
+    const derived = derivedPermissionRecommendation(input.actionClass);
+
     const raised = await this.raise({
       project: input.project,
       task: input.task,
@@ -356,13 +406,18 @@ export class DoubtService {
       context: `The agent asked to do something the policy sends to a human: ${input.title}\n\nPolicy said: ${input.reason}`,
       blocks: `Task "${input.task.title}" cannot continue past this action.`,
       options: doubtOptions,
-      // No recommendation: a human gate exists precisely because we do not have one.
-      recommendation: null,
+      recommendation: derived,
+      ...(derived ? { derivedRecommendation: true } : {}),
     });
 
     if (raised.outcome === "auto_continue") {
-      // Cannot happen without a recommendation, but keep the branch honest.
-      return allowOption ? { optionId: allowOption.optionId } : { reject: true, explanation: "" };
+      if (allowOption) return { optionId: allowOption.optionId };
+      // The adapter offered no allow option: there is nothing to authorize, so refuse rather
+      // than pretend the provisional decision was carried out.
+      return {
+        reject: true,
+        explanation: "No allow option was offered for this action. Adapt, or stop and report it.",
+      };
     }
 
     const doubt = raised.doubt;

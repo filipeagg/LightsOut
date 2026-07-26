@@ -87,10 +87,16 @@ async function main(): Promise<void> {
   if (tasks.length === 0) throw new Error("at least one --task is required");
 
   const orchestrator = new Orchestrator(config, repos, bus, agents);
+  // OR-10: the CLI states an expectation for every task, taken from --expects or a sane default,
+  // so the development entry point obeys the same contract as the surfaces.
+  const expects = arg(
+    "expects",
+    "The work described in the task, done and verifiable: the files it names, and the verify command green.",
+  );
   const launch = orchestrator.launchChain({
     projectId: project.id,
     title: arg("chain", "cli chain"),
-    tasks,
+    tasks: tasks.map((task) => ({ ...task, expects })),
   });
   console.log(`[cli] chain ${launch.chainId} started=${launch.started} tasks=${launch.taskIds.length}`);
 

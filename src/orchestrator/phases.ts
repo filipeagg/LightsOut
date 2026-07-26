@@ -19,6 +19,7 @@ import type { ProjectTemplate } from "../templates/schema.js";
 import { WORKSPACE_PREFIX } from "../templates/schema.js";
 import { ProjectDocs } from "../projects/docs.js";
 import type { Orchestrator } from "./orchestrator.js";
+import { REQUEST_HEADING, composeSpec, requireExpects, requireRequest } from "./spec.js";
 
 export type PhaseActor = "mcp" | "panel" | "system";
 
@@ -143,7 +144,7 @@ export class PhaseService {
     actor: PhaseActor,
     projectId: string,
     phaseRef: string,
-    input?: string,
+    input: { request: string; expects: string },
   ): Promise<LaunchPhaseResult> {
     const project = this.repos.projects.getOrThrow(projectId);
     const phase = this.resolve(projectId, phaseRef);
@@ -163,7 +164,9 @@ export class PhaseService {
       projectId: project.id,
       chainId: chain,
       title: phase.title,
-      spec: this.buildSpec(phase, input),
+      spec: this.buildSpec(phase, input.request, input.expects),
+      // The spec already carries it; the orchestrator's own check is satisfied by the same value.
+      expects: input.expects,
       agentId: phase.agent_id,
       ...(phase.verify_cmd !== null ? { verifyCmd: phase.verify_cmd } : {}),
     });
@@ -180,6 +183,31 @@ export class PhaseService {
     };
   }
 
+  /**
+   * The request and the expected return for a phase the *system* starts — the next step of a
+   * plan, after the previous one closed or was skipped (OR-10). Nobody typed them, so they are
+   * derived from what is known and say so: an intermediate step still arrives with both, and the
+   * agent still knows what it is for. A person launching by hand writes better ones.
+   */
+  private derived(
+    next: ProjectPhaseRow,
+    previous: ProjectPhaseRow,
+  ): { request: string; expects: string } {
+    const left = previous.deliverable
+      ? `The previous phase (${previous.phase_id}) left ${previous.deliverable}; read it first.`
+      : `The previous phase (${previous.phase_id}) is ${previous.status}.`;
+    return {
+      request:
+        `(derived by the system, not by a person) Continue the project's plan with this phase: ` +
+        `${next.title}. ${left} The project's context brief says what the project is for.`,
+      expects: next.deliverable
+        ? `${next.deliverable}, in the machine-first format (BA-07), complete enough that the ` +
+          `next phase can work from it without asking you anything.`
+        : `A result block saying what you did and what changed, and a doubt for every decision ` +
+          `that was not yours to make.`,
+    };
+  }
+
   /** One chain per project (§16.2); created on demand for a project older than phase 9. */
   private chainFor(project: ProjectRow): string {
     const existing =
@@ -189,19 +217,27 @@ export class PhaseService {
     return this.repos.chains.create({ projectId: project.id, title: project.name }).id;
   }
 
-  /** The task spec: the frozen instructions, the request, and what to leave behind (BA-04). */
-  buildSpec(phase: ProjectPhaseRow, input?: string): string {
-    const parts = [phase.instructions.trim()];
-    if (input?.trim()) {
-      parts.push(`## Request\n\n${input.trim()}`);
-    }
+  /**
+   * The task spec: the frozen instructions, the request for this run, what to leave behind
+   * (BA-04) and what is expected back (OR-10). Both the request and `expects` are required, and
+   * that includes an intermediate phase of a template: instructions frozen months ago do not say
+   * which subsystem, which question or which integration this launch is about.
+   */
+  buildSpec(phase: ProjectPhaseRow, input: string, expects: string): string {
+    const parts = [
+      phase.instructions.trim(),
+      `${REQUEST_HEADING}\n\n${requireRequest(input, `phase ${phase.phase_id}`)}`,
+    ];
     if (phase.deliverable) {
       parts.push(
         `Deliverable: ${phase.deliverable}. The phase is not complete until it exists; ` +
           `reporting success without it fails the phase.`,
       );
     }
-    return parts.join("\n\n");
+    return composeSpec({
+      spec: parts.join("\n\n"),
+      expects: requireExpects(expects, `phase ${phase.phase_id}`),
+    });
   }
 
   /**
@@ -245,7 +281,7 @@ export class PhaseService {
     }
 
     const next = this.repos.phases.nextPending(project.id);
-    if (next) await this.launchPhase("system", project.id, next.phase_id);
+    if (next) await this.launchPhase("system", project.id, next.phase_id, this.derived(next, done));
     this.bus.emit("overview");
   }
 
@@ -263,7 +299,7 @@ export class PhaseService {
     const skipped = this.repos.phases.setStatus(phase.id, "skipped");
     this.emitPhase(skipped, actor);
     const next = this.repos.phases.nextPending(projectId);
-    if (next) await this.launchPhase("system", projectId, next.phase_id);
+    if (next) await this.launchPhase("system", projectId, next.phase_id, this.derived(next, skipped));
     this.bus.emit("overview");
     return skipped;
   }
@@ -327,7 +363,16 @@ export class PhaseService {
     if (choice !== GATE_CONTINUE) return false;
     const next = this.repos.phases.nextPending(doubt.project_id);
     if (!next) return false;
-    await this.launchPhase("system", doubt.project_id, next.phase_id);
+    // The gate was the previous phase's; a person said continue, and OR-10 still applies.
+    const previous = this.repos.phases.get(doubt.task_id)
+      ? this.repos.phases.getByTask(doubt.task_id)
+      : undefined;
+    await this.launchPhase(
+      "system",
+      doubt.project_id,
+      next.phase_id,
+      this.derived(next, previous ?? next),
+    );
     return true;
   }
 

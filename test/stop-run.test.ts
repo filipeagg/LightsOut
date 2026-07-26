@@ -108,8 +108,8 @@ describe("stop the run that is running (OR-06, OR-09)", () => {
       projectId: project.id,
       title: "long",
       tasks: [
-        { title: "one", spec: "s", agentId: "builder" },
-        { title: "two", spec: "s", agentId: "builder" },
+        { title: "one", spec: "s", agentId: "builder", expects: "the work done" },
+        { title: "two", spec: "s", agentId: "builder", expects: "the work done" },
       ],
     });
     await settle(live, project.id);
@@ -133,7 +133,7 @@ describe("stop the run that is running (OR-06, OR-09)", () => {
     orch.launchChain({
       projectId: project.id,
       title: "long",
-      tasks: [{ title: "one", spec: "s", agentId: "builder" }],
+      tasks: [{ title: "one", spec: "s", agentId: "builder", expects: "the work done" }],
     });
     await settle(live, project.id);
     const runId = live.forProject(project.id)[0]!.runId;
@@ -188,8 +188,8 @@ describe("stop the run that is running (OR-06, OR-09)", () => {
       projectId: project.id,
       title: "doomed",
       tasks: [
-        { title: "one", spec: "s", agentId: "builder" },
-        { title: "two", spec: "s", agentId: "builder" },
+        { title: "one", spec: "s", agentId: "builder", expects: "the work done" },
+        { title: "two", spec: "s", agentId: "builder", expects: "the work done" },
       ],
     });
     await settle(live, project.id);
@@ -211,8 +211,8 @@ describe("stop the run that is running (OR-06, OR-09)", () => {
       projectId: project.id,
       title: "drain",
       tasks: [
-        { title: "one", spec: "s", agentId: "builder" },
-        { title: "two", spec: "s", agentId: "builder" },
+        { title: "one", spec: "s", agentId: "builder", expects: "the work done" },
+        { title: "two", spec: "s", agentId: "builder", expects: "the work done" },
       ],
     });
     await settle(live, project.id);

@@ -176,11 +176,12 @@ export class Actions {
     return project;
   }
 
+  /** OR-10: the request for this run and what is expected back, both required. */
   async launchPhase(
     actor: Actor,
     projectId: string,
     phase: string,
-    input?: string,
+    input: { request: string; expects: string },
   ): Promise<LaunchPhaseResult> {
     this.requireNotArchived(projectId);
     return this.need(this.deps.phases, "phases").launchPhase(actor, projectId, phase, input);
@@ -218,6 +219,8 @@ export class Actions {
       projectId: string;
       title: string;
       spec: string;
+      /** What comes back (OR-10); refused when missing. */
+      expects: string;
       agentId: string;
       level?: TaskLevel;
       verifyCmd?: string | null;

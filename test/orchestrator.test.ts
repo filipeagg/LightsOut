@@ -403,7 +403,7 @@ describe("chain loop", () => {
     const launch = orch.launchChain({
       projectId: project.id,
       title: "three",
-      tasks: ["a", "b", "c"].map((t) => ({ title: t, spec: t, agentId: "builder" })),
+      tasks: ["a", "b", "c"].map((t) => ({ title: t, spec: t, agentId: "builder", expects: "the work done" })),
     });
     expect(launch.started).toBe(true);
     await orch.idle();
@@ -418,7 +418,7 @@ describe("chain loop", () => {
     const launch = orch.launchChain({
       projectId: project.id,
       title: "gated",
-      tasks: ["first", "second"].map((t) => ({ title: t, spec: t, agentId: "builder" })),
+      tasks: ["first", "second"].map((t) => ({ title: t, spec: t, agentId: "builder", expects: "the work done" })),
     });
     await orch.idle();
 
@@ -439,7 +439,7 @@ describe("chain loop", () => {
     const launch = orch.launchChain({
       projectId: project.id,
       title: "gated",
-      tasks: ["first", "second"].map((t) => ({ title: t, spec: t, agentId: "builder" })),
+      tasks: ["first", "second"].map((t) => ({ title: t, spec: t, agentId: "builder", expects: "the work done" })),
     });
     await orch.idle();
     expect(repos.chains.getOrThrow(launch.chainId).status).toBe("paused");
@@ -473,7 +473,7 @@ describe("chain loop", () => {
     const launch = orch.launchChain({
       projectId: project.id,
       title: "boom",
-      tasks: ["first", "second"].map((t) => ({ title: t, spec: t, agentId: "builder" })),
+      tasks: ["first", "second"].map((t) => ({ title: t, spec: t, agentId: "builder", expects: "the work done" })),
     });
     // The promise the orchestrator holds must resolve, never reject.
     await expect(orch.idle()).resolves.toBeUndefined();
@@ -496,7 +496,7 @@ describe("chain loop", () => {
     const launch = orch.launchChain({
       projectId: project.id,
       title: "interrupted",
-      tasks: ["first", "second"].map((t) => ({ title: t, spec: t, agentId: "builder" })),
+      tasks: ["first", "second"].map((t) => ({ title: t, spec: t, agentId: "builder", expects: "the work done" })),
     });
     await orch.idle();
     expect(repos.chains.getOrThrow(launch.chainId).status).toBe("completed");
@@ -521,7 +521,7 @@ describe("chain loop", () => {
     const launch = orch.launchChain({
       projectId: project.id,
       title: "done",
-      tasks: [{ title: "only", spec: "only", agentId: "builder" }],
+      tasks: [{ title: "only", spec: "only", agentId: "builder", expects: "the work done" }],
     });
     await orch.idle();
     expect(() => orch.resumeChain(launch.chainId)).toThrow(/already completed/);
@@ -572,7 +572,7 @@ describe("chain loop", () => {
     const first = busy.launchChain({
       projectId: project.id,
       title: "long",
-      tasks: [{ title: "long task", spec: "s", agentId: "builder" }],
+      tasks: [{ title: "long task", spec: "s", agentId: "builder", expects: "the work done" }],
     });
     expect(first.started).toBe(true);
 
@@ -580,6 +580,7 @@ describe("chain loop", () => {
       projectId: project.id,
       title: "queued task",
       spec: "s",
+      expects: "the work done",
       agentId: "builder",
       chainId: first.chainId,
     });
@@ -597,7 +598,7 @@ describe("chain loop", () => {
     const launch = orch.launchChain({
       projectId: project.id,
       title: "doomed",
-      tasks: [{ title: "one", spec: "s", agentId: "builder" }],
+      tasks: [{ title: "one", spec: "s", agentId: "builder", expects: "the work done" }],
     });
     await orch.idle();
 
@@ -605,6 +606,7 @@ describe("chain loop", () => {
       projectId: project.id,
       title: "later",
       spec: "s",
+      expects: "the work done",
       agentId: "builder",
       chainId: launch.chainId,
     });

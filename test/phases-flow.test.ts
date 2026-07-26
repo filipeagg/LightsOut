@@ -129,7 +129,7 @@ describe("phase flow", () => {
 
   it("holds a human gate instead of starting the next phase (TP-01)", async () => {
     const { orch, phases, project } = await harness({ writeDeliverables: true });
-    await phases.launchPhase("mcp", project.id, "shape");
+    await phases.launchPhase("mcp", project.id, "shape", { request: "this run", expects: "the deliverable" });
     await orch.idle();
 
     const [shape, build] = phases.list(project.id);
@@ -149,7 +149,7 @@ describe("phase flow", () => {
 
   it("continues to the next phase when the gate is answered (§16.2)", async () => {
     const { orch, phases, project } = await harness({ writeDeliverables: true });
-    await phases.launchPhase("mcp", project.id, "shape");
+    await phases.launchPhase("mcp", project.id, "shape", { request: "this run", expects: "the deliverable" });
     await orch.idle();
 
     const doubt = repos.doubts.listOpen(project.id)[0]!;
@@ -165,7 +165,7 @@ describe("phase flow", () => {
 
   it("stops where it is when the gate says stop", async () => {
     const { orch, phases, project } = await harness({ writeDeliverables: true });
-    await phases.launchPhase("mcp", project.id, "shape");
+    await phases.launchPhase("mcp", project.id, "shape", { request: "this run", expects: "the deliverable" });
     await orch.idle();
 
     const doubt = repos.doubts.listOpen(project.id)[0]!;
@@ -177,7 +177,7 @@ describe("phase flow", () => {
 
   it("fails the phase when the deliverable is not on disk (BA-04)", async () => {
     const { orch, phases, project } = await harness({ writeDeliverables: false });
-    await phases.launchPhase("mcp", project.id, "shape");
+    await phases.launchPhase("mcp", project.id, "shape", { request: "this run", expects: "the deliverable" });
     await orch.idle();
 
     expect(phases.list(project.id)[0]?.status).toBe("failed");
@@ -191,22 +191,22 @@ describe("phase flow", () => {
 
   it("fails the phase when its task fails", async () => {
     const { orch, phases, project } = await harness({ writeDeliverables: true, fail: true });
-    await phases.launchPhase("mcp", project.id, "shape");
+    await phases.launchPhase("mcp", project.id, "shape", { request: "this run", expects: "the deliverable" });
     await orch.idle();
     expect(phases.list(project.id)[0]?.status).toBe("failed");
   });
 
   it("refuses to relaunch a phase that is not repeatable (TP-07)", async () => {
     const { orch, phases, project } = await harness({ writeDeliverables: true });
-    await phases.launchPhase("mcp", project.id, "shape");
+    await phases.launchPhase("mcp", project.id, "shape", { request: "this run", expects: "the deliverable" });
     await orch.idle();
-    await expect(phases.launchPhase("mcp", project.id, "shape")).rejects.toThrow(
+    await expect(phases.launchPhase("mcp", project.id, "shape", { request: "this run", expects: "the deliverable" })).rejects.toThrow(
       /not repeatable/,
     );
     // The repeatable one may run again and keeps its position.
-    await phases.launchPhase("mcp", project.id, "build");
+    await phases.launchPhase("mcp", project.id, "build", { request: "this run", expects: "the deliverable" });
     await orch.idle();
-    await phases.launchPhase("mcp", project.id, "build");
+    await phases.launchPhase("mcp", project.id, "build", { request: "this run", expects: "the deliverable" });
     await orch.idle();
     expect(phases.list(project.id)[1]?.position).toBe(1);
   });

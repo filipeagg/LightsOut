@@ -755,8 +755,12 @@ function phaseList() {
       </td></tr>`;
         return editing === `launch:${p.id}`
           ? `${row}<tr><td colspan="6"><div class="card pad" style="margin:8px 0">
-              <label class="tiny">What are you asking for this time? (optional)<br>
-                <textarea id="ph-input" rows="4" style="width:100%"></textarea></label>
+              <label class="tiny">What are you asking for this time? (required, OR-10)<br>
+                <textarea id="ph-input" rows="4" style="width:100%"
+                  placeholder="The subsystem, the question, the integration — what this run is about."></textarea></label>
+              <label class="tiny">What must come back? (required)<br>
+                <textarea id="ph-expects" rows="3" style="width:100%"
+                  placeholder="The artefact, its shape, and how you decide it was met."></textarea></label>
               <div class="row" style="gap:8px;margin-top:12px">
                 <button class="btn primary" onclick="launchPhase('${esc(p.id)}')">Launch ${esc(p.title)}</button>
                 <button class="btn" onclick="editing=null;paint()">Cancel</button>
@@ -767,9 +771,15 @@ function phaseList() {
     ${running ? `<p class="tiny muted" style="margin-top:8px">A phase is running; the rest wait for it (OR-08).</p>` : ""}`;
 }
 
+/** OR-10: a phase never starts without knowing what is asked and what must come back. */
 async function launchPhase(phaseId) {
-  const input = $("ph-input") ? $("ph-input").value.trim() : "";
-  await act("POST", `/api/phases/${encodeURIComponent(phaseId)}/launch`, input ? { input } : {});
+  const input = field("ph-input");
+  const expects = field("ph-expects");
+  if (!input || !expects) {
+    store.error = "say what you are asking for and what must come back (OR-10)";
+    return paint();
+  }
+  await act("POST", `/api/phases/${encodeURIComponent(phaseId)}/launch`, { input, expects });
 }
 
 /** Attach and detach knowledge for one project (KB-03). */

@@ -274,12 +274,9 @@ export class KnowledgeWriter {
     if (!info?.isDirectory()) {
       throw new Error(`no such folder in the workspace: ${folder}`);
     }
-    if (!inPlace && inKnowledge) {
-      throw new Error(
-        `${cleaned} is inside knowledge/ but is not a base directory; move it to ` +
-          `knowledge/${baseId}/ to adopt it, or keep your documents outside knowledge/`,
-      );
-    }
+    // A folder deeper inside knowledge/ is linked like any other, which is how a documentation
+    // tree gets split into the parts a project needs (KB-10). Only a base directory is refused,
+    // and `resolveSource` does that.
 
     const { id: _id, ...rest } = patch;
     const manifest = await this.putManifest(baseId, {

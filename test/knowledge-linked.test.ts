@@ -42,11 +42,19 @@ describe("resolveSource (KB-08)", () => {
   });
 
   it("refuses what it cannot see or must not touch", () => {
+    // A base directory is not a source: a base reading another base's directory would shadow it.
     for (const bad of ["/etc", "C:/Windows", "../outside", "..", "knowledge", "knowledge/other"]) {
       const result = resolveSource(workspace, bad);
       expect(result, bad).toHaveProperty("error");
     }
     expect(resolveSource(workspace, ".")).toHaveProperty("error");
+  });
+
+  it("accepts a folder deeper inside knowledge/, which is how a tree gets split up", () => {
+    // The point of KB-10: one base for the technical branch and not the rest of the tree.
+    expect(resolveSource(workspace, "knowledge/company/product/technical")).toEqual({
+      dir: path.resolve(workspace, "knowledge/company/product/technical"),
+    });
   });
 });
 
@@ -265,15 +273,31 @@ describe("adopting a folder (KB-10)", () => {
     );
   });
 
-  it("refuses a folder nested inside knowledge/ that cannot be a base directory", async () => {
-    await write("knowledge/tree/product/one.md", "one");
+  it("adopts one branch of a tree inside knowledge/, leaving the rest out", async () => {
+    // The reason this matters: a project may need the technical documents and nothing else.
+    await write("knowledge/tree/product/technical/api.md", "api");
+    await write("knowledge/tree/product/technical/deep/more.md", "more");
+    await write("knowledge/tree/product/functional/menus.md", "menus");
+
     const loader = new KnowledgeLoader(workspace);
     const writer = new KnowledgeWriter(loader);
     await loader.load();
 
-    await expect(
-      writer.adopt("knowledge/tree/product", { id: "product", kind: "other" }),
-    ).rejects.toThrow(/move it to knowledge\/product/);
+    const result = await writer.adopt("knowledge/tree/product/technical", {
+      id: "product-technical",
+      kind: "technical",
+    });
+    expect(result.inPlace).toBe(false);
+
+    const base = loader.getOrThrow("product-technical");
+    expect(base.source).toBe("knowledge/tree/product/technical");
+    expect(base.documents.map((d) => d.file)).toEqual(["api.md", "deep/more.md"]);
+    // The functional branch is not in it, which is the whole point.
+    expect(base.documents.some((d) => d.file.includes("menus"))).toBe(false);
+    // And the branch itself is untouched: only the new base directory gets files.
+    expect(
+      (await readdir(path.join(workspace, "knowledge/tree/product/technical"))).sort(),
+    ).toEqual(["api.md", "deep"]);
   });
 });
 

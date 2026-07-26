@@ -9,7 +9,40 @@ import type { Repos } from "../db/repos/index.js";
 export type RecoveryReport = {
   runs: number;
   chainsPaused: string[];
+  /** Phase rows left claiming to be running by this or any earlier restart. */
+  phasesReconciled: string[];
 };
+
+/**
+ * Enforce the invariant the panel depends on: a phase is `running` only while its task is.
+ *
+ * Doing this only for the runs a single recovery pass interrupts is not enough — a row left
+ * `running` by an earlier restart is never looked at again, and the panel goes on reporting a
+ * phase as working with no run in flight for as long as the project lives. So every phase is
+ * reconciled at boot, whatever left it inconsistent.
+ */
+function reconcilePhases(repos: Repos, reason: string): string[] {
+  const fixed: string[] = [];
+  for (const project of repos.projects.list({ includeArchived: true })) {
+    for (const phase of repos.phases.list(project.id)) {
+      if (phase.status !== "running") continue;
+      const task = phase.task_id ? repos.tasks.get(phase.task_id) : undefined;
+      if (task && (task.status === "running" || task.status === "queued")) continue;
+      repos.phases.setStatus(phase.id, "pending");
+      repos.events.append({
+        type: "phase.state",
+        payload: {
+          phaseId: phase.id,
+          ref: phase.phase_id,
+          status: "pending",
+          reason: `${reason}: its task is ${task?.status ?? "gone"}`,
+        },
+      });
+      fixed.push(phase.id);
+    }
+  }
+  return fixed;
+}
 
 export function recoverInterrupted(repos: Repos, reason = "container restart"): RecoveryReport {
   const interrupted = repos.runs.markInterrupted(reason);
@@ -29,21 +62,6 @@ export function recoverInterrupted(repos: Repos, reason = "container restart"): 
       type: "task.state",
       payload: { taskId: task.id, status: "interrupted" },
     });
-    // The phase row is what the panel actually shows. Leaving it `running` while its task is
-    // interrupted made the project view state something untrue: a phase marked running with no
-    // run in flight and no way to tell that anything had gone wrong. It goes back to `pending`,
-    // which is where it really is — it has to run again — rather than adding an `interrupted`
-    // phase status for a distinction the `phase.state` event already records.
-    const phase = repos.phases.getByTask(task.id);
-    if (phase && phase.status === "running") {
-      repos.phases.setStatus(phase.id, "pending");
-      repos.events.append({
-        runId: run.id,
-        type: "phase.state",
-        payload: { phaseId: phase.id, ref: phase.phase_id, status: "pending", reason },
-      });
-    }
-
     const chain = repos.chains.get(task.chain_id);
     if (chain && chain.status === "active") {
       repos.chains.setStatus(chain.id, "paused");
@@ -55,5 +73,10 @@ export function recoverInterrupted(repos: Repos, reason = "container restart"): 
     }
   }
 
-  return { runs: interrupted.length, chainsPaused: [...chainsPaused] };
+  // After the runs, because interrupting a task is what makes its phase inconsistent — and the
+  // pass also catches rows an earlier restart left behind, which is how a phase can read
+  // `running` on a project whose run was marked interrupted long ago.
+  const phasesReconciled = reconcilePhases(repos, reason);
+
+  return { runs: interrupted.length, chainsPaused: [...chainsPaused], phasesReconciled };
 }

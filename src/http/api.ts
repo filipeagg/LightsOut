@@ -312,15 +312,23 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
           documents: base.documents.map((d) => ({ file: d.file, bytes: d.bytes })),
         })),
         rejected: deps.knowledge.rejections(),
+        // Folders under knowledge/ holding documents and no manifest: an invitation, not an
+        // error (KB-10).
+        adoptable: deps.knowledge.adoptable(),
       };
     }),
   );
 
-  /** Folders in the workspace a base could be linked to (KB-08). */
+  /** The workspace tree a base could be linked to or adopted from (KB-08, KB-10). */
   app.get("/api/knowledge/folders", async (_request, reply) =>
-    envelope(reply, async () => ({
-      folders: await listWorkspaceFolders(config.workspace),
-    })),
+    envelope(reply, async () => {
+      const basesByPath = new Map<string, string>();
+      for (const base of deps.knowledge?.list() ?? []) {
+        basesByPath.set(`knowledge/${base.manifest.id}`, base.manifest.id);
+        if (base.source) basesByPath.set(base.source, base.manifest.id);
+      }
+      return { folders: await listWorkspaceFolders(config.workspace, { basesByPath }) };
+    }),
   );
 
   app.get("/api/knowledge/:baseId/doc", async (request, reply) =>

@@ -425,9 +425,40 @@ export class Actions {
     return { deleted: true };
   }
 
-  /** The folders a base could be linked to (KB-08): the workspace tree, in render order. */
+  /**
+   * Adopt a folder of documents as a knowledge base (KB-10): write the manifest, and an index
+   * only if it has none. Under `knowledge/` the folder becomes the base in place; anywhere else
+   * in the workspace it gets a base that links to it.
+   */
+  async adoptKnowledge(
+    actor: Actor,
+    folder: string,
+    patch: Omit<ManifestPatch, "source"> & { id?: string },
+  ) {
+    const result = await this.need(this.knowledgeWriter, "knowledge").adopt(folder, patch);
+    this.changed("knowledge", result.manifest.id, actor);
+    this.deps.repos.events.append({
+      type: "knowledge.adopted",
+      payload: { baseId: result.manifest.id, folder, inPlace: result.inPlace, actor },
+    });
+    return result;
+  }
+
+  /** The workspace tree a base could be linked to or adopted from (KB-08, KB-10). */
   async knowledgeFolders(): Promise<WorkspaceFolder[]> {
-    return listWorkspaceFolders(this.deps.config.workspace);
+    // Mark the folders that already are bases, so the picker can say so instead of offering to
+    // adopt something that is adopted.
+    const basesByPath = new Map<string, string>();
+    for (const base of this.deps.knowledge?.list() ?? []) {
+      basesByPath.set(`knowledge/${base.manifest.id}`, base.manifest.id);
+      if (base.source) basesByPath.set(base.source, base.manifest.id);
+    }
+    return listWorkspaceFolders(this.deps.config.workspace, { basesByPath });
+  }
+
+  /** Folders under `knowledge/` holding documents and no manifest yet (KB-10). */
+  adoptableFolders() {
+    return this.need(this.deps.knowledge, "knowledge").adoptable();
   }
 
   async deleteKnowledge(actor: Actor, baseId: string): Promise<{ deleted: true }> {

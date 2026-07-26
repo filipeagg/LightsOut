@@ -16,14 +16,20 @@ import {
   resolveSource,
   type KnowledgeManifest,
 } from "./schema.js";
-import { INDEX_FILE, MANIFEST_FILE, type KnowledgeLoader } from "./loader.js";
+import {
+  findIndexFile,
+  INDEX_FILE,
+  MANIFEST_FILE,
+  scanDocuments,
+  type KnowledgeLoader,
+} from "./loader.js";
 
 /** `source: null` unlinks a base and sends it back to holding its own documents (KB-08). */
 export type ManifestPatch = Partial<Omit<KnowledgeManifest, "id" | "source">> & {
   source?: string | null;
 };
 
-/** One folder in the workspace tree a base could be linked to (KB-08). */
+/** One folder in the workspace tree a base could be linked to or adopted from (KB-08, KB-10). */
 export type WorkspaceFolder = {
   /** Path relative to the workspace root, forward slashes. */
   path: string;
@@ -31,28 +37,46 @@ export type WorkspaceFolder = {
   name: string;
   /** How deep below the root it sits; the root's children are 0. */
   depth: number;
-  /** Text documents directly inside it — what linking here would actually give an agent. */
+  /**
+   * Text documents inside it, **counting subfolders** (KB-09). A folder whose documents are all
+   * one level down is the normal case, and reporting 0 for it is what made the picker look empty.
+   */
   documents: number;
   /** Whether it has folders of its own, so the tree knows what can be expanded. */
   hasChildren: boolean;
+  /** The id of the base this folder already is, if any. */
+  baseId?: string;
+  /** Whether adopting it would make it a base in place, rather than linking to it (KB-10). */
+  adoptInPlace?: boolean;
 };
 
 /**
- * The whole workspace tree, depth first, in the order a tree renders (KB-08).
+ * The workspace tree as it really is, depth first, in the order a tree renders (KB-08, KB-10).
  *
  * There is no folder picker to offer instead: a browser cannot hand a server a path, and the
  * container's filesystem is the workspace and nothing else (RT-02) — a folder elsewhere on the
  * host is not forbidden, it is absent. So this walks what the container can actually open.
  *
- * `knowledge/`, `projects/`, `agents/`, `templates/` and anything hidden are skipped at the root:
- * they belong to LightsOut, not to the user's documents. The walk is bounded (`MAX_FOLDERS`,
- * `MAX_DEPTH`) so a workspace with a stray `node_modules` deep inside cannot hang the request.
+ * `knowledge/` **is** included, and its children are marked with the base they already are or
+ * flagged as adoptable in place: someone who dropped their documentation under `knowledge/` should
+ * see it there rather than an empty picker. `projects/`, `agents/` and `templates/` are skipped at
+ * the root — those are LightsOut's own. The walk is bounded (`MAX_FOLDERS`, `MAX_DEPTH`) so a
+ * workspace with a stray dependency tree deep inside cannot hang the request.
  */
 const MAX_FOLDERS = 2000;
 const MAX_DEPTH = 12;
 
-export async function listWorkspaceFolders(workspace: string): Promise<WorkspaceFolder[]> {
-  const reserved = new Set(["knowledge", "projects", "agents", "templates"]);
+export type FolderContext = {
+  /** Base ids by the folder path they occupy, so the tree can say "this already is one". */
+  basesByPath?: Map<string, string>;
+};
+
+export async function listWorkspaceFolders(
+  workspace: string,
+  context: FolderContext = {},
+): Promise<WorkspaceFolder[]> {
+  const reserved = new Set(["projects", "agents", "templates"]);
+  const bases = context.basesByPath ?? new Map<string, string>();
   const found: WorkspaceFolder[] = [];
 
   const walk = async (relative: string, depth: number): Promise<void> => {
@@ -71,20 +95,31 @@ export async function listWorkspaceFolders(workspace: string): Promise<Workspace
     for (const entry of folders) {
       if (found.length >= MAX_FOLDERS) return;
       const child = relative === "" ? entry.name : `${relative}/${entry.name}`;
-      let documents = 0;
+
       let hasChildren = false;
       try {
-        for (const inner of await readdir(path.join(workspace, child), { withFileTypes: true })) {
-          if (inner.isDirectory()) {
-            if (!inner.name.startsWith(".") && inner.name !== "node_modules") hasChildren = true;
-          } else if (inner.isFile() && isDocumentFile(inner.name)) {
-            documents += 1;
-          }
-        }
+        hasChildren = (
+          await readdir(path.join(workspace, child), { withFileTypes: true })
+        ).some((i) => i.isDirectory() && !i.name.startsWith(".") && i.name !== "node_modules");
       } catch {
         // Unreadable folders are still shown: the user may want to know they are there.
       }
-      found.push({ path: child, name: entry.name, depth, documents, hasChildren });
+
+      // Counting subfolders is the whole point (KB-09): a folder whose documents all sit one
+      // level down is the normal case, and reporting 0 for it is what made the picker look empty.
+      const documents = (await scanDocuments(path.join(workspace, child))).length;
+      const baseId = bases.get(child);
+      const adoptInPlace = child.startsWith("knowledge/") && child.split("/").length === 2;
+
+      found.push({
+        path: child,
+        name: entry.name,
+        depth,
+        documents,
+        hasChildren,
+        ...(baseId ? { baseId } : {}),
+        ...(baseId ? {} : adoptInPlace ? { adoptInPlace: true } : {}),
+      });
       await walk(child, depth + 1);
     }
   };
@@ -140,7 +175,10 @@ export class KnowledgeWriter {
     await mkdir(dir, { recursive: true });
     const { id: _id, ...body } = manifest;
     await writeFile(path.join(dir, MANIFEST_FILE), dumpYaml(body, { lineWidth: 100 }), "utf8");
-    if (!current) {
+    // Seed an index only when the folder has none — in any case, because a folder adopted in
+    // place may have arrived with `INDEX.md` and a second `index.md` next to it would be a file
+    // LightsOut invented on top of the user's own (KB-10).
+    if ((await findIndexFile(dir)) === undefined) {
       await writeFile(
         path.join(dir, INDEX_FILE),
         `# ${manifest.name}\n\nOne line per document, saying what is in it.\n`,
@@ -194,6 +232,65 @@ export class KnowledgeWriter {
     }
     await rm(target, { force: true });
     await this.loader.load();
+  }
+
+  /**
+   * Make an existing folder of documents usable as a base (KB-10), writing only what is missing.
+   *
+   * A folder under `knowledge/` becomes the base in place: the manifest is written next to the
+   * documents and nothing moves. A folder anywhere else in the workspace gets a base in
+   * `knowledge/<id>/` that links to it with `source`, so the folder stays untouched (KB-08).
+   *
+   * An index is written only when the folder has none in any case, and a folder that is already
+   * a base is refused rather than overwritten. The folder is the user's and it was there first.
+   */
+  async adopt(
+    folder: string,
+    patch: Omit<ManifestPatch, "source"> & { id?: string },
+  ): Promise<{ manifest: KnowledgeManifest; inPlace: boolean; hasIndex: boolean }> {
+    const cleaned = folder.trim().replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
+    const inKnowledge = cleaned === "knowledge" || cleaned.startsWith("knowledge/");
+    const name = cleaned.split("/").filter(Boolean).pop() ?? "";
+    const baseId = (patch.id ?? name).trim();
+
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(baseId)) {
+      throw new Error(
+        `"${baseId}" cannot be a base id: lowercase letters, digits and - only. Pass an id.`,
+      );
+    }
+    if (this.loader.get(baseId)) {
+      throw new Error(`${baseId} is already a knowledge base`);
+    }
+
+    // In place: the folder must be a direct child of knowledge/, because the id has to equal the
+    // directory name (§17.1). Anything deeper is linked instead.
+    const depth = cleaned.split("/").filter(Boolean).length;
+    const inPlace = inKnowledge && depth === 2 && name === baseId;
+
+    const target = inPlace
+      ? path.join(this.workspace, cleaned)
+      : path.resolve(this.workspace, cleaned);
+    const info = await stat(target).catch(() => undefined);
+    if (!info?.isDirectory()) {
+      throw new Error(`no such folder in the workspace: ${folder}`);
+    }
+    if (!inPlace && inKnowledge) {
+      throw new Error(
+        `${cleaned} is inside knowledge/ but is not a base directory; move it to ` +
+          `knowledge/${baseId}/ to adopt it, or keep your documents outside knowledge/`,
+      );
+    }
+
+    const { id: _id, ...rest } = patch;
+    const manifest = await this.putManifest(baseId, {
+      ...rest,
+      ...(inPlace ? {} : { source: cleaned }),
+    });
+
+    // Whether the base ends up with an index — one it already had, or the stub `putManifest`
+    // seeds when there was none. It never has two: `putManifest` looks case-insensitively.
+    const hasIndex = (await findIndexFile(inPlace ? target : this.dir(baseId))) !== undefined;
+    return { manifest, inPlace, hasIndex };
   }
 
   /**

@@ -1258,11 +1258,34 @@ updated: 2026-07-25
 
 `index.md` is a table of contents with one line per document saying what is in it. It is always
 injected in full, whatever the budget, because it is what lets an agent ask for the right
-document.
+document. The name is matched case-insensitively: a folder that arrived with `INDEX.md` keeps it,
+and the container's filesystem is case-sensitive where the person who wrote it was not.
 
 A document is a text file: `.md`, `.markdown` or `.txt`. Nothing else is accepted, by the
 uploader or by the loader, because what a base is *for* is text that goes into a prompt — a PDF
 sitting in the directory would be a document the agent is told exists and cannot read.
+
+#### A base is a tree (KB-09)
+
+Documents are found in subfolders too, and a document's id is its path inside the base:
+
+```
+knowledge/product-docs/
+├── knowledge.yaml
+├── INDEX.md
+├── functional/
+│   ├── menus.md
+│   └── reports.md
+└── technical/
+    ├── api-auth.md
+    └── api-entities.md
+```
+
+`read_knowledge("product-docs", "technical/api-auth.md")`, and the injection header reads
+`--- knowledge: product-docs (technical) — technical/api-auth.md ---`. The path travels with the
+document because it is usually how the person who organised the folder said what it is about, and
+throwing it away would discard the only structure they gave. The walk is bounded (`MAX_DEPTH` 8,
+`MAX_DOCUMENTS` 500 per base) and skips hidden directories.
 
 #### Linked bases (KB-08)
 
@@ -1281,13 +1304,33 @@ the file explorer is visible to the next session without touching the panel. The
 against the workspace root and refused if it escapes it, points at `knowledge/` itself or is
 absolute: the container only sees the workspace (RT-02), and a manifest arrives from a browser.
 
-`GET /api/knowledge/folders` walks the workspace tree — depth first, alphabetical, no depth limit,
-bounded at 2000 folders — reporting each folder's depth, how many text documents it holds directly
-and whether it has children, and the panel renders that as a tree to pick from. There is no folder
-dialog to offer instead: a browser cannot hand a server a path, and a folder elsewhere on the host
-is not on the container's filesystem at all.
+`GET /api/knowledge/folders` walks the workspace tree — depth first, alphabetical, bounded at 2000
+folders and 12 levels — and reports, for every folder including the ones under `knowledge/`: its
+depth, how many text documents it holds **counting subfolders**, whether it has children, whether
+it already is a base, and whether it could become one. That is the workspace as it really is,
+which is the point: a person who dropped a folder of Markdown in there should see it and its
+document count, not an empty picker. There is no folder dialog to offer instead — a browser cannot
+hand a server a path, and a folder elsewhere on the host is not on the container's filesystem at
+all.
+
 A linked base is never writable — `writableKnowledge` refuses it (KB-05), because the curation
 project would be editing a folder that something else owns.
+
+#### Adopting a folder (KB-10)
+
+A folder that holds documents and no `knowledge.yaml` is an invitation, not an error. It is
+reported as `adoptable` rather than rejected, and `POST /api/knowledge/adopt`
+(`adopt_knowledge` through MCP) makes it usable by writing only what is missing:
+
+- **A folder under `knowledge/`** becomes the base in place. Its own name is the base id, the
+  manifest is written next to the documents, and nothing moves.
+- **A folder anywhere else in the workspace** gets a base in `knowledge/<id>/` that links to it
+  with `source` — the folder is left untouched, exactly as §17.1 requires of a linked base.
+
+An `index.md` is written only when the folder has none in any case, and `knowledge.yaml` is never
+overwritten: adopting a folder that is already a base is refused, with the base named. LightsOut
+generates what the system needs to accept the folder and not one byte more, because the folder is
+the user's and it was there first.
 
 ### 17.2 Injection (KB-04, KB-06)
 

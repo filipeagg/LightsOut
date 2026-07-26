@@ -179,6 +179,21 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
     }),
   );
 
+  /** Turn a folder of documents into a base, writing only what is missing (KB-10). */
+  app.post("/api/knowledge/adopt", async (request, reply) =>
+    envelope(reply, async () => {
+      const input = body(
+        manifestBody.omit({ source: true }).extend({
+          folder: z.string().min(1),
+          id: z.string().min(1).optional(),
+        }),
+        request.body,
+      );
+      const { folder, ...patch } = input;
+      return actions.adoptKnowledge("panel", folder, patch);
+    }),
+  );
+
   app.delete("/api/knowledge/:baseId/doc", async (request, reply) =>
     envelope(reply, async () => {
       const { baseId } = z.object({ baseId: z.string().min(1) }).parse(request.params);

@@ -40,17 +40,108 @@ export type KnowledgeBase = {
   documents: KnowledgeDocument[];
 };
 
+/** A folder that holds documents and no manifest: offered for adoption, not rejected (KB-10). */
+export type AdoptableFolder = {
+  /** Relative to the workspace root, forward slashes. */
+  path: string;
+  /** What the base would be called; the folder's own name. */
+  suggestedId: string;
+  documents: number;
+  /** Whether it already has an index in any case, which adoption then leaves alone. */
+  hasIndex: boolean;
+};
+
 export type KnowledgeLoadReport = {
   loaded: number;
   rejected: RejectedBase[];
+  adoptable: AdoptableFolder[];
 };
 
 export const MANIFEST_FILE = "knowledge.yaml";
 export const INDEX_FILE = "index.md";
 
+/** A base is a tree, not a flat list (KB-09), but a bounded one. */
+const MAX_DEPTH = 8;
+const MAX_DOCUMENTS = 500;
+
+/**
+ * The base's index, by whatever case it was written in. A folder that arrived with `INDEX.md`
+ * keeps it: the container's filesystem is case-sensitive and the person who wrote it was not.
+ */
+export async function findIndexFile(dir: string): Promise<string | undefined> {
+  try {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.toLowerCase() === INDEX_FILE) return entry.name;
+    }
+  } catch {
+    // No directory, no index.
+  }
+  return undefined;
+}
+
+/**
+ * Every text document under `root`, depth first, identified by its path inside the base
+ * (`technical/api-auth.md`). That path is how the person who organised the folder said what the
+ * document is about, so it travels with it instead of being flattened away (KB-09).
+ */
+export async function scanDocuments(
+  root: string,
+  skipAtRoot?: string,
+): Promise<KnowledgeDocument[]> {
+  const documents: KnowledgeDocument[] = [];
+
+  const walk = async (relative: string, depth: number): Promise<void> => {
+    if (depth > MAX_DEPTH || documents.length >= MAX_DOCUMENTS) return;
+    let entries: Dirent[];
+    try {
+      entries = await readdir(path.join(root, relative), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of [...entries].sort((a, b) => a.name.localeCompare(b.name))) {
+      if (documents.length >= MAX_DOCUMENTS) return;
+      // Hidden directories and dependency trees are not documentation, whoever dropped them here.
+      if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+      const child = relative === "" ? entry.name : `${relative}/${entry.name}`;
+      if (entry.isDirectory()) {
+        await walk(child, depth + 1);
+        continue;
+      }
+      if (!entry.isFile() || !isDocumentFile(entry.name)) continue;
+      if (relative === "" && skipAtRoot !== undefined && entry.name === skipAtRoot) continue;
+      const info = await stat(path.join(root, child));
+      documents.push({
+        file: child,
+        bytes: info.size,
+        updated: new Date(info.mtimeMs).toISOString(),
+      });
+    }
+  };
+
+  await walk("", 0);
+  documents.sort((a, b) => a.file.localeCompare(b.file));
+  return documents;
+}
+
+/** The index lives with the manifest, except in a folder adopted in place, where both are together. */
+async function readIndex(dir: string, docsDir: string): Promise<string | undefined> {
+  for (const root of dir === docsDir ? [dir] : [dir, docsDir]) {
+    const name = await findIndexFile(root);
+    if (name !== undefined) {
+      try {
+        return await readFile(path.join(root, name), "utf8");
+      } catch {
+        // Unreadable is the same as absent for the prompt's purposes.
+      }
+    }
+  }
+  return undefined;
+}
+
 export class KnowledgeLoader {
   private bases = new Map<string, KnowledgeBase>();
   private rejected: RejectedBase[] = [];
+  private adoptableFolders: AdoptableFolder[] = [];
 
   constructor(private readonly workspace: string) {}
 
@@ -79,19 +170,35 @@ export class KnowledgeLoader {
     return this.rejected;
   }
 
+  /** Folders under `knowledge/` that hold documents and no manifest yet (KB-10). */
+  adoptable(): AdoptableFolder[] {
+    return this.adoptableFolders;
+  }
+
   /**
    * Read one document, refusing anything that escapes the base. The MCP `read_knowledge`
    * tool and the prompt builder both go through here so the check exists once.
    */
   async readDocument(baseId: string, file: string): Promise<string> {
     const base = this.getOrThrow(baseId);
-    // `index.md` and the manifest live in the base directory even when the documents do not.
-    const root = file === INDEX_FILE || file === MANIFEST_FILE ? base.dir : base.docsDir;
-    const target = path.resolve(root, file);
-    if (target !== root && !target.startsWith(root + path.sep)) {
-      throw new Error(`path escapes the knowledge base: ${file}`);
+    // Documents live under `docsDir`; the manifest and the index live with the base. Both roots
+    // are tried, and each is checked on its own, so a `..` cannot walk out through either.
+    const roots = base.dir === base.docsDir ? [base.dir] : [base.docsDir, base.dir];
+    let lastError: unknown;
+    for (const root of roots) {
+      const target = path.resolve(root, file);
+      if (target !== root && !target.startsWith(root + path.sep)) {
+        throw new Error(`path escapes the knowledge base: ${file}`);
+      }
+      try {
+        return await readFile(target, "utf8");
+      } catch (err) {
+        lastError = err;
+      }
     }
-    return readFile(target, "utf8");
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(`cannot read ${file} in ${baseId}`);
   }
 
   async load(): Promise<KnowledgeLoadReport> {
@@ -106,11 +213,31 @@ export class KnowledgeLoader {
       entries = [];
     }
 
+    const adoptable: AdoptableFolder[] = [];
+
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       const dir = path.join(this.knowledgeDir, entry.name);
+
+      // KB-10: a folder of documents with no manifest is an invitation, not an error. Report it
+      // as adoptable so the panel can offer to write what is missing, instead of showing the
+      // person who dropped their documentation in here a red rejection.
+      const manifestRaw = await readFile(path.join(dir, MANIFEST_FILE), "utf8").catch(
+        () => undefined,
+      );
+      if (manifestRaw === undefined) {
+        const documents = await scanDocuments(dir);
+        adoptable.push({
+          path: `knowledge/${entry.name}`,
+          suggestedId: entry.name,
+          documents: documents.length,
+          hasIndex: (await findIndexFile(dir)) !== undefined,
+        });
+        continue;
+      }
+
       try {
-        const raw = loadYaml(await readFile(path.join(dir, MANIFEST_FILE), "utf8"));
+        const raw = loadYaml(manifestRaw);
         if (raw === null || typeof raw !== "object") {
           throw new Error(`${MANIFEST_FILE} is empty or not a YAML mapping`);
         }
@@ -137,26 +264,11 @@ export class KnowledgeLoader {
           docsDir = resolved.dir;
         }
 
-        const documents: KnowledgeDocument[] = [];
-        for (const file of await readdir(docsDir, { withFileTypes: true })) {
-          if (!file.isFile()) continue;
-          if (!isDocumentFile(file.name)) continue;
-          if (docsDir === dir && file.name === INDEX_FILE) continue;
-          const info = await stat(path.join(docsDir, file.name));
-          documents.push({
-            file: file.name,
-            bytes: info.size,
-            updated: new Date(info.mtimeMs).toISOString(),
-          });
-        }
-        documents.sort((a, b) => a.file.localeCompare(b.file));
+        // KB-09: a base is a tree. The index is the only file skipped, and only at the root.
+        const indexName = await findIndexFile(docsDir);
+        const documents = await scanDocuments(docsDir, docsDir === dir ? indexName : undefined);
 
-        let index: string | undefined;
-        try {
-          index = await readFile(path.join(dir, INDEX_FILE), "utf8");
-        } catch {
-          index = undefined;
-        }
+        const index = await readIndex(dir, docsDir);
 
         bases.set(manifest.id, {
           manifest,
@@ -176,6 +288,7 @@ export class KnowledgeLoader {
 
     this.bases = bases;
     this.rejected = rejected;
-    return { loaded: bases.size, rejected };
+    this.adoptableFolders = adoptable.sort((a, b) => a.path.localeCompare(b.path));
+    return { loaded: bases.size, rejected, adoptable: this.adoptableFolders };
   }
 }

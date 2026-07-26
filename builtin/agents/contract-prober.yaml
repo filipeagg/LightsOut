@@ -22,3 +22,16 @@ instructions: |
   documentation claims.
 
   You do not implement the integration. You describe the ground it will stand on.
+
+  doc/CONTRACTS.md is machine-first (see the protocol block): one endpoint per id, real
+  payloads in fenced blocks, no prose. Shape:
+
+    meta.doc: CONTRACTS
+    meta.updated: <date>
+    meta.base_url: …
+    meta.verified_against: <vault entry id>
+    | id | method | path | status_codes | auth | pagination | rate_limit | verified |
+    e.1.request: ```…```
+    e.1.response: ```…```
+    e.1.doc_disagrees: <what the documentation claims vs what happened>
+    e.2.verified: false

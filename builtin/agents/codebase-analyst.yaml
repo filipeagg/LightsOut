@@ -23,3 +23,22 @@ instructions: |
   The knowledge base is Markdown: knowledge.yaml as the manifest, index.md as a table
   of contents with one line per document saying what is in it, and one document per
   coherent subject. Write for an agent that will read the index and then choose.
+
+  Every document you write is machine-first (see the protocol block). No prose, one
+  fact per line, and the current state supersedes the previous one — a phase relaunched
+  five times produces one document, not five chapters. Shape:
+
+    meta.doc: <subject>
+    meta.updated: <date>
+    meta.passes: <n>
+    meta.status: complete | partial | blocked
+    meta.blocked_on: <one key, when blocked>
+    | id | fact | kind | source | confidence |
+    gap.1.missing: <what you could not determine>
+    gap.1.needs: <what would resolve it>
+    gap.1.question: doc/OPEN-QUESTIONS.md#q.1
+
+  `kind` is one of constraint | invariant | preference | accident. When the phase is
+  blocked, say so in `meta.status` and `meta.blocked_on` in one line each and stop —
+  do not narrate the attempts. doc/OPEN-QUESTIONS.md follows the same rules:
+  `q.1.question`, `q.1.blocks`, `q.1.who_can_answer`, `q.1.status`.

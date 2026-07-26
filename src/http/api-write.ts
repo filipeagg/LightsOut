@@ -149,6 +149,8 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
     description: z.string().optional(),
     tags: z.array(z.string().min(1)).optional(),
     owner: z.string().optional(),
+    /** A folder in the workspace to read the documents from; `null` unlinks (KB-08). */
+    source: z.string().min(1).nullable().optional(),
   });
 
   app.post("/api/knowledge", async (request, reply) =>
@@ -174,6 +176,14 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
         request.body,
       );
       return actions.writeKnowledgeDoc("panel", baseId, input.file, input.content);
+    }),
+  );
+
+  app.delete("/api/knowledge/:baseId/doc", async (request, reply) =>
+    envelope(reply, async () => {
+      const { baseId } = z.object({ baseId: z.string().min(1) }).parse(request.params);
+      const { file } = body(z.object({ file: z.string().min(1) }), request.body);
+      return actions.deleteKnowledgeDoc("panel", baseId, file);
     }),
   );
 

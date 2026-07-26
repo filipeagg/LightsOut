@@ -17,7 +17,11 @@ import type { TemplatesLoader } from "../templates/loader.js";
 import { TemplateWriter, type TemplatePatch } from "../templates/writer.js";
 import type { ProjectTemplate } from "../templates/schema.js";
 import type { KnowledgeLoader } from "../knowledge/loader.js";
-import { KnowledgeWriter, type ManifestPatch } from "../knowledge/writer.js";
+import {
+  KnowledgeWriter,
+  listWorkspaceFolders,
+  type ManifestPatch,
+} from "../knowledge/writer.js";
 import type { Vault } from "../vault/vault.js";
 import type { VaultEntry, VaultEntryView } from "../vault/schema.js";
 import type { Orchestrator } from "../orchestrator/orchestrator.js";
@@ -304,6 +308,12 @@ export class Actions {
     const project = this.project(projectId);
     const base = this.need(this.deps.knowledge, "knowledge").getOrThrow(baseId);
     if (writable) {
+      if (base.source !== undefined) {
+        throw new Error(
+          `${baseId} reads its documents from ${base.source}; a linked base cannot be the ` +
+            `writable one (KB-05, KB-08)`,
+        );
+      }
       const existing = this.deps.repos.projectKnowledge.writableBase(project.id);
       if (existing && existing !== baseId) {
         throw new Error(`${project.id} already writes into ${existing}; only one base may be writable (KB-05)`);
@@ -402,6 +412,21 @@ export class Actions {
     );
     this.changed("knowledge", baseId, actor);
     return { file: written };
+  }
+
+  async deleteKnowledgeDoc(
+    actor: Actor,
+    baseId: string,
+    file: string,
+  ): Promise<{ deleted: true }> {
+    await this.need(this.knowledgeWriter, "knowledge").removeDocument(baseId, file);
+    this.changed("knowledge", baseId, actor);
+    return { deleted: true };
+  }
+
+  /** The folders a base could be linked to (KB-08): what is in the workspace, one level down. */
+  async knowledgeFolders(): Promise<string[]> {
+    return listWorkspaceFolders(this.deps.config.workspace);
   }
 
   async deleteKnowledge(actor: Actor, baseId: string): Promise<{ deleted: true }> {

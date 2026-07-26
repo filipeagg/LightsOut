@@ -22,6 +22,7 @@ import type { KnowledgeLoader } from "../knowledge/loader.js";
 import type { Vault } from "../vault/vault.js";
 import { agentSource } from "../agents/writer.js";
 import { ENGINE_MODELS } from "../agents/models.js";
+import { listWorkspaceFolders } from "../knowledge/writer.js";
 
 export type ApiDeps = {
   config: Config;
@@ -305,11 +306,21 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
           tags: base.manifest.tags,
           owner: base.manifest.owner ?? null,
           updated: base.manifest.updated ?? null,
+          // The folder a linked base reads from, so the panel can say the documents are not
+          // its to edit (KB-08).
+          source: base.source ?? null,
           documents: base.documents.map((d) => ({ file: d.file, bytes: d.bytes })),
         })),
         rejected: deps.knowledge.rejections(),
       };
     }),
+  );
+
+  /** Folders in the workspace a base could be linked to (KB-08). */
+  app.get("/api/knowledge/folders", async (_request, reply) =>
+    envelope(reply, async () => ({
+      folders: await listWorkspaceFolders(config.workspace),
+    })),
   );
 
   app.get("/api/knowledge/:baseId/doc", async (request, reply) =>

@@ -78,7 +78,26 @@ export class TaskRunner {
     writableKnowledgeBase?: string;
   }> {
     const attachments = this.repos.projectKnowledge.list(project.id);
-    const writable = attachments.find((row) => row.writable === 1)?.base_id;
+    const declaredWritable = attachments.find((row) => row.writable === 1)?.base_id;
+
+    // A hard-rule base is never writable, whatever the template declared at launch (KB-11c). An
+    // agent that can edit the rules binding it is not bound by them. Dropped rather than refused
+    // later, so the grant never reaches the policy engine at all.
+    let writable = declaredWritable;
+    if (declaredWritable && this.context?.knowledge) {
+      const base = this.context.knowledge.get(declaredWritable);
+      if (base?.manifest.enforcement === "hard") {
+        writable = undefined;
+        this.repos.events.append({
+          type: "system",
+          payload: {
+            reason: "writable knowledge base refused: it holds hard rules",
+            baseId: declaredWritable,
+            projectId: project.id,
+          },
+        });
+      }
+    }
 
     let knowledgeBlock: string | undefined;
     if (this.context?.knowledge && attachments.length > 0) {
@@ -262,17 +281,30 @@ export class TaskRunner {
     if (outcome.status === "doubt" && outcome.doubt) {
       // A second opinion may settle it and let the chain continue (DO-02); otherwise the
       // doubt opens with both positions attached (DO-03).
+      // A doubt naming a binding rule is a different kind of question: only the user can answer
+      // it, so no advisor is consulted and it can never auto-continue (KB-11b, §17.4).
+      const hardRule = outcome.doubt.hardRule;
       const raised = await this.doubts.raise({
         project,
         task,
         runId: run.id,
-        kind: "functional",
+        kind: hardRule ? "hard_rule" : "functional",
         engine: profile.engine,
-        context: outcome.doubt.context,
+        context: hardRule
+          ? `Binding rule in the way: ${hardRule}\n\n${outcome.doubt.context}`
+          : outcome.doubt.context,
         blocks: outcome.doubt.blocks,
         options: outcome.doubt.options,
-        recommendation: outcome.doubt.recommendation ?? null,
+        // A recommendation on a hard rule would be the agent proposing which way to break it.
+        recommendation: hardRule ? null : (outcome.doubt.recommendation ?? null),
       });
+      if (hardRule) {
+        this.repos.events.append({
+          runId: run.id,
+          type: "system",
+          payload: { reason: "hard rule blocked a decision", rule: hardRule },
+        });
+      }
 
       if (raised.outcome === "auto_continue") {
         result.autoContinued = { choice: raised.choice, decisionId: raised.decisionId };

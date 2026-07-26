@@ -215,7 +215,9 @@ export function overviewView(
       title: d.taskTitle || d.ref,
       detail: d.context,
       ageMin: d.ageMin,
-      severity: d.kind === "permission" ? ("amber" as const) : ("amber" as const),
+      // A hard-rule doubt is red: nothing else can settle it, so it will sit there until the
+      // user does, and the task behind it is stopped meanwhile (KB-11b).
+      severity: d.kind === "hard_rule" ? ("red" as const) : ("amber" as const),
     })),
     ...items
       .filter((p) => p.status === "paused")

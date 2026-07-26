@@ -146,6 +146,8 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
     kind: z
       .enum(["technical", "functional", "organisational", "market", "other"])
       .optional(),
+    /** `hard` makes the base binding: an agent may not decide against it (KB-11). */
+    enforcement: z.enum(["advisory", "hard"]).optional(),
     description: z.string().optional(),
     tags: z.array(z.string().min(1)).optional(),
     owner: z.string().optional(),

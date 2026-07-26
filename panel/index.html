@@ -514,6 +514,9 @@ function doubtCard(doubt) {
       <h3>${esc(doubt.ref)} <em>${esc(doubt.kind)}</em></h3>
       <div class="row">${statusPill(doubt.status)}<span class="pill amber"><span class="sdot"></span>${esc(ago(doubt.ageMin))}</span></div>
     </div>
+    ${doubt.kind === "hard_rule" ? `<div class="note bad" style="margin-top:12px">
+      <b>A binding rule is in the way.</b> Only you can answer this: the other engine was not
+      consulted and cannot approve it, and the agent is stopped until you do (KB-11).</div>` : ""}
     <p class="tiny dim" style="margin:12px 0 0;white-space:pre-wrap">${esc(doubt.context)}</p>
     ${doubt.blocks ? `<p class="tiny muted" style="margin:8px 0 0">Blocks: ${esc(doubt.blocks)}</p>` : ""}
     ${doubt.options.length ? `<div class="grid" style="margin-top:16px;gap:8px">
@@ -1056,6 +1059,10 @@ function viewTemplates() {
           .map((r) => `<div class="tiny">${esc(r.file)}: ${esc(r.error)}</div>`)
           .join("")}</div>`
       : ""}
+    <div class="row" style="margin-bottom:16px">
+      <button class="btn primary" onclick="editPhases('new-template')">New template</button>
+    </div>
+    ${editing === "new-template" ? templateEditor(null) : ""}
     ${t.templates
       .map(
         (tpl) => `<div class="card pad" style="margin-bottom:16px">
@@ -1096,11 +1103,25 @@ function viewTemplates() {
  */
 let draft = null;
 
+/** A new template starts with one phase rather than none: an empty list cannot be saved (TP-01). */
+const BLANK_PHASE = {
+  id: "analyse",
+  title: "",
+  agent: "",
+  instructions: "",
+  gate: "auto",
+  optional: false,
+  repeatable: false,
+};
+
 function startDraft(tpl) {
-  draft = tpl.phases.map(cleanPhase);
+  draft = tpl ? tpl.phases.map(cleanPhase) : [{ ...BLANK_PHASE }];
 }
 
-/** Open the editor on a template, discarding any draft left from another one. */
+/**
+ * Open the editor on a template, discarding any draft left from another one. `'new-template'`
+ * opens it empty, which is how a template gets created (TP-04).
+ */
 function editPhases(id) {
   draft = null;
   editingJson = false;
@@ -1113,8 +1134,26 @@ function templateEditor(tpl) {
   const agents = store.agents
     ? store.agents.agents.filter((a) => a.valid && a.enabled !== false).map((a) => a.id)
     : [];
-  return `<div style="margin-top:12px">
-    <div class="between" style="margin-bottom:8px">
+  const isNew = tpl === null;
+  const meta = tpl ?? { id: "", name: "", description: "", requiresWritableKnowledge: false };
+  return `<div style="margin-top:12px" class="${isNew ? "card pad" : ""}">
+    ${isNew ? `<div class="micro" style="margin-bottom:8px">A new template</div>` : ""}
+    <div class="row wrap" style="gap:16px;margin-bottom:12px">
+      ${isNew
+        ? `<label class="tiny">Id<br><input id="tpl-id" placeholder="api-integration"></label>`
+        : `<label class="tiny">Id<br><input value="${esc(meta.id)}" readonly></label>`}
+      <label class="tiny">Name<br><input id="tpl-name" value="${esc(meta.name || "")}"
+        placeholder="API integration"></label>
+      <label class="tiny" style="display:flex;align-items:flex-end;gap:6px;padding-bottom:8px">
+        <input type="checkbox" id="tpl-writable" ${meta.requiresWritableKnowledge ? "checked" : ""}>
+        needs a writable knowledge base</label>
+    </div>
+    <label class="tiny">Description<br><input id="tpl-description"
+      value="${esc(meta.description || "")}" style="width:100%"></label>
+    ${isNew ? `<p class="tiny muted" style="margin:8px 0 0">The id becomes the file name under
+      <code>templates/</code>. Give the template an id matching a builtin and this becomes a
+      workspace copy that shadows it (TP-04).</p>` : ""}
+    <div class="between" style="margin:16px 0 8px">
       <span class="micro">Phases · ${draft.length}</span>
       <div class="row" style="gap:6px">
         <button class="btn sm" onclick="addDraftPhase()">+ Add a phase</button>
@@ -1131,8 +1170,8 @@ function templateEditor(tpl) {
            the form, so whichever one you edited last is the one that counts.</p>`
       : draft.map((p, i) => phaseRow(p, i, agents)).join("")}
     <div class="row" style="gap:8px;margin-top:12px">
-      <button class="btn primary" onclick="saveTemplate('${esc(tpl.id)}')">
-        ${tpl.source === "builtin" ? "Save as a workspace copy" : "Save"}</button>
+      <button class="btn primary" onclick="saveTemplate(${isNew ? "null" : `'${esc(meta.id)}'`})">
+        ${isNew ? "Create" : meta.source === "builtin" ? "Save as a workspace copy" : "Save"}</button>
       <button class="btn" onclick="cancelTemplate()">Cancel</button>
     </div>
   </div>`;
@@ -1243,6 +1282,11 @@ function cleanPhase(p) {
   return out;
 }
 
+/**
+ * Save a template, or create one when `id` is null (TP-04). The metadata travels with the phases:
+ * before this, the panel could only rewrite the phase list, so a template's name and description
+ * were editable nowhere and a new one could not be made at all.
+ */
 async function saveTemplate(id) {
   if (editingJson && !readJsonDraft()) return;
   const phases = draft.map(cleanPhase);
@@ -1251,9 +1295,25 @@ async function saveTemplate(id) {
     store.error = `phase ${missing + 1} needs an id, a title, an agent and instructions`;
     return paint();
   }
+
+  const newId = id === null ? field("tpl-id") : id;
+  if (!newId) {
+    store.error = "an id is required";
+    return paint();
+  }
+  const patch = {
+    phases,
+    name: field("tpl-name") || newId,
+    description: field("tpl-description"),
+    requires_writable_knowledge: checked("tpl-writable"),
+  };
+
   draft = null;
   editingJson = false;
-  await act("PUT", `/api/templates/${encodeURIComponent(id)}`, { phases });
+  if (id === null) {
+    return act("POST", "/api/templates", { id: newId, ...patch });
+  }
+  await act("PUT", `/api/templates/${encodeURIComponent(id)}`, patch);
 }
 
 async function deleteTemplate(id) {
@@ -1280,6 +1340,7 @@ function viewKnowledge() {
       <div class="row" style="justify-content:space-between">
         <div><b>${esc(b.name)}</b> <code class="tiny">${esc(b.id)}</code>
           <span class="pill">${esc(b.kind)}</span>
+          ${b.enforcement === "hard" ? `<span class="pill red">hard rules</span>` : ""}
           ${b.source ? `<span class="pill blue">linked</span>` : ""}
           <div class="tiny muted">${esc(b.description || "")}</div>
           <div class="tiny muted">${b.documents.length} document(s)${
@@ -1352,8 +1413,19 @@ function baseForm(b) {
       <label class="tiny">Kind<br><select id="kb-kind">${kinds
         .map((k) => `<option ${k === base.kind ? "selected" : ""}>${k}</option>`)
         .join("")}</select></label>
+      <label class="tiny">Authority<br><select id="kb-enforcement">
+        <option value="advisory" ${base.enforcement !== "hard" ? "selected" : ""}>advisory — context to use</option>
+        <option value="hard" ${base.enforcement === "hard" ? "selected" : ""}>hard rules — may not be broken</option>
+      </select></label>
       <label class="tiny">Tags<br><input id="kb-tags" value="${esc((base.tags || []).join(", "))}" placeholder="erp, legacy"></label>
     </div>
+    <p class="tiny muted" style="margin:8px 0 0">A base of <b>hard rules</b> — a design system, a
+      strict technology directive — is injected first and marked as binding, and an agent that would
+      have to break one must stop and ask you instead. That question goes to nobody else: the other
+      engine is not consulted and cannot approve it (KB-11). A hard-rule base is never writable by
+      an agent. Enforcement is by instruction: nothing reads your design system to catch a breach,
+      so what this guarantees is that a breach the agent <em>declares</em> reaches you and only
+      you.</p>
     <label class="tiny">Description<br><input id="kb-description" value="${esc(base.description || "")}" style="width:100%"></label>
     <div class="micro" style="margin-top:16px">Where the documents are</div>
     <p class="tiny muted" style="margin:4px 0 8px">Pick any folder in the workspace — a whole tree
@@ -1510,6 +1582,7 @@ async function saveBase(id) {
   const patch = {
     name: field("kb-name"),
     kind: field("kb-kind"),
+    enforcement: field("kb-enforcement") || "advisory",
     description: field("kb-description"),
     tags: csv("kb-tags"),
   };

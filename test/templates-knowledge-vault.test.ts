@@ -161,6 +161,48 @@ describe("knowledge loader and injection", () => {
     expect(tight.text).toContain('read_knowledge("legacy-core", "big.md")');
   });
 
+  it("puts hard rules first, in full, and ignores the budget for them (KB-11a)", async () => {
+    await seedBase(
+      "design-system",
+      "name: Design system\nkind: technical\nenforcement: hard\n",
+      { "spacing.md": `# Spacing\n\nThe scale is 8px.\n${"x".repeat(4000)}\n` },
+    );
+    await seedBase("legacy-core", "name: Legacy core\nkind: technical\n", {
+      "architecture.md": `# Architecture\n${"y".repeat(4000)}\n`,
+    });
+    const loader = new KnowledgeLoader(workspace);
+    await loader.load();
+
+    // A budget far too small for either document. The binding one goes in anyway: an agent bound
+    // by a rule it was never shown would break it in good faith.
+    const block = await buildKnowledgeBlock(loader, ["legacy-core", "design-system"], {
+      budgetChars: 500,
+    });
+
+    expect(block.included.map((d) => d.file)).toEqual(["spacing.md"]);
+    expect(block.omitted.map((d) => d.file)).toEqual(["architecture.md"]);
+    expect(block.text).toContain("# Binding rules — you may not decide against these");
+    expect(block.text).toContain("--- knowledge: design-system (hard rule · technical) — spacing.md ---");
+    expect(block.text).toContain("The scale is 8px.");
+    // The rules come before the advisory material, not after it.
+    expect(block.text.indexOf("Binding rules")).toBeLessThan(
+      block.text.indexOf("# Attached knowledge"),
+    );
+    // And the agent is told exactly how to raise the question instead of deciding.
+    expect(block.text).toContain('"hardRule"');
+  });
+
+  it("keeps the plain header when nothing is binding", async () => {
+    await seedBase("legacy-core", "name: Legacy core\nkind: technical\n", {
+      "architecture.md": "# Architecture\n",
+    });
+    const loader = new KnowledgeLoader(workspace);
+    await loader.load();
+    const block = await buildKnowledgeBlock(loader, ["legacy-core"], { budgetChars: 100000 });
+    expect(block.text).not.toContain("Binding rules");
+    expect(block.text).toContain("--- knowledge: legacy-core (technical) — architecture.md ---");
+  });
+
   it("returns nothing when no base is attached", async () => {
     const loader = new KnowledgeLoader(workspace);
     await loader.load();

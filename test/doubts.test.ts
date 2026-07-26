@@ -214,6 +214,98 @@ describe("raising a doubt", () => {
     expect(result.outcome).toBe("opened");
   });
 
+  it("never lets the advisor settle a hard-rule doubt (KB-11b)", async () => {
+    const { project, task, run } = seed();
+    // An advisor that agrees completely. It must change nothing.
+    const svc = service(agreeing(1));
+
+    const result = await svc.raise({
+      project,
+      task,
+      runId: run.id,
+      kind: "hard_rule",
+      engine: "claude",
+      context: "Binding rule in the way: design-system/spacing.md",
+      blocks: "the component cannot be built as specified",
+      options: [
+        { id: "A", text: "use a 6px gap, breaking the scale" },
+        { id: "B", text: "keep the 8px scale and change the layout" },
+      ],
+      recommendation: "A",
+    });
+
+    expect(result.outcome).toBe("opened");
+    expect(repos.doubts.listOpen(project.id)).toHaveLength(1);
+    expect(repos.doubts.listOpen(project.id)[0]!.kind).toBe("hard_rule");
+    // No provisional decision, whatever the advisor said.
+    expect(repos.decisions.latest(project.id)).toBeUndefined();
+  });
+
+  it("does not consult the advisor at all on a hard rule, and says so by its absence", async () => {
+    const { project, task, run } = seed();
+    const config = loadConfig({ LO_WORKSPACE: dir, LO_DB: ":memory:" });
+    const agents = { pack: () => undefined, profileOrThrow: () => undefined } as never;
+    // The real secondOpinion, not the stub: it must return before spawning anything, because
+    // there is no adapter in this test and a consultation would fail rather than be skipped.
+    const svc = new DoubtService(config, repos, createBus(), agents);
+
+    const result = await svc.raise({
+      project,
+      task,
+      runId: run.id,
+      kind: "hard_rule",
+      engine: "claude",
+      context: "Binding rule in the way: design-system/colour.md",
+      blocks: "the screen cannot use the requested accent",
+      options: [
+        { id: "A", text: "use the off-palette accent" },
+        { id: "B", text: "use the nearest palette colour" },
+      ],
+      recommendation: null,
+    });
+
+    expect(result.outcome).toBe("opened");
+    if (result.outcome === "opened") expect(result.advisor).toBeUndefined();
+    const types = repos.events.listByRun(run.id).map((e) => e.type);
+    expect(types).not.toContain("advisor.consulted");
+  });
+
+  it("does not spend the auto-continue budget on a hard rule", async () => {
+    const { project, task, run } = seed();
+    const svc = service(agreeing(1));
+
+    // Exhaust the budget with provisional decisions from earlier work on this task.
+    for (let i = 0; i < DoubtService.MAX_AUTO_CONTINUE; i += 1) {
+      repos.decisions.record({
+        projectId: project.id,
+        taskId: task.id,
+        kind: "provisional",
+        question: `q${i}`,
+        choice: "A",
+      });
+    }
+
+    const result = await svc.raise({
+      project,
+      task,
+      runId: run.id,
+      kind: "hard_rule",
+      engine: "claude",
+      context: "Binding rule in the way: design-system/spacing.md",
+      blocks: "blocked",
+      options: OPTIONS,
+      recommendation: null,
+    });
+
+    expect(result.outcome).toBe("opened");
+    // The budget event is about provisional decisions; a hard rule can never be one, so
+    // reporting the budget as exhausted here would only confuse the timeline.
+    const budgetEvents = repos.events
+      .listByRun(run.id)
+      .filter((e) => JSON.stringify(e.payload).includes("auto-continue budget"));
+    expect(budgetEvents).toHaveLength(0);
+  });
+
   it("stops auto-continuing after the budget for one task is spent", async () => {
     const { project, task, run } = seed();
     const svc = service(agreeing(0.9));

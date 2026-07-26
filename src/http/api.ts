@@ -20,6 +20,7 @@ import { doubtView, overviewView, projectStatusView } from "../views.js";
 import type { TemplatesLoader } from "../templates/loader.js";
 import type { KnowledgeLoader } from "../knowledge/loader.js";
 import type { Vault } from "../vault/vault.js";
+import { agentSource } from "../agents/writer.js";
 
 export type ApiDeps = {
   config: Config;
@@ -188,6 +189,12 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
   app.get("/api/agents", async (_request, reply) =>
     envelope(reply, async () => {
       const snapshot = agents.current();
+      // Where each definition comes from, so the editor can say "this is a builtin, saving
+      // will make a workspace copy" instead of pretending they are the same thing (§2, AP-06).
+      const sources = new Map<string, "builtin" | "workspace">();
+      for (const id of snapshot.profiles.keys()) {
+        sources.set(id, (await agentSource(agents, id)) ?? "builtin");
+      }
       return {
         agents: [
           ...[...snapshot.profiles.values()].map((p) => ({
@@ -195,11 +202,14 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
             name: p.name,
             engine: p.engine,
             model: p.model ?? null,
+            reasoning: p.reasoning ?? null,
+            instructions: p.instructions,
             policy: p.policy,
+            tags: p.tags,
+            deliverable: p.deliverable ?? null,
             advisor: p.advisor,
-            // Everything is a workspace profile until the builtin library lands (BA-01, phase 9).
-            source: "workspace" as const,
-            enabled: true,
+            source: sources.get(p.id) ?? "builtin",
+            enabled: p.enabled,
             valid: true,
             error: null as string | null,
           })),
@@ -265,16 +275,19 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
         templates: deps.templates.list().map((t) => ({
           id: t.id,
           name: t.name,
+          source: deps.templates!.current().sources.get(t.id) ?? "builtin",
           description: t.description,
           requiresWritableKnowledge: t.requires_writable_knowledge,
           phases: t.phases.map((p) => ({
             id: p.id,
             title: p.title,
             agent: p.agent,
+            instructions: p.instructions,
             gate: p.gate,
             optional: p.optional,
             repeatable: p.repeatable,
             deliverable: p.deliverable ?? null,
+            verify: p.verify ?? null,
           })),
         })),
         rejected: deps.templates.current().rejected,
@@ -299,6 +312,16 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
         })),
         rejected: deps.knowledge.rejections(),
       };
+    }),
+  );
+
+  app.get("/api/knowledge/:baseId/doc", async (request, reply) =>
+    envelope(reply, async () => {
+      const { baseId } = z.object({ baseId: z.string().min(1) }).parse(request.params);
+      const { path: file } = z.object({ path: z.string().min(1) }).parse(request.query);
+      const loader = deps.knowledge;
+      if (!loader) throw notFound("knowledge is not available in this process");
+      return { baseId, file, content: await loader.readDocument(baseId, file) };
     }),
   );
 

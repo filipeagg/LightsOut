@@ -181,6 +181,9 @@ tbody tr:hover{background:var(--surface-2)}
     <a href="#/projects" data-r="/projects">Projects <span id="nav-projects"></span></a>
     <div class="navsec">Configuration</div>
     <a href="#/agents" data-r="/agents">Agents</a>
+    <a href="#/templates" data-r="/templates">Templates</a>
+    <a href="#/knowledge" data-r="/knowledge">Knowledge</a>
+    <a href="#/vault" data-r="/vault">Vault</a>
     <div class="navsec">System</div>
     <a href="#/health" data-r="/health">Health <span id="nav-health"></span></a>
     <a href="/setup.html">Setup</a>
@@ -211,7 +214,12 @@ const ICON = {
 };
 
 /** Everything the views read. Replaced wholesale, never patched in place. */
-const store = { overview: null, project: null, history: null, agents: null, health: null, error: "" };
+const store = {
+  overview: null, project: null, history: null, agents: null, health: null,
+  templates: null, knowledge: null, vault: null, phases: null, error: "",
+};
+/** Which row has its editor open. Panel-local: the server has no opinion about it. */
+let editing = null;
 let route = { name: "/", id: null, tab: null };
 let stream = null;
 let runListener = null;
@@ -224,6 +232,50 @@ async function api(path) {
   if (body.ok === false) throw new Error(body.error ? body.error.message : "request failed");
   return body;
 }
+
+/**
+ * Every mutation the panel makes (§12.1b). Nothing is optimistic: on success the route is
+ * re-loaded from the API, because the server is the truth and a refusal is a normal answer.
+ */
+async function write(method, path, payload) {
+  const response = await fetch(path, {
+    method,
+    headers: { "content-type": "application/json", accept: "application/json" },
+    ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
+  });
+  const body = await response.json().catch(() => null);
+  if (!body) throw new Error(`${response.status} ${response.statusText}`);
+  if (body.ok === false) throw new Error(body.error ? body.error.message : "request failed");
+  return body;
+}
+
+/** Run a mutation, show what it said if it refused, and re-read the view either way. */
+async function act(method, path, payload) {
+  try {
+    store.error = "";
+    await write(method, path, payload);
+  } catch (err) {
+    store.error = err.message;
+  }
+  editing = null;
+  await load();
+}
+
+/** A destructive button names the object it is about to remove (WP-11). */
+function confirmed(what) {
+  return window.confirm(`Delete ${what}? This cannot be undone from here.`);
+}
+
+const field = (id) => {
+  const node = $(id);
+  return node ? node.value.trim() : "";
+};
+const checked = (id) => Boolean($(id) && $(id).checked);
+const csv = (id) =>
+  field(id)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
 /* ---------- formatting ---------- */
 const pad2 = (n) => String(n).padStart(2, "0");
@@ -330,7 +382,16 @@ function runCard(run) {
     </div>
     ${last ? `<div class="note" style="margin-top:16px"><span class="mono">${esc(last.type)}</span>
       — ${esc(JSON.stringify(last.payload).slice(0, 200))}</div>` : ""}
+    <div class="row" style="margin-top:16px">
+      <button class="danger" onclick="abortRun('${esc(run.id)}')">Abort the chain</button>
+    </div>
   </div>`;
+}
+
+/** Abort drops the queued tasks and lets the running one finish (OR-06). */
+async function abortRun(runId) {
+  if (!window.confirm("Abort this chain? Queued tasks are dropped; the running one finishes.")) return;
+  await act("POST", `/api/runs/${encodeURIComponent(runId)}/abort`);
 }
 
 /* ---------- chain steps ---------- */
@@ -365,9 +426,37 @@ function doubtCard(doubt) {
     </div>` : ""}
     ${doubt.secondOpinion ? `<div class="note" style="margin-top:16px">
       <span class="micro">Second opinion</span><br>${esc(JSON.stringify(doubt.secondOpinion).slice(0, 400))}</div>` : ""}
-    <div class="note" style="margin-top:16px">Answer it from Claude Desktop with
-      <code>answer_doubt</code>. The answer form lands here in phase 10 (WP-02).</div>
+    ${doubt.status === "open" ? answerForm(doubt) : ""}
   </div>`;
+}
+
+/**
+ * Answering from the panel (DO-04, WP-02). It is the same call Claude Desktop makes, so a
+ * doubt raised while nobody was at the desk can be settled in whichever surface the person
+ * happens to be in — which is the point of the single action layer (§12.0).
+ */
+function answerForm(doubt) {
+  return `<div style="margin-top:16px">
+    <div class="row wrap" style="gap:8px">
+      ${doubt.options
+        .map(
+          (o) => `<button class="${o.id === doubt.recommendation ? "primary" : ""}"
+            onclick="answerDoubt('${esc(doubt.id)}','${esc(o.id)}')">${esc(o.id)} — ${esc(o.text)}</button>`,
+        )
+        .join("")}
+    </div>
+    <label class="tiny" style="display:block;margin-top:12px">Note (optional, recorded with the decision)<br>
+      <input id="dbt-note-${esc(doubt.id)}" style="width:100%"></label>
+  </div>`;
+}
+
+async function answerDoubt(doubtId, choice) {
+  const node = $(`dbt-note-${doubtId}`);
+  const note = node ? node.value.trim() : "";
+  await act("POST", `/api/doubts/${encodeURIComponent(doubtId)}/answer`, {
+    choice,
+    ...(note ? { note } : {}),
+  });
 }
 
 /* ====================== views ====================== */
@@ -402,12 +491,57 @@ function viewOverview() {
     <p class="tiny muted" style="margin-top:16px">Network: <code>${esc(o.network)}</code></p>`;
 }
 
+/** Create a project from a template, with knowledge attached (TP-05, KB-03). */
+function newProjectForm() {
+  const templates = store.templates && store.templates.templates ? store.templates.templates : [];
+  const bases = store.knowledge && store.knowledge.bases ? store.knowledge.bases : [];
+  const chosen = templates.find((t) => t.id === (window.__pickedTemplate || ""));
+  return `<div class="card pad" style="margin-bottom:16px">
+    <div class="row wrap" style="gap:16px">
+      <label class="tiny">Name<br><input id="pr-name" placeholder="Offline sync"></label>
+      <label class="tiny">Template<br>
+        <select id="pr-template" onchange="window.__pickedTemplate=this.value;paint()">
+          <option value="">(none — an empty project)</option>
+          ${templates.map((t) => `<option value="${esc(t.id)}" ${
+            t.id === window.__pickedTemplate ? "selected" : ""}>${esc(t.name)}</option>`).join("")}
+        </select></label>
+      <label class="tiny">Verify command<br><input id="pr-verify" placeholder="npm test"></label>
+      <label class="tiny">Knowledge (base ids, comma separated)<br>
+        <input id="pr-knowledge" placeholder="${esc(bases.map((b) => b.id).slice(0, 2).join(", "))}"></label>
+      ${chosen && chosen.requiresWritableKnowledge
+        ? `<label class="tiny">Writable base (required by this template)<br>
+             <input id="pr-writable" placeholder="the base this project writes"></label>`
+        : ""}
+    </div>
+    <div class="row" style="gap:8px;margin-top:12px">
+      <button class="primary" onclick="createProjectFromPanel()">Create</button>
+      <button onclick="editing=null;paint()">Cancel</button>
+    </div>
+  </div>`;
+}
+
+async function createProjectFromPanel() {
+  const name = field("pr-name");
+  if (!name) { store.error = "a name is required"; return paint(); }
+  const payload = { name };
+  if (field("pr-template")) payload.template = field("pr-template");
+  if (field("pr-verify")) payload.verify = field("pr-verify");
+  if (csv("pr-knowledge").length) payload.knowledge = csv("pr-knowledge");
+  if (field("pr-writable")) payload.writableKnowledge = field("pr-writable");
+  await act("POST", "/api/projects", payload);
+}
+
 function viewProjects() {
   const o = store.overview;
   if (!o) return `<div class="empty">Loading…</div>`;
+  const header = `<h1>Projects <em>${o.projects.length}</em></h1>
+    <div class="row" style="margin-bottom:16px">
+      <button class="primary" onclick="editing='new-project';paint()">New project</button>
+    </div>
+    ${editing === "new-project" ? newProjectForm() : ""}`;
   if (o.projects.length === 0) {
-    return `<h1>Projects</h1><div class="card"><div class="empty">
-      No projects yet. Create the first one from <a href="/setup.html">Setup</a> or through Claude Desktop.
+    return `${header}<div class="card"><div class="empty">
+      No projects yet. Create one above, from <a href="/setup.html">Setup</a>, or through Claude Desktop.
     </div></div>`;
   }
   const bar = (p) => {
@@ -415,7 +549,7 @@ function viewProjects() {
     if (steps.length === 0) return `<span class="tiny muted">no chain</span>`;
     return `<div class="phasebar">${steps.map((s) => `<i class="${markClass(s.status)}" title="${esc(s.title)}"></i>`).join("")}</div>`;
   };
-  return `<h1>Projects <em>${o.projects.length}</em></h1>
+  return `${header}
     <p class="sub">One row per project: what it is doing, how far along, and what it is waiting for.</p>
     <div class="card"><table>
       <thead><tr><th>Project</th><th>Status</th><th>Progress</th><th>Doubts</th><th>Last activity</th></tr></thead>
@@ -434,7 +568,103 @@ function projectTabs(id, tab) {
   const item = (href, key, label) =>
     `<a href="${href}" class="${tab === key ? "on" : ""}">${label}</a>`;
   const base = `#/p/${encodeURIComponent(id)}`;
-  return `<div class="tabs">${item(base, null, "Current")}${item(`${base}/history`, "history", "History")}</div>`;
+  return `<div class="tabs">${item(base, null, "Current")}${item(`${base}/history`, "history", "History")}${item(
+    `${base}/knowledge`,
+    "knowledge",
+    "Knowledge",
+  )}</div>`;
+}
+
+/**
+ * The phase list with its controls (TP-06, TP-07). Launch carries an optional request: it is
+ * what the person is asking for this time, and a shaping or answering phase is useless
+ * without it.
+ */
+function phaseList() {
+  const data = store.phases;
+  if (!data || !data.phases || data.phases.length === 0) {
+    return `<div class="card"><div class="empty">
+      This project has no phases. It was created without a template, or before templates
+      existed; launch tasks through Claude Desktop, or create a new project from a template.
+    </div></div>`;
+  }
+  const running = data.phases.some((p) => p.status === "running");
+  return `<div class="card"><table>
+    <thead><tr><th>#</th><th>Phase</th><th>Agent</th><th>Deliverable</th><th>Status</th><th></th></tr></thead>
+    <tbody>${data.phases
+      .map((p) => {
+        const canLaunch =
+          !running && (p.status === "pending" || (p.repeatable && p.status !== "running"));
+        const row = `<tr>
+      <td class="tiny muted num">${p.position + 1}</td>
+      <td><b>${esc(p.title)}</b> <code class="tiny">${esc(p.ref)}</code>
+        ${p.gate === "human" ? `<span class="pill amber">human gate</span>` : ""}
+        ${p.optional ? `<span class="pill">optional</span>` : ""}
+        ${p.repeatable ? `<span class="pill">repeatable</span>` : ""}</td>
+      <td class="tiny">${esc(p.agent)}</td>
+      <td class="tiny mono">${p.deliverable ? esc(p.deliverable) : "—"}</td>
+      <td>${statusPill(p.status === "done" ? "ok" : p.status)}</td>
+      <td class="row" style="gap:6px;justify-content:flex-end">
+        ${canLaunch
+          ? `<button class="tiny primary" onclick="editing='launch:${esc(p.id)}';paint()">
+               ${p.status === "pending" ? "Launch" : "Re-launch"}</button>`
+          : ""}
+        ${p.optional && p.status === "pending"
+          ? `<button class="tiny" onclick="act('POST','/api/phases/${esc(p.id)}/skip')">Skip</button>`
+          : ""}
+      </td></tr>`;
+        return editing === `launch:${p.id}`
+          ? `${row}<tr><td colspan="6"><div class="card pad" style="margin:8px 0">
+              <label class="tiny">What are you asking for this time? (optional)<br>
+                <textarea id="ph-input" rows="4" style="width:100%"></textarea></label>
+              <div class="row" style="gap:8px;margin-top:12px">
+                <button class="primary" onclick="launchPhase('${esc(p.id)}')">Launch ${esc(p.title)}</button>
+                <button onclick="editing=null;paint()">Cancel</button>
+              </div></div></td></tr>`
+          : row;
+      })
+      .join("")}</tbody></table></div>
+    ${running ? `<p class="tiny muted" style="margin-top:8px">A phase is running; the rest wait for it (OR-08).</p>` : ""}`;
+}
+
+async function launchPhase(phaseId) {
+  const input = $("ph-input") ? $("ph-input").value.trim() : "";
+  await act("POST", `/api/phases/${encodeURIComponent(phaseId)}/launch`, input ? { input } : {});
+}
+
+/** Attach and detach knowledge for one project (KB-03). */
+function viewProjectKnowledge() {
+  const s = store.project;
+  const k = store.knowledge;
+  if (!s || !k) return `<div class="empty">Loading…</div>`;
+  const attached = (store.phases && store.phases.knowledge) || [];
+  return `<h1>${esc(s.project.name)}</h1>
+    <p class="sub mono">${esc(s.project.path)}</p>
+    ${projectTabs(s.project.id, "knowledge")}
+    <p class="sub">What this project's agents are told before they start. One base may be
+      writable, and only for a curation project (KB-05).</p>
+    <div class="card"><table>
+      <thead><tr><th>Base</th><th>Kind</th><th>Documents</th><th>Attached</th><th></th></tr></thead>
+      <tbody>${k.bases
+        .map((b) => {
+          const here = attached.find((a) => a.baseId === b.id);
+          return `<tr>
+        <td><b>${esc(b.name)}</b> <code class="tiny">${esc(b.id)}</code></td>
+        <td class="tiny">${esc(b.kind)}</td>
+        <td class="tiny num">${b.documents.length}</td>
+        <td>${here
+          ? here.writable
+            ? `<span class="pill amber"><span class="sdot"></span>writable</span>`
+            : `<span class="pill green"><span class="sdot"></span>read-only</span>`
+          : `<span class="tiny muted">—</span>`}</td>
+        <td class="row" style="gap:6px;justify-content:flex-end">
+          ${here
+            ? `<button class="tiny" onclick="act('DELETE','/api/projects/${encodeURIComponent(s.project.id)}/knowledge/${encodeURIComponent(b.id)}')">Detach</button>`
+            : `<button class="tiny" onclick="act('POST','/api/projects/${encodeURIComponent(s.project.id)}/knowledge',{baseId:'${esc(b.id)}'})">Attach</button>
+               <button class="tiny" onclick="act('POST','/api/projects/${encodeURIComponent(s.project.id)}/knowledge',{baseId:'${esc(b.id)}',writable:true})">Attach writable</button>`}
+        </td></tr>`;
+        })
+        .join("")}</tbody></table></div>`;
 }
 
 function viewProject() {
@@ -452,6 +682,8 @@ function viewProject() {
     </div>
     ${s.run ? runCard(s.run) : `<div class="card"><div class="empty">No run in flight. Next: ${esc(s.state.next || "nothing queued")}</div></div>`}
     ${s.doubts.length ? `<h2>Open doubts <em>${s.doubts.length}</em></h2>${s.doubts.map(doubtCard).join("")}` : ""}
+    <h2>Phases</h2>
+    ${phaseList()}
     <h2>Chain</h2>
     <div class="card pad">${chainSteps(s.chain)}</div>
     ${s.run ? `<h2>Timeline</h2><div class="card pad"><div class="timeline" id="timeline">${timelineRows()}</div></div>` : ""}
@@ -499,26 +731,405 @@ function viewHistory() {
       h.totals.costUsd ? ` · $${h.totals.costUsd.toFixed(4)} reported` : " · no cost reported"}</p>`}`;
 }
 
+/* ====================== configuration library (phase 10) ====================== */
+
+const sourcePill = (source) =>
+  source === "workspace"
+    ? `<span class="pill">workspace</span>`
+    : `<span class="pill tiny">builtin</span>`;
+
+/**
+ * The agent editor (AP-06..08). Saving a builtin writes a workspace copy that shadows it, so
+ * the button says so rather than pretending the shipped file is being edited.
+ */
+function agentEditor(p, packs) {
+  const engines = ["claude", "codex"];
+  const reasonings = ["", "minimal", "low", "medium", "high"];
+  return `<tr><td colspan="6">
+    <div class="card pad" style="margin:8px 0">
+      <div class="row wrap" style="gap:16px;margin-bottom:12px">
+        <label class="tiny">Name<br><input id="ag-name" value="${esc(p.name || p.id)}"></label>
+        <label class="tiny">Engine<br><select id="ag-engine">${engines
+          .map((e) => `<option ${e === p.engine ? "selected" : ""}>${e}</option>`)
+          .join("")}</select></label>
+        <label class="tiny">Model<br><input id="ag-model" value="${esc(p.model || "")}"></label>
+        <label class="tiny">Reasoning<br><select id="ag-reasoning">${reasonings
+          .map((r) => `<option ${r === (p.reasoning || "") ? "selected" : ""}>${r}</option>`)
+          .join("")}</select></label>
+        <label class="tiny">Policy pack<br><select id="ag-policy">${packs
+          .map((k) => `<option ${k === p.policy ? "selected" : ""}>${esc(k)}</option>`)
+          .join("")}</select></label>
+        <label class="tiny">Tags<br><input id="ag-tags" value="${esc((p.tags || []).join(", "))}"></label>
+      </div>
+      <label class="tiny">Instructions<br>
+        <textarea id="ag-instructions" rows="10" style="width:100%">${esc(p.instructions || "")}</textarea>
+      </label>
+      <div class="row" style="gap:8px;margin-top:12px">
+        <button class="primary" onclick="saveAgent('${esc(p.id)}')">
+          ${p.source === "builtin" ? "Save as a workspace copy" : "Save"}</button>
+        <button onclick="editing=null;paint()">Cancel</button>
+        ${p.source === "workspace"
+          ? `<button class="danger" onclick="deleteAgent('${esc(p.id)}')">Delete the copy</button>`
+          : ""}
+      </div>
+    </div></td></tr>`;
+}
+
 function viewAgents() {
   const a = store.agents;
   if (!a) return `<div class="empty">Loading…</div>`;
   return `<h1>Agents <em>${a.agents.length}</em></h1>
-    <p class="sub">Profiles loaded from the workspace. Editing them here arrives with the write
-      surface (AP-06, phase 10); for now they are files under <code>agents/</code>.</p>
+    <p class="sub">The builtin library, and whatever this installation has changed on top of it.
+      Editing a builtin writes a workspace copy that shadows it; deleting the copy brings the
+      builtin back (AP-06, §2).</p>
+    <div class="row" style="margin-bottom:16px">
+      <button class="primary" onclick="editing='new-agent';paint()">New profile</button>
+      <button onclick="act('POST','/api/agents/reload')">Reload from disk</button>
+    </div>
+    ${editing === "new-agent" ? newAgentForm(a.packs) : ""}
     <div class="card"><table>
-      <thead><tr><th>Id</th><th>Engine</th><th>Model</th><th>Policy</th><th>Advisor</th><th></th></tr></thead>
-      <tbody>${a.agents.map((p) => `<tr>
+      <thead><tr><th>Id</th><th>Engine</th><th>Model</th><th>Policy</th><th>Source</th><th></th></tr></thead>
+      <tbody>${a.agents
+        .map((p) => {
+          const row = `<tr>
         <td><b>${esc(p.id)}</b><div class="tiny muted">${esc(p.name || "")}</div>
           ${p.error ? `<div class="tiny" style="color:var(--red-fg)">${esc(p.error)}</div>` : ""}</td>
         <td>${p.engine ? esc(p.engine) : "—"}</td>
         <td class="tiny">${p.model ? esc(p.model) : "—"}</td>
         <td class="tiny">${p.policy ? esc(p.policy) : "—"}</td>
-        <td class="tiny">${p.advisor ? esc(p.advisor) : "—"}</td>
-        <td>${p.valid ? `<span class="pill green"><span class="sdot"></span>valid</span>`
-                      : `<span class="pill red"><span class="sdot"></span>rejected</span>`}</td>
-      </tr>`).join("")}</tbody>
+        <td class="tiny">${sourcePill(p.source)}</td>
+        <td class="row" style="gap:6px;justify-content:flex-end">
+          ${p.valid
+            ? `<button class="tiny" onclick="act('POST','/api/agents/${encodeURIComponent(p.id)}/enabled',{enabled:${!p.enabled}})">
+                 ${p.enabled ? "Disable" : "Enable"}</button>
+               <button class="tiny" onclick="editing='${esc(p.id)}';paint()">Edit</button>`
+            : `<span class="pill red"><span class="sdot"></span>rejected</span>`}
+          ${p.enabled === false ? `<span class="pill amber"><span class="sdot"></span>disabled</span>` : ""}
+        </td>
+      </tr>`;
+          return editing === p.id ? row + agentEditor(p, a.packs) : row;
+        })
+        .join("")}</tbody>
     </table></div>
     <p class="tiny muted" style="margin-top:16px">Policy packs: ${a.packs.map((k) => `<code>${esc(k)}</code>`).join(" ") || "—"}</p>`;
+}
+
+function newAgentForm(packs) {
+  return `<div class="card pad" style="margin-bottom:16px">
+    <div class="row wrap" style="gap:16px">
+      <label class="tiny">Id<br><input id="ag-new-id" placeholder="my-builder"></label>
+      <label class="tiny">Name<br><input id="ag-new-name" placeholder="My builder"></label>
+      <label class="tiny">Engine<br><select id="ag-new-engine"><option>claude</option><option>codex</option></select></label>
+      <label class="tiny">Policy pack<br><select id="ag-new-policy">${packs
+        .map((k) => `<option>${esc(k)}</option>`)
+        .join("")}</select></label>
+    </div>
+    <label class="tiny">Instructions<br>
+      <textarea id="ag-new-instructions" rows="6" style="width:100%"></textarea></label>
+    <div class="row" style="gap:8px;margin-top:12px">
+      <button class="primary" onclick="createAgent()">Create</button>
+      <button onclick="editing=null;paint()">Cancel</button>
+    </div>
+  </div>`;
+}
+
+async function createAgent() {
+  const id = field("ag-new-id");
+  if (!id) { store.error = "an id is required"; return paint(); }
+  await act("POST", "/api/agents", {
+    id,
+    name: field("ag-new-name") || id,
+    engine: field("ag-new-engine"),
+    policy: field("ag-new-policy"),
+    instructions: $("ag-new-instructions").value,
+  });
+}
+
+async function saveAgent(id) {
+  const patch = {
+    name: field("ag-name"),
+    engine: field("ag-engine"),
+    policy: field("ag-policy"),
+    instructions: $("ag-instructions").value,
+    tags: csv("ag-tags"),
+  };
+  if (field("ag-model")) patch.model = field("ag-model");
+  if (field("ag-reasoning")) patch.reasoning = field("ag-reasoning");
+  await act("PUT", `/api/agents/${encodeURIComponent(id)}`, patch);
+}
+
+async function deleteAgent(id) {
+  if (!confirmed(`the workspace copy of ${id}`)) return;
+  await act("DELETE", `/api/agents/${encodeURIComponent(id)}`);
+}
+
+/* ---------- templates (TP-04) ---------- */
+
+function viewTemplates() {
+  const t = store.templates;
+  if (!t) return `<div class="empty">Loading…</div>`;
+  if (t.available === false) {
+    return `<h1>Templates</h1><div class="empty">Templates are not loaded in this process.</div>`;
+  }
+  return `<h1>Templates <em>${t.templates.length}</em></h1>
+    <p class="sub">The recipe a project is created from. Editing one never rewrites a running
+      project: phases are frozen when the project is created (TP-05).</p>
+    ${t.rejected && t.rejected.length
+      ? `<div class="note bad" style="margin-bottom:16px">${t.rejected
+          .map((r) => `<div class="tiny">${esc(r.file)}: ${esc(r.error)}</div>`)
+          .join("")}</div>`
+      : ""}
+    ${t.templates
+      .map(
+        (tpl) => `<div class="card pad" style="margin-bottom:16px">
+      <div class="row" style="justify-content:space-between">
+        <div><b>${esc(tpl.name)}</b> <code class="tiny">${esc(tpl.id)}</code> ${sourcePill(tpl.source)}
+          ${tpl.requiresWritableKnowledge ? `<span class="pill amber">needs a writable base</span>` : ""}
+          <div class="tiny muted">${esc(tpl.description || "")}</div></div>
+        <div class="row" style="gap:6px">
+          <button class="tiny" onclick="editing='${esc(tpl.id)}';paint()">Edit phases</button>
+          ${tpl.source === "workspace"
+            ? `<button class="tiny danger" onclick="deleteTemplate('${esc(tpl.id)}')">Delete</button>`
+            : ""}
+        </div>
+      </div>
+      <ol class="tiny" style="margin-top:12px">${tpl.phases
+        .map(
+          (p) => `<li><b>${esc(p.title)}</b> — ${esc(p.agent)}
+            ${p.gate === "human" ? `<span class="pill amber">gate</span>` : ""}
+            ${p.optional ? `<span class="pill">optional</span>` : ""}
+            ${p.repeatable ? `<span class="pill">repeatable</span>` : ""}
+            ${p.deliverable ? `<code>${esc(p.deliverable)}</code>` : ""}</li>`,
+        )
+        .join("")}</ol>
+      ${editing === tpl.id ? templateEditor(tpl) : ""}
+    </div>`,
+      )
+      .join("")}`;
+}
+
+/**
+ * The phase editor is one textarea of JSON rather than a drag-and-drop list. Reordering,
+ * inserting and removing are the same edit to the same array, and the array is what the file
+ * holds; a bespoke widget here would be a second representation to keep in step.
+ */
+function templateEditor(tpl) {
+  return `<div style="margin-top:12px">
+    <label class="tiny">Phases (JSON: id, title, agent, instructions, gate, optional, repeatable, deliverable, verify)<br>
+      <textarea id="tpl-phases" rows="16" style="width:100%;font-family:var(--mono)">${esc(
+        JSON.stringify(tpl.phases.map(cleanPhase), null, 2),
+      )}</textarea></label>
+    <div class="row" style="gap:8px;margin-top:12px">
+      <button class="primary" onclick="saveTemplate('${esc(tpl.id)}')">
+        ${tpl.source === "builtin" ? "Save as a workspace copy" : "Save"}</button>
+      <button onclick="editing=null;paint()">Cancel</button>
+    </div>
+  </div>`;
+}
+
+function cleanPhase(p) {
+  const out = { id: p.id, title: p.title, agent: p.agent, instructions: p.instructions };
+  if (p.deliverable) out.deliverable = p.deliverable;
+  if (p.verify) out.verify = p.verify;
+  if (p.gate && p.gate !== "auto") out.gate = p.gate;
+  if (p.optional) out.optional = true;
+  if (p.repeatable) out.repeatable = true;
+  return out;
+}
+
+async function saveTemplate(id) {
+  let phases;
+  try {
+    phases = JSON.parse($("tpl-phases").value);
+  } catch (err) {
+    store.error = `the phase list is not valid JSON: ${err.message}`;
+    return paint();
+  }
+  await act("PUT", `/api/templates/${encodeURIComponent(id)}`, { phases });
+}
+
+async function deleteTemplate(id) {
+  if (!confirmed(`the workspace template ${id}`)) return;
+  await act("DELETE", `/api/templates/${encodeURIComponent(id)}`);
+}
+
+/* ---------- knowledge (KB-01..03) ---------- */
+
+function viewKnowledge() {
+  const k = store.knowledge;
+  if (!k) return `<div class="empty">Loading…</div>`;
+  return `<h1>Knowledge <em>${k.bases.length}</em></h1>
+    <p class="sub">What an agent is told before it starts. Every document is injected labelled
+      with its base and its kind, because a preference and a constraint are not the same
+      thing (KB-02).</p>
+    <div class="row" style="margin-bottom:16px">
+      <button class="primary" onclick="editing='new-base';paint()">New base</button>
+    </div>
+    ${editing === "new-base"
+      ? `<div class="card pad" style="margin-bottom:16px">
+          <div class="row wrap" style="gap:16px">
+            <label class="tiny">Id<br><input id="kb-id" placeholder="erpagro-core"></label>
+            <label class="tiny">Name<br><input id="kb-name" placeholder="ERPagro core"></label>
+            <label class="tiny">Kind<br><select id="kb-kind">
+              <option>technical</option><option>functional</option>
+              <option>organisational</option><option>market</option><option>other</option>
+            </select></label>
+            <label class="tiny">Tags<br><input id="kb-tags" placeholder="erp, legacy"></label>
+          </div>
+          <label class="tiny">Description<br><input id="kb-description" style="width:100%"></label>
+          <div class="row" style="gap:8px;margin-top:12px">
+            <button class="primary" onclick="createBase()">Create</button>
+            <button onclick="editing=null;paint()">Cancel</button>
+          </div>
+        </div>`
+      : ""}
+    ${k.bases
+      .map(
+        (b) => `<div class="card pad" style="margin-bottom:16px">
+      <div class="row" style="justify-content:space-between">
+        <div><b>${esc(b.name)}</b> <code class="tiny">${esc(b.id)}</code>
+          <span class="pill">${esc(b.kind)}</span>
+          <div class="tiny muted">${esc(b.description || "")}</div>
+          <div class="tiny muted">${b.documents.length} document(s)${
+            b.updated ? ` · updated ${esc(b.updated)}` : ""}</div></div>
+        <div class="row" style="gap:6px">
+          <button class="tiny" onclick="editing='doc:${esc(b.id)}';paint()">Add a document</button>
+          <button class="tiny danger" onclick="deleteBase('${esc(b.id)}')">Delete</button>
+        </div>
+      </div>
+      <div class="tiny" style="margin-top:8px">${b.documents
+        .map((d) => `<code>${esc(d.file || d)}</code>`)
+        .join(" ")}</div>
+      ${editing === `doc:${b.id}`
+        ? `<div style="margin-top:12px">
+            <label class="tiny">File name<br><input id="kb-doc-file" placeholder="data-model.md"></label>
+            <label class="tiny">Content<br><textarea id="kb-doc-body" rows="10" style="width:100%"></textarea></label>
+            <div class="row" style="gap:8px;margin-top:12px">
+              <button class="primary" onclick="saveDoc('${esc(b.id)}')">Save the document</button>
+              <button onclick="editing=null;paint()">Cancel</button>
+            </div></div>`
+        : ""}
+    </div>`,
+      )
+      .join("")}`;
+}
+
+async function createBase() {
+  const id = field("kb-id");
+  if (!id) { store.error = "an id is required"; return paint(); }
+  await act("POST", "/api/knowledge", {
+    id,
+    name: field("kb-name") || id,
+    kind: field("kb-kind"),
+    description: field("kb-description"),
+    tags: csv("kb-tags"),
+  });
+}
+
+async function saveDoc(baseId) {
+  const file = field("kb-doc-file");
+  if (!file) { store.error = "a file name is required"; return paint(); }
+  await act("PUT", `/api/knowledge/${encodeURIComponent(baseId)}/doc`, {
+    file,
+    content: $("kb-doc-body").value,
+  });
+}
+
+async function deleteBase(id) {
+  if (!confirmed(`the knowledge base ${id}`)) return;
+  await act("DELETE", `/api/knowledge/${encodeURIComponent(id)}`);
+}
+
+/* ---------- vault (VT-01..03) ---------- */
+
+function viewVault() {
+  const v = store.vault;
+  if (!v) return `<div class="empty">Loading…</div>`;
+  return `<h1>Vault <em>${v.entries.length}</em></h1>
+    <p class="sub">Values are write-only. Nothing here, and no route behind it, ever returns
+      one: the panel can set a token and can tell you whether one is set, and that is all
+      (VT-03).</p>
+    <div class="row" style="margin-bottom:16px">
+      <button class="primary" onclick="editing='new-entry';paint()">New entry</button>
+    </div>
+    ${editing === "new-entry" ? vaultForm({ id: "", label: "", auth: "none", fields: [] }, true) : ""}
+    ${v.entries
+      .map(
+        (e) => `<div class="card pad" style="margin-bottom:16px">
+      <div class="row" style="justify-content:space-between">
+        <div><b>${esc(e.label)}</b> <code class="tiny">${esc(e.id)}</code>
+          ${e.test_only ? `<span class="pill green"><span class="sdot"></span>test only</span>` : `<span class="pill red"><span class="sdot"></span>not test-only</span>`}
+          <div class="tiny muted">${esc(e.base_url || "")} · ${esc(e.auth)}</div>
+          ${e.notes ? `<div class="tiny muted">${esc(e.notes)}</div>` : ""}
+          <div class="tiny">${e.fields
+            .map((f) => `<code>${esc(f.name)}</code> ${f.present ? "set" : "<b>empty</b>"}`)
+            .join(" · ") || "<span class='muted'>no fields</span>"}</div></div>
+        <div class="row" style="gap:6px">
+          <button class="tiny" onclick="editing='${esc(e.id)}';paint()">Edit</button>
+          <button class="tiny danger" onclick="deleteEntry('${esc(e.id)}')">Delete</button>
+        </div>
+      </div>
+      ${editing === e.id ? vaultForm(e, false) : ""}
+    </div>`,
+      )
+      .join("")}`;
+}
+
+function vaultForm(entry, isNew) {
+  const auths = ["none", "basic", "bearer", "api_key", "oauth2_client_credentials"];
+  return `<div class="card pad" style="margin-bottom:16px">
+    <div class="row wrap" style="gap:16px">
+      ${isNew ? `<label class="tiny">Id<br><input id="vt-id" placeholder="erpagro-sandbox"></label>` : ""}
+      <label class="tiny">Label<br><input id="vt-label" value="${esc(entry.label || "")}"></label>
+      <label class="tiny">Base URL<br><input id="vt-url" value="${esc(entry.base_url || "")}"></label>
+      <label class="tiny">Auth<br><select id="vt-auth">${auths
+        .map((a) => `<option ${a === entry.auth ? "selected" : ""}>${a}</option>`)
+        .join("")}</select></label>
+      <label class="tiny">Scope (project ids, or *)<br>
+        <input id="vt-scope" value="${esc((entry.scope || ["*"]).join(", "))}"></label>
+      <label class="tiny">Test only<br>
+        <input type="checkbox" id="vt-test" ${entry.test_only ? "checked" : ""}></label>
+    </div>
+    <label class="tiny">Notes<br><input id="vt-notes" style="width:100%" value="${esc(entry.notes || "")}"></label>
+    <label class="tiny">Fields (one per line, <code>name=value</code>; leave a value empty to keep what is stored)<br>
+      <textarea id="vt-fields" rows="5" style="width:100%;font-family:var(--mono)">${esc(
+        (entry.fields || []).map((f) => `${f.name}=`).join("\n"),
+      )}</textarea></label>
+    <div class="row" style="gap:8px;margin-top:12px">
+      <button class="primary" onclick="saveEntry(${isNew ? "null" : `'${esc(entry.id)}'`})">Save</button>
+      <button onclick="editing=null;paint()">Cancel</button>
+    </div>
+  </div>`;
+}
+
+async function saveEntry(existingId) {
+  const id = existingId || field("vt-id");
+  if (!id) { store.error = "an id is required"; return paint(); }
+  const fields = {};
+  for (const line of $("vt-fields").value.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const at = trimmed.indexOf("=");
+    const name = (at === -1 ? trimmed : trimmed.slice(0, at)).trim();
+    const value = at === -1 ? "" : trimmed.slice(at + 1);
+    // An empty value means "leave the stored one alone", which is what makes the form
+    // usable at all: it never sees what is already there.
+    if (name && value) fields[name] = value;
+  }
+  await act("PUT", `/api/vault/${encodeURIComponent(id)}`, {
+    label: field("vt-label") || id,
+    base_url: field("vt-url"),
+    auth: field("vt-auth"),
+    test_only: checked("vt-test"),
+    scope: csv("vt-scope").length ? csv("vt-scope") : ["*"],
+    notes: field("vt-notes"),
+    fields,
+  });
+}
+
+async function deleteEntry(id) {
+  if (!confirmed(`the vault entry ${id}`)) return;
+  await act("DELETE", `/api/vault/${encodeURIComponent(id)}`);
 }
 
 function viewHealth() {
@@ -561,9 +1172,23 @@ function parseRoute() {
 const RENDER = {
   "/": viewOverview,
   "/projects": viewProjects,
-  "/p": () => (route.tab === "history" ? viewHistory() : viewProject()),
+  "/p": () =>
+    route.tab === "history"
+      ? viewHistory()
+      : route.tab === "knowledge"
+        ? viewProjectKnowledge()
+        : viewProject(),
   "/agents": viewAgents,
+  "/templates": viewTemplates,
+  "/knowledge": viewKnowledge,
+  "/vault": viewVault,
   "/health": viewHealth,
+  // The wizard is its own page (it has to work before the panel has anything to show). The
+  // hash route of §12.3 exists so a link to #/setup lands there rather than nowhere.
+  "/setup": () => {
+    location.replace("/setup.html");
+    return `<div class="empty">Opening setup…</div>`;
+  },
 };
 
 function paint() {
@@ -590,17 +1215,30 @@ function paint() {
 async function load() {
   try {
     if (route.name === "/p" && route.id) {
-      store.project = await api(`/api/projects/${encodeURIComponent(route.id)}`);
+      const id = encodeURIComponent(route.id);
+      store.project = await api(`/api/projects/${id}`);
+      store.phases = await api(`/api/projects/${id}/phases`);
       if (route.tab === "history") {
-        store.history = await api(`/api/projects/${encodeURIComponent(route.id)}/history?limit=50`);
+        store.history = await api(`/api/projects/${id}/history?limit=50`);
       }
+      if (route.tab === "knowledge") store.knowledge = await api("/api/knowledge");
       watchRun(store.project.run ? store.project.run.id : null);
     } else if (route.name === "/agents") {
       store.agents = await api("/api/agents");
+    } else if (route.name === "/templates") {
+      store.templates = await api("/api/templates");
+    } else if (route.name === "/knowledge") {
+      store.knowledge = await api("/api/knowledge");
+    } else if (route.name === "/vault") {
+      store.vault = await api("/api/vault");
     } else if (route.name === "/health") {
       store.health = await api("/health");
     } else {
       store.overview = await api("/api/overview");
+      // The project list needs the templates to offer them in the create form (WP-10).
+      if (route.name === "/projects" && !store.templates) {
+        store.templates = await api("/api/templates").catch(() => null);
+      }
     }
     store.error = "";
   } catch (err) {

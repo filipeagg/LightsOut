@@ -19,6 +19,8 @@ import {
 export type TemplatesSnapshot = {
   templates: Map<string, ProjectTemplate>;
   rejected: RejectedTemplate[];
+  /** Which layer each id ended up coming from, for the panel's library view (§2, TP-04). */
+  sources: Map<string, "builtin" | "workspace">;
 };
 
 export type TemplateLoadReport = {
@@ -45,7 +47,11 @@ async function listYaml(dir: string): Promise<string[]> {
 export type AgentResolver = (id: string) => boolean;
 
 export class TemplatesLoader {
-  private snapshot: TemplatesSnapshot = { templates: new Map(), rejected: [] };
+  private snapshot: TemplatesSnapshot = {
+    templates: new Map(),
+    rejected: [],
+    sources: new Map(),
+  };
   private fingerprint = "";
   private pollTimer: NodeJS.Timeout | undefined;
   private polling = false;
@@ -86,6 +92,7 @@ export class TemplatesLoader {
 
     const templates = new Map<string, ProjectTemplate>();
     const rejected: RejectedTemplate[] = [];
+    const sources = new Map<string, "builtin" | "workspace">();
     let fromWorkspace = 0;
 
     for (const [layer, dir] of [
@@ -115,6 +122,7 @@ export class TemplatesLoader {
             throw new Error(`unknown or disabled agent(s): ${missing.join(", ")}`);
           }
           if (layer === "workspace") fromWorkspace += 1;
+          sources.set(parsed.id, layer);
           templates.set(parsed.id, parsed);
         } catch (err) {
           rejected.push({
@@ -126,7 +134,7 @@ export class TemplatesLoader {
       }
     }
 
-    this.snapshot = { templates, rejected };
+    this.snapshot = { templates, rejected, sources };
     this.fingerprint = await this.treeFingerprint();
     return { loaded: templates.size, fromWorkspace, rejected };
   }

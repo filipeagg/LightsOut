@@ -63,9 +63,13 @@ Es la vista en vivo. Se actualiza solo, sin recargar. Rutas:
 | `#/vault` | Las credenciales. Los valores solo entran: ninguna pantalla ni ninguna ruta devuelve uno. |
 | `#/health` | Contenedor, base de datos y motores. |
 
-**Los ficheros reales: `C:\Users\fcg102006\Documents\LightsOut`**
+**Los ficheros reales: la carpeta de trabajo**
 
-Esto es una carpeta normal de Windows. Se abre en el explorador, en VS Code o en lo que quieras:
+Por defecto es `Documents\LightsOut` dentro de tu carpeta de usuario, pero el asistente de
+instalación pudo apuntarla a otro sitio. Si no sabes cuál es, pregúntamelo: `health` la dice, y
+`list_projects` da la ruta de cada proyecto.
+
+Es una carpeta normal. Se abre en el explorador, en VS Code o en lo que quieras:
 
 - `projects\<id>\` — el proyecto, con su git y su carpeta `doc\`
 - `agents\` — perfiles de agente y paquetes de política que esta instalación ha cambiado
@@ -76,9 +80,9 @@ Esto es una carpeta normal de Windows. Se abre en el explorador, en VS Code o en
 Cuando un agente termina una fase, lo que ha hecho está ahí, en un commit. No hay nada oculto.
 
 **Si el panel no responde**: el contenedor está parado. Se arranca con doble clic en
-`scripts\windows\1-Start-LightsOut.bat`. Si un motor sale como no conectado en `#/health`,
-`2-Connect-Claude.bat` o `3-Connect-Codex.bat` lo reconectan (son logins interactivos: los tiene
-que lanzar el usuario en su propia terminal).
+`1-Start-LightsOut.bat`, dentro de `scripts\windows\` de la instalación. Si un motor sale como no
+conectado en `#/health`, `2-Connect-Claude.bat` o `3-Connect-Codex.bat` lo reconectan; son logins
+interactivos, así que los tiene que lanzar el usuario en su propia terminal, no yo.
 
 ## Las herramientas que tienes
 

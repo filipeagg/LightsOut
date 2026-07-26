@@ -12,6 +12,12 @@ import type { Config } from "../config.js";
 import type { Repos } from "../db/repos/index.js";
 import type { AgentsLoader } from "../agents/loader.js";
 import type { AgentProfile } from "../agents/schema.js";
+import {
+  modelCatalog,
+  resolveProfile,
+  validateModelChoice,
+  type ModelChoice,
+} from "../agents/effective.js";
 import { AgentWriter, agentSource, type AgentPatch } from "../agents/writer.js";
 import type { TemplatesLoader } from "../templates/loader.js";
 import { TemplateWriter, type TemplatePatch } from "../templates/writer.js";
@@ -60,6 +66,12 @@ export type ActionDeps = {
   knowledge?: KnowledgeLoader;
   vault?: Vault;
   phases?: PhaseService;
+  /**
+   * Engine auth, so a launch onto an unauthenticated engine is refused in one second instead of
+   * dying on AUTH_REQUIRED two seconds into a run (OR-11). Optional: a process without it simply
+   * does not make that check.
+   */
+  health?: { engines(): Promise<{ engine: string; detected: boolean; auth: boolean }[]> };
 };
 
 export const DOC_NAMES = ["STATE", "PLAN", "DECISIONS", "QUESTIONS"] as const;
@@ -189,10 +201,24 @@ export class Actions {
     actor: Actor,
     projectId: string,
     phase: string,
-    input: { request: string; expects: string },
+    input: {
+      request: string;
+      expects: string;
+      /** Engine and model for this run of the phase, overriding the agent's (AP-09). */
+      engine?: string;
+      model?: string;
+      reasoning?: string;
+    },
   ): Promise<LaunchPhaseResult> {
     this.requireNotArchived(projectId);
-    return this.need(this.deps.phases, "phases").launchPhase(actor, projectId, phase, input);
+    const phases = this.need(this.deps.phases, "phases");
+    if (input.engine || input.model || input.reasoning) {
+      // OR-11: check it against the phase's own agent before the phase is marked running.
+      const row =
+        this.deps.repos.phases.getByRef(projectId, phase) ?? this.deps.repos.phases.get(phase);
+      if (row) await this.requireModelChoice(row.agent_id, input);
+    }
+    return phases.launchPhase(actor, projectId, phase, input);
   }
 
   async skipPhase(actor: Actor, projectId: string, phase: string): Promise<ProjectPhaseRow> {
@@ -274,6 +300,38 @@ export class Actions {
     throw new Error(explainMismatch({ agentId: input.agentId, missing, alternatives }));
   }
 
+  /**
+   * The engine and model this launch chose, checked against the catalog and against engine health
+   * before a task row exists (AP-09, OR-11). Returns what to store on the task, or throws the
+   * refusal — which always names the accepted values, because a rejection that does not say what
+   * was expected costs the caller another round trip.
+   */
+  private async requireModelChoice(
+    agentId: string,
+    choice: ModelChoice | undefined,
+  ): Promise<{ engine?: string; model?: string; reasoning?: string }> {
+    const profile = this.deps.agents.profileOrThrow(agentId);
+    const problem = validateModelChoice(profile, choice);
+    if (problem) throw new Error(problem);
+
+    const resolved = resolveProfile(profile, choice);
+    if (this.deps.health) {
+      const engines = await this.deps.health.engines();
+      const target = engines.find((e) => e.engine === resolved.engine);
+      if (target && (!target.detected || !target.auth)) {
+        throw new Error(
+          `engine ${resolved.engine} is not ready (${target.detected ? "not authenticated" : "not detected"}); ` +
+            `reconnect it from the panel before launching onto it, or launch on the other engine`,
+        );
+      }
+    }
+    return {
+      ...(choice?.engine ? { engine: choice.engine } : {}),
+      ...(choice?.model ? { model: choice.model } : {}),
+      ...(choice?.reasoning ? { reasoning: choice.reasoning } : {}),
+    };
+  }
+
   async launchTask(
     actor: Actor,
     input: {
@@ -290,16 +348,29 @@ export class Actions {
       needs?: string[];
       /** What to grant it for this run only (PE-12). */
       grants?: string[];
+      /** The engine, model and reasoning this launch chooses, overriding the profile (AP-09). */
+      engine?: string;
+      model?: string;
+      reasoning?: string;
     },
   ): Promise<{ taskId: string; chainId: string; started: boolean; queued: boolean }> {
     this.requireNotArchived(input.projectId);
     this.requireLaunchable(input.agentId);
     const capabilities = await this.requireCapabilities(input);
-    const { needs: _declared, grants: _asked, ...rest } = input;
+    const chosen = await this.requireModelChoice(input.agentId, input);
+    const {
+      needs: _declared,
+      grants: _asked,
+      engine: _engine,
+      model: _model,
+      reasoning: _reasoning,
+      ...rest
+    } = input;
     const launch = this.deps.orchestrator.launchTask({
       ...rest,
       ...(capabilities.needs.length ? { needs: capabilities.needs } : {}),
       ...(capabilities.grants.length ? { grants: capabilities.grants } : {}),
+      ...chosen,
     });
     this.deps.repos.events.append({
       type: "task.state",
@@ -311,6 +382,74 @@ export class Actions {
       started: launch.started,
       queued: launch.queued,
     };
+  }
+
+  /**
+   * A whole chain, with every task checked before any of it is queued (OR-11).
+   *
+   * It goes through here rather than straight to the orchestrator so that the capability check
+   * (PE-12) and the model check (AP-09) apply to a chain exactly as they apply to a single task:
+   * a chain whose fourth task names a model that does not exist should be refused now, not four
+   * tasks from now.
+   */
+  async launchChain(
+    actor: Actor,
+    input: {
+      projectId: string;
+      title: string;
+      tasks: {
+        title: string;
+        spec: string;
+        expects: string;
+        agentId: string;
+        level?: TaskLevel;
+        verifyCmd?: string | null;
+        needs?: string[];
+        grants?: string[];
+        engine?: string;
+        model?: string;
+        reasoning?: string;
+      }[];
+    },
+  ): Promise<{ chainId: string; taskIds: string[]; started: boolean; queued: boolean }> {
+    this.requireNotArchived(input.projectId);
+
+    const prepared = [];
+    for (const task of input.tasks) {
+      this.requireLaunchable(task.agentId);
+      const capabilities = await this.requireCapabilities({
+        projectId: input.projectId,
+        agentId: task.agentId,
+        ...(task.needs ? { needs: task.needs } : {}),
+        ...(task.grants ? { grants: task.grants } : {}),
+      });
+      const chosen = await this.requireModelChoice(task.agentId, task);
+      const { needs: _n, grants: _g, engine: _e, model: _m, reasoning: _r, ...rest } = task;
+      prepared.push({
+        ...rest,
+        ...(capabilities.needs.length ? { needs: capabilities.needs } : {}),
+        ...(capabilities.grants.length ? { grants: capabilities.grants } : {}),
+        ...chosen,
+      });
+    }
+
+    const launch = this.deps.orchestrator.launchChain({
+      projectId: input.projectId,
+      title: input.title,
+      tasks: prepared,
+    });
+    for (const taskId of launch.taskIds) {
+      this.deps.repos.events.append({
+        type: "task.state",
+        payload: { taskId, status: "queued", actor },
+      });
+    }
+    return launch;
+  }
+
+  /** The engines, models and reasoning levels a launch or a profile may name (AP-08, AP-09). */
+  modelCatalog(): ReturnType<typeof modelCatalog> {
+    return modelCatalog();
   }
 
   /** A profile that is disabled stays visible and refuses to run, with the reason (AP-07). */

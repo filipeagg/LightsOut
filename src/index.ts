@@ -171,6 +171,8 @@ async function main(): Promise<void> {
     knowledge,
     vault,
     phases,
+    // OR-11: so a launch onto an engine that is not authenticated is refused, not attempted.
+    health,
   });
 
   // 5c. Interactive engine logins driven from the browser (SU-04).

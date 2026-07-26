@@ -144,7 +144,19 @@ export class PhaseService {
     actor: PhaseActor,
     projectId: string,
     phaseRef: string,
-    input: { request: string; expects: string },
+    input: {
+      request: string;
+      expects: string;
+      /**
+       * The engine and model for this run of the phase (AP-09). A template froze the agent months
+       * ago; which model that agent is worth today is a decision for the person launching it.
+       * Validated by `Actions` before it reaches here, and never carried into a derived launch —
+       * a choice made for one phase is not a choice made for the next.
+       */
+      engine?: string;
+      model?: string;
+      reasoning?: string;
+    },
   ): Promise<LaunchPhaseResult> {
     const project = this.repos.projects.getOrThrow(projectId);
     const phase = this.resolve(projectId, phaseRef);
@@ -169,6 +181,9 @@ export class PhaseService {
       expects: input.expects,
       agentId: phase.agent_id,
       ...(phase.verify_cmd !== null ? { verifyCmd: phase.verify_cmd } : {}),
+      ...(input.engine ? { engine: input.engine } : {}),
+      ...(input.model ? { model: input.model } : {}),
+      ...(input.reasoning ? { reasoning: input.reasoning } : {}),
     });
     const taskId = launched.taskIds[0]!;
     const running = this.repos.phases.markRunning(phase.id, taskId);

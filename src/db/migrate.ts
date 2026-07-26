@@ -242,6 +242,19 @@ ALTER TABLE tasks ADD COLUMN needs TEXT;
 ALTER TABLE tasks ADD COLUMN grants TEXT;
 `;
 
+/**
+ * Version 8 (AP-09): the engine, model and reasoning level chosen for this launch.
+ *
+ * All three are nullable and NULL means "use the profile's". Nullable rather than backfilled from
+ * the agent on purpose: a task written before this migration must keep following its profile when
+ * the profile changes, and a copied value would silently freeze it.
+ */
+const TASK_MODEL_OVERRIDE_SQL = `
+ALTER TABLE tasks ADD COLUMN engine TEXT;
+ALTER TABLE tasks ADD COLUMN model TEXT;
+ALTER TABLE tasks ADD COLUMN reasoning TEXT;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial schema", up: applyInitialSchema },
   {
@@ -260,6 +273,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 5, name: "project read-only areas", up: PROJECT_AREAS_SQL },
   { version: 6, name: "learned allows", up: LEARNED_ALLOWS_SQL },
   { version: 7, name: "task capabilities", up: TASK_CAPABILITIES_SQL },
+  { version: 8, name: "task engine and model override", up: TASK_MODEL_OVERRIDE_SQL },
 ];
 
 /** The marker migration 4 writes, and the panel looks for (PM-09). */

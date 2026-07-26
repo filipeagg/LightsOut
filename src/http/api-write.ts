@@ -334,13 +334,23 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
       const { phaseId } = z.object({ phaseId: z.string().min(1) }).parse(request.params);
       // OR-10: both required, here as in MCP.
       const input = body(
-        z.object({ input: z.string().min(1), expects: z.string().min(1) }),
+        z.object({
+          input: z.string().min(1),
+          expects: z.string().min(1),
+          // AP-09: the model for this run of the phase, chosen in the launch form.
+          engine: z.string().min(1).optional(),
+          model: z.string().min(1).optional(),
+          reasoning: z.string().min(1).optional(),
+        }),
         request.body,
       );
       const phase = phaseOrThrow(actions, phaseId);
       return actions.launchPhase("panel", phase.project_id, phase.id, {
         request: input.input,
         expects: input.expects,
+        ...(input.engine ? { engine: input.engine } : {}),
+        ...(input.model ? { model: input.model } : {}),
+        ...(input.reasoning ? { reasoning: input.reasoning } : {}),
       });
     }),
   );

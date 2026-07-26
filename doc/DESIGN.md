@@ -307,6 +307,9 @@ CREATE TABLE tasks (
   title       TEXT NOT NULL,
   spec        TEXT NOT NULL,                   -- full prompt/acceptance criteria
   agent_id    TEXT NOT NULL,                   -- profile id (AP-01)
+  engine      TEXT,                            -- migration 8: launch override, NULL = the profile's (AP-09)
+  model       TEXT,                            -- migration 8: idem
+  reasoning   TEXT,                            -- migration 8: idem
   level       TEXT NOT NULL CHECK (level IN ('quick','full')),
   verify_cmd  TEXT,                            -- overrides project verify_cmd
   status      TEXT NOT NULL DEFAULT 'queued'
@@ -569,6 +572,55 @@ Two consequences worth stating. The chain loop must not pause a chain that is al
 the aborted task's outcome arrives after the abort, and `paused` would erase the user's decision.
 And a stop is recorded as `run.state {status:'aborted', reason, actor}` plus a `system` event
 naming who asked, so the timeline says "the user stopped this" rather than "the task failed".
+
+### 5.5 The model is a launch decision, not a property of the agent (AP-09, OR-11)
+
+A profile carries `engine`, `model` and `reasoning`, and until now those were the only answer: to
+run `builder` on a cheaper model you had to edit the profile, launch, and remember to put it back.
+That is a setting masquerading as a decision. The same agent doing the same job is worth `haiku`
+when the task is mechanical and `opus` when it is not, and the person launching it is the one who
+knows which.
+
+**The profile is the default; the launch may override it.** `launch_task`, `launch_chain` (whole
+chain or per task) and `launch_phase` all accept optional `engine`, `model` and `reasoning`.
+Nothing is written to the profile on disk — AP-01 keeps the workspace file as the source of truth,
+and an override that silently rewrote it would change every later launch.
+
+**Effective profile.** `resolveProfile(profile, task)` in `src/agents/effective.ts` is the one
+place the merge happens: the profile, overridden field by field by whatever the task carries.
+`TaskRunner.run` calls it immediately after `profileOrThrow` and uses the result for everything
+downstream — the adapter command (a `codex` override means the Codex adapter, not Claude's), the
+`runs` row, the prompt and the session. Nothing else reads `profile.model` directly, so the two
+cannot drift.
+
+**Storage is migration 8**: `tasks.engine`, `tasks.model`, `tasks.reasoning`, all nullable, all
+meaning "use the profile's". Nullable rather than backfilled on purpose: a task that predates this
+must keep following its agent when the agent changes, and a copied value would freeze it.
+
+**Refused at launch, not at run time (OR-11).** `Actions` validates before a task row exists:
+
+| what is wrong | the answer |
+|---|---|
+| engine is not `claude` or `codex` | refused, naming both |
+| the model is not in `ENGINE_MODELS[engine]` | `modelRejection()` — the same sentence AP-08 gives the panel, listing the accepted models |
+| reasoning is not one of `REASONING_LEVELS` | refused, listing them |
+| a model given with no engine and the profile's engine does not accept it | refused, saying which engine was assumed |
+| the resolved engine is not authenticated | refused, pointing at the reconnect flow (§14.4) |
+
+That last row is the point of OR-11: engine health is already known at launch, and a run that dies
+on `AUTH_REQUIRED` two seconds in taught nobody anything. It joins the `needs` check of PE-12 — one
+pass over everything a launch can be wrong about, one refusal listing all of it.
+
+**The audit says who chose.** The `runs` row already carries `engine` and `model`; when they came
+from a launch rather than the profile the run also gets
+`config.changed {kind:'override', op:'launch', actor, from:{engine,model,reasoning}, to:{…}}`, and
+the panel and `status_card` mark the run "model chosen at launch". A run whose model nobody can
+account for is a cost nobody can explain.
+
+**Discovery.** `list_agents` gains a `models` block — the catalog of `src/agents/models.ts`, per
+engine, with the default first — because the MCP client has no other way to learn what it may
+pass, and guessing produces the refusal above instead of a run. The `agents` section of `guide`
+documents the override with a worked example.
 
 ## 6. ACP session runner (SR-01..08)
 

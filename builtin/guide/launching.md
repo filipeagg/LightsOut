@@ -28,6 +28,13 @@ example.expects: "the entity x operation matrix as a table, one row per entity, 
 behaviour: all three return immediately with ids (MC-06). Poll project_status or status_card.
 concurrency: one run per project; a second launch queues instead of failing (OR-08).
 
+## optional_on_every_launch
+
+needs: what the task needs to succeed (network, deps_install, execute, write, git, delete, knowledge_write). Checked against the agent's packs before the run starts; a mismatch is a refusal in one second, not a wasted run (PE-12).
+grants: widen the policy for this run only. Recorded on the task, gone when it ends. Never reaches the hard floor.
+engine / model / reasoning: the model for this launch only, overriding the profile (AP-09). One of list_agents.models for that engine; anything else is refused with the list.
+checked_together: needs, the model and engine health are all checked in one pass, before a task row exists (OR-11).
+
 ## worked_example.task
 
 ```json

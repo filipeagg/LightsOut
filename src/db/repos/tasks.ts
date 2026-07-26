@@ -16,6 +16,13 @@ export type CreateTask = {
   /** What the launch said this task needs, and what was granted for it (PE-12). */
   needs?: string[];
   grants?: string[];
+  /**
+   * The engine, model and reasoning level chosen for this launch (AP-09). Undefined or null means
+   * "whatever the agent profile says", resolved at run time so a profile edit still reaches it.
+   */
+  engine?: string | null;
+  model?: string | null;
+  reasoning?: string | null;
 };
 
 export class TasksRepo {
@@ -29,8 +36,8 @@ export class TasksRepo {
       .prepare(
         `INSERT INTO tasks
            (id, chain_id, project_id, position, title, spec, agent_id, level, verify_cmd,
-            status, created_at, updated_at, needs, grants)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)`,
+            status, created_at, updated_at, needs, grants, engine, model, reasoning)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -46,6 +53,9 @@ export class TasksRepo {
         ts,
         input.needs?.length ? JSON.stringify(input.needs) : null,
         input.grants?.length ? JSON.stringify(input.grants) : null,
+        input.engine ?? null,
+        input.model ?? null,
+        input.reasoning ?? null,
       );
     return this.getOrThrow(id);
   }

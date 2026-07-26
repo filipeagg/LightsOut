@@ -137,6 +137,13 @@ export type TaskRow = {
   /** JSON arrays of capability names (PE-12): what the launch declared, what it was granted. */
   needs: string | null;
   grants: string | null;
+  /**
+   * The engine, model and reasoning level this launch chose (AP-09). NULL means the agent
+   * profile's, resolved at run time by `resolveProfile` so a profile edit still reaches the task.
+   */
+  engine: Engine | null;
+  model: string | null;
+  reasoning: string | null;
 };
 
 export type RunRow = {

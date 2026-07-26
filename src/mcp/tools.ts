@@ -272,13 +272,34 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
 
   tool(
     "abort_run",
-    "Abort a chain, dropping its queued tasks (OR-06).",
-    { runId: z.string().optional(), chainId: z.string().optional() },
-    async ({ runId, chainId }) => {
+    "Abort a chain: drop its queued tasks AND stop the run in flight — the ACP turn is cancelled " +
+      "and the adapter process ends (OR-06, OR-09). Pass letCurrentFinish to leave the running " +
+      "agent working and only drop the queue.",
+    {
+      runId: z.string().optional(),
+      chainId: z.string().optional(),
+      letCurrentFinish: z.boolean().optional(),
+    },
+    async ({ runId, chainId, letCurrentFinish }) => {
       if (!runId && !chainId) throw invalid("give runId or chainId");
       return actions.abortRun("mcp", {
         ...(runId ? { runId } : {}),
         ...(chainId ? { chainId } : {}),
+        ...(letCurrentFinish ? { letCurrentFinish: true } : {}),
+      });
+    },
+  );
+
+  tool(
+    "stop_run",
+    "Stop the run executing right now: cancel the ACP turn, end the adapter process, release any " +
+      "permission gate it was holding, and pause the chain. The queue is left alone (OR-09).",
+    { runId: z.string().optional(), projectId: z.string().optional() },
+    async ({ runId, projectId }) => {
+      if (!runId && !projectId) throw invalid("give runId or projectId");
+      return actions.stopRun("mcp", {
+        ...(runId ? { runId } : {}),
+        ...(projectId ? { projectId } : {}),
       });
     },
   );

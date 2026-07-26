@@ -11,6 +11,7 @@ import { PolicyEngine } from "../policy/engine.js";
 import type { PolicyPack } from "../policy/schema.js";
 import type { ProjectRow, TaskRow } from "../db/types.js";
 import { RunSession, type HumanGate, type RunOutcome } from "./session.js";
+import { LiveRuns } from "./live.js";
 import { DoubtService } from "../orchestrator/doubts.js";
 import type { KnowledgeLoader } from "../knowledge/loader.js";
 import { buildKnowledgeBlock } from "../knowledge/inject.js";
@@ -57,6 +58,11 @@ export class TaskRunner {
       knowledge?: KnowledgeLoader;
       vault?: Vault;
     },
+    /**
+     * The registry of live sessions (OR-06). Shared with the orchestrator so a stop from the
+     * panel or from MCP can reach the session that is actually running.
+     */
+    readonly live: LiveRuns = new LiveRuns(),
   ) {
     this.doubts = doubts ?? new DoubtService(config, repos, bus, agents);
   }
@@ -229,6 +235,18 @@ export class TaskRunner {
     // wrapped: whatever escapes becomes an `error` outcome and travels down the ordinary failure
     // path, which finishes the run, fails the task, pauses the chain and records recovery info.
     // A dead adapter must cost one run, never the orchestrator (OR-05, RT-07).
+    // Registered before the turn starts and removed when it ends: this handle is the only way a
+    // stop from the panel or from MCP can reach the session that is running (OR-06, §5.4).
+    this.live.register({
+      runId: run.id,
+      taskId: task.id,
+      projectId: project.id,
+      chainId: task.chain_id,
+      abort: () => session.abort(),
+      acpSession: () => session.acpSession,
+      startedAt: Date.now(),
+    });
+
     let outcome: RunOutcome;
     try {
       outcome = await session.start();
@@ -246,6 +264,8 @@ export class TaskRunner {
         sentinelMissing: true,
         ...(session.acpSession ? { acpSession: session.acpSession } : {}),
       };
+    } finally {
+      this.live.unregister(run.id);
     }
 
     this.repos.runs.finish(run.id, {

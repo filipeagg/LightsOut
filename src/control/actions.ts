@@ -240,10 +240,15 @@ export class Actions {
     return profile;
   }
 
-  abortRun(actor: Actor, input: { runId?: string; chainId?: string }): {
-    chainId: string;
-    aborted: string[];
-  } {
+  /**
+   * Abort a chain (OR-06, OR-09): the queued tasks are dropped **and** the run in flight is
+   * stopped. `letCurrentFinish` keeps the old behaviour of letting the current agent finish, which
+   * is occasionally what someone wants and never what they expect by default.
+   */
+  async abortRun(
+    actor: Actor,
+    input: { runId?: string; chainId?: string; letCurrentFinish?: boolean },
+  ): Promise<{ chainId: string; aborted: string[]; stopped: string[] }> {
     const { repos } = this.deps;
     if (!input.runId && !input.chainId) throw new Error("give runId or chainId");
     const chain = input.chainId
@@ -253,12 +258,73 @@ export class Actions {
           if (!run) throw new Error(`run not found: ${input.runId}`);
           return repos.chains.getOrThrow(repos.tasks.getOrThrow(run.task_id).chain_id);
         })();
-    const aborted = this.deps.orchestrator.abortChain(chain.id);
+    const result = await this.deps.orchestrator.abortChain(chain.id, {
+      ...(input.letCurrentFinish ? { letCurrentFinish: true } : {}),
+      reason: `chain aborted by ${actor}`,
+    });
     repos.events.append({
       type: "chain.state",
-      payload: { chainId: chain.id, status: "aborted", actor },
+      payload: { chainId: chain.id, status: "aborted", actor, stopped: result.stopped.length },
     });
-    return { chainId: chain.id, aborted };
+    return { chainId: chain.id, aborted: result.aborted, stopped: result.stopped };
+  }
+
+  /**
+   * Stop the run that is executing right now and leave the chain paused (OR-09). The counterpart
+   * to abort: this one does not touch the queue, so the same task can be launched again, or a
+   * different one, once whatever the agent was doing has been looked at.
+   */
+  async stopRun(
+    actor: Actor,
+    input: { runId?: string; projectId?: string },
+  ): Promise<{
+    runId: string;
+    stopped: boolean;
+    doubtsClosed: string[];
+    reconciled: boolean;
+    chainPaused: boolean;
+  }> {
+    const { repos, orchestrator } = this.deps;
+    const runId =
+      input.runId ??
+      (() => {
+        if (!input.projectId) throw new Error("give runId or projectId");
+        const live = orchestrator.live.forProject(input.projectId)[0];
+        if (live) return live.runId;
+        const active = repos.runs.listActive();
+        const found = active.find(
+          (run) => repos.tasks.get(run.task_id)?.project_id === input.projectId,
+        );
+        if (!found) throw new Error(`no run in flight for project ${input.projectId}`);
+        return found.id;
+      })();
+
+    const run = repos.runs.get(runId);
+    if (!run) throw new Error(`run not found: ${runId}`);
+    const task = repos.tasks.get(run.task_id);
+    const result = await orchestrator.stopRun(runId, `stopped by ${actor}`);
+
+    // The chain must not carry on to the next task after a stop: that is what abort is for, and
+    // silently continuing would make the stop look like it did nothing.
+    let chainPaused = false;
+    if (task) {
+      const chain = repos.chains.get(task.chain_id);
+      if (chain && chain.status === "active") {
+        repos.chains.setStatus(chain.id, "paused");
+        repos.events.append({
+          type: "chain.state",
+          payload: { chainId: chain.id, status: "paused", reason: "run stopped", actor },
+        });
+        chainPaused = true;
+      }
+    }
+
+    repos.events.append({
+      runId,
+      type: "run.state",
+      payload: { status: "aborted", reason: `stopped by ${actor}`, actor },
+    });
+    return { ...result, chainPaused };
   }
 
   /**

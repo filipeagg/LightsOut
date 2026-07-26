@@ -599,7 +599,7 @@ describe("chain loop", () => {
       agentId: "builder",
       chainId: launch.chainId,
     });
-    const aborted = orch.abortChain(launch.chainId);
+    const { aborted } = await orch.abortChain(launch.chainId);
     expect(repos.chains.getOrThrow(launch.chainId).status).toBe("aborted");
     // The task may already have run; if it was still queued it must now be aborted.
     const status = repos.tasks.getOrThrow(extra.taskIds[0]!).status;

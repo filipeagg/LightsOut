@@ -526,6 +526,48 @@ export class DoubtService {
   }
 
   /**
+   * Release every permission gate a run is holding, because the run is being stopped
+   * (OR-06, DESIGN §5.4). The held ACP request is answered as refused and the doubt is closed
+   * with the reason, so a gate nobody will ever answer does not sit open in the attention strip.
+   * Returns the refs it closed. Never throws: a stop must not fail on tidying up.
+   */
+  async cancelForRun(runId: string, reason = "the run was stopped"): Promise<string[]> {
+    const closed: string[] = [];
+    for (const doubt of this.repos.doubts.listOpen()) {
+      if (doubt.run_id !== runId) continue;
+      try {
+        // "B" is the refusing option by construction in gatePermission; releasing with it makes
+        // the held request answer "reject" instead of hanging until the slow clock.
+        this.pending.get(doubt.id)?.("B");
+        const answered = this.repos.doubts.answer(doubt.id, `cancelled: ${reason}`);
+        this.repos.doubts.close(doubt.id);
+        const project = this.repos.projects.get(doubt.project_id);
+        if (project) await this.mirror(project, { ...answered, status: "closed" });
+        this.repos.events.append({
+          runId,
+          type: "doubt.answered",
+          payload: { doubtId: doubt.id, ref: doubt.ref, choice: "cancelled", reason },
+        });
+        closed.push(doubt.ref);
+      } catch (err) {
+        this.repos.events.append({
+          runId,
+          type: "system",
+          payload: {
+            reason: "could not cancel a doubt while stopping the run",
+            doubtId: doubt.id,
+            detail: err instanceof Error ? err.message : String(err),
+          },
+        });
+      }
+    }
+    if (closed.length > 0) {
+      this.bus.emit("overview");
+    }
+    return closed;
+  }
+
+  /**
    * The decision context prepended to a resumed task, so a new run knows what was settled
    * even when the adapter cannot reload the original session (DESIGN §8.4).
    */

@@ -314,6 +314,22 @@ function describeResult(method, path, body) {
       : `it reads from ${body.manifest.source || "its own folder"}`;
     return `Created the knowledge base ${body.manifest.id}: ${where}.`;
   }
+  if (body.stopped !== undefined && body.runId) {
+    const gates = body.doubtsClosed && body.doubtsClosed.length
+      ? ` Permission gates released: ${body.doubtsClosed.join(", ")}.`
+      : "";
+    if (!body.stopped) {
+      return body.reconciled
+        ? `Nothing was running: the run row said otherwise and has been corrected.${gates}`
+        : `Nothing was running for that run.${gates}`;
+    }
+    const dropped = body.aborted && body.aborted.length ? ` ${body.aborted.length} queued task(s) dropped.` : "";
+    return `Stopped the run.${dropped}${gates}`;
+  }
+  if (body.aborted) {
+    const stopped = body.stopped && body.stopped.length ? `stopped the running agent and ` : "";
+    return `Chain aborted: ${stopped}${body.aborted.length} queued task(s) dropped.`;
+  }
   if (body.agent) return `Saved the agent ${body.agent.id}.`;
   if (body.template) return `Saved the template ${body.template.id}.`;
   if (body.project) return `Saved the project ${body.project.id || body.project.name}.`;
@@ -473,14 +489,24 @@ function runCard(run) {
     ${last ? `<div class="note" style="margin-top:16px"><span class="mono">${esc(last.type)}</span>
       — ${esc(JSON.stringify(last.payload).slice(0, 200))}</div>` : ""}
     <div class="row" style="margin-top:16px">
-      <button class="btn danger" onclick="abortRun('${esc(run.id)}')">Abort the chain</button>
+      <button class="btn danger" onclick="stopRun('${esc(run.id)}')">Stop this run now</button>
+      <button class="btn danger" onclick="abortRun('${esc(run.id)}')">Stop and abort the chain</button>
     </div>
   </div>`;
 }
 
-/** Abort drops the queued tasks and lets the running one finish (OR-06). */
+/**
+ * Stop the run that is executing: the ACP turn is cancelled, the adapter process ends and the
+ * chain is left paused, so it can be resumed or relaunched afterwards (OR-09).
+ */
+async function stopRun(runId) {
+  if (!window.confirm("Stop this run now? The agent is cut off mid-turn and the chain is paused.")) return;
+  await act("POST", `/api/runs/${encodeURIComponent(runId)}/stop`);
+}
+
+/** Abort stops the running session as well as dropping the queued tasks (OR-06). */
 async function abortRun(runId) {
-  if (!window.confirm("Abort this chain? Queued tasks are dropped; the running one finishes.")) return;
+  if (!window.confirm("Abort this chain? The running agent is stopped now and queued tasks are dropped.")) return;
   await act("POST", `/api/runs/${encodeURIComponent(runId)}/abort`);
 }
 

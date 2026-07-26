@@ -1,7 +1,8 @@
 /** Phase 9: the migration-2 tables and their repos (TP-05..08, KB-03, VT-05). */
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDb, type Db } from "../src/db/db.js";
-import { migrate } from "../src/db/migrate.js";
+import { migrate, MIGRATIONS } from "../src/db/migrate.js";
+import { nowIso, ulid } from "../src/ids.js";
 import { createRepos, type Repos } from "../src/db/repos/index.js";
 
 let db: Db;
@@ -52,6 +53,74 @@ describe("migration 2", () => {
   it("keeps template_id on projects", () => {
     const id = seedProject();
     expect(repos.projects.getOrThrow(id).template_id).toBe("full-development");
+  });
+
+  /**
+   * The rebuild of `doubts` is the risky half of this migration, and it is only risky when
+   * there is data to carry across: a database that already holds doubts and the decisions
+   * pointing at them. Migrating an empty schema proves nothing, which is how this shipped
+   * broken once — the container restart-looped on `FOREIGN KEY constraint failed`.
+   */
+  it("carries existing doubts and their decisions across the rebuild", () => {
+    const legacy = openDb({ file: ":memory:" });
+    const v1 = MIGRATIONS.find((m) => m.version === 1)!;
+    (v1.up as (db: Db) => void)(legacy);
+    legacy
+      .prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (1, ?)")
+      .run(nowIso());
+
+    const legacyRepos = createRepos(legacy);
+    // Raw SQL: ProjectsRepo already writes template_id, which the v1 schema does not have.
+    legacy
+      .prepare(
+        `INSERT INTO projects (id, name, path, push_policy, policy_pack, archived, created_at)
+         VALUES ('old', 'Old', '/workspace/projects/old', 'manual', 'default', 0, ?)`,
+      )
+      .run(nowIso());
+    const chain = legacyRepos.chains.create({ projectId: "old", title: "c" });
+    const task = legacyRepos.tasks.create({
+      chainId: chain.id,
+      projectId: "old",
+      title: "t",
+      spec: "s",
+      agentId: "builder",
+      level: "quick",
+    });
+    const doubt = legacyRepos.doubts.open({
+      projectId: "old",
+      taskId: task.id,
+      kind: "functional",
+      context: "which way",
+      blocks: "the rest",
+      options: [{ id: "A", text: "left" }],
+    });
+    legacyRepos.decisions.record({
+      projectId: "old",
+      taskId: task.id,
+      doubtId: doubt.id,
+      kind: "human",
+      question: "which way",
+      choice: "A",
+    });
+
+    const result = migrate(legacy);
+    expect(result.from).toBe(1);
+    expect(result.applied).toEqual(["2:phases, knowledge, vault audit"]);
+
+    const after = createRepos(legacy);
+    expect(after.doubts.get(doubt.id)?.ref).toBe(doubt.ref);
+    expect(after.decisions.listByDoubt(doubt.id)).toHaveLength(1);
+    expect(legacy.pragma("foreign_key_check")).toEqual([]);
+    // And the widened CHECK is in force on the rebuilt table.
+    expect(() =>
+      legacy
+        .prepare(
+          `INSERT INTO doubts (id, ref, project_id, task_id, kind, status, context, blocks,
+                               options, created_at)
+           VALUES (?, 'D-9', 'old', ?, 'nonsense', 'open', 'c', 'b', '[]', ?)`,
+        )
+        .run(ulid(), task.id, nowIso()),
+    ).toThrow();
   });
 
   it("accepts the gate doubt kind and preserves existing doubts", () => {

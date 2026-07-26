@@ -479,10 +479,17 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
 
   tool(
     "launch_phase",
-    "Run a phase: creates its task and queues it on the project's chain (TP-07).",
-    { projectId: z.string().min(1), phase: z.string().min(1) },
-    async ({ projectId, phase }) =>
-      need(deps.phases, "phases").launchPhase("mcp", project(projectId).id, phase),
+    "Run a phase: creates its task and queues it on the project's chain (TP-07). " +
+      "`input` is what you are asking for this time: the raw request for a shaping phase, the " +
+      "question for an answering one, the integration to probe. Without it the agent has only " +
+      "the template's instructions and will ask what it is meant to be working on.",
+    {
+      projectId: z.string().min(1),
+      phase: z.string().min(1),
+      input: z.string().optional(),
+    },
+    async ({ projectId, phase, input }) =>
+      need(deps.phases, "phases").launchPhase("mcp", project(projectId).id, phase, input),
   );
 
   tool(

@@ -101,17 +101,18 @@ fi
 
 echo "-- a curated knowledge base (KB-01)"
 docker exec "$CONTAINER" mkdir -p "/workspace/knowledge/${BASE}"
-docker exec "$CONTAINER" sh -c "cat > /workspace/knowledge/${BASE}/knowledge.yaml" <<YAML
+# -i, or docker does not forward the heredoc and the file lands empty.
+docker exec -i "$CONTAINER" sh -c "cat > /workspace/knowledge/${BASE}/knowledge.yaml" <<YAML
 name: Phase 9 test base
 kind: technical
 description: Facts the gate checks the agent was told.
 tags: [phase9, gate]
 updated: "2026-07-26"
 YAML
-docker exec "$CONTAINER" sh -c "cat > /workspace/knowledge/${BASE}/index.md" <<'MD'
+docker exec -i "$CONTAINER" sh -c "cat > /workspace/knowledge/${BASE}/index.md" <<'MD'
 - rules.md: the one rule this project must respect
 MD
-docker exec "$CONTAINER" sh -c "cat > /workspace/knowledge/${BASE}/rules.md" <<'MD'
+docker exec -i "$CONTAINER" sh -c "cat > /workspace/knowledge/${BASE}/rules.md" <<'MD'
 # Rules
 
 The magic word for this project is PLUMBAGO. Any document you write must contain it.
@@ -123,7 +124,13 @@ for _ in $(seq 1 40); do
 done
 
 knowledge=$(mcp list_knowledge)
-check "printf '%s' \"\$knowledge\" | grep -q '\"${BASE}\"'" "the knowledge base is loaded (KB-01)"
+# Count the loaded bases, not the raw text: a rejected base is named in the output too.
+loaded_base=$(jq_get "$knowledge" "j.bases.filter((b) => b.id === '${BASE}').length")
+if [ "${loaded_base:-0}" = "1" ]; then
+  ok "the knowledge base is loaded (KB-01)"
+else
+  bad "the knowledge base is loaded (KB-01)"; echo "  $knowledge" | head -5
+fi
 doc=$(mcp read_knowledge "{\"baseId\":\"${BASE}\",\"file\":\"rules.md\"}")
 check "printf '%s' \"\$doc\" | grep -q 'PLUMBAGO'" "read_knowledge returns a document (KB-04)"
 escape=$(mcp read_knowledge "{\"baseId\":\"${BASE}\",\"file\":\"../../vault.yaml\"}")
@@ -131,7 +138,7 @@ check "printf '%s' \"\$escape\" | grep -q '\"ok\": false'" \
   "read_knowledge refuses a path outside the base"
 
 echo "-- the vault never returns a value (VT-03)"
-docker exec "$CONTAINER" sh -c "cat > /workspace/vault.yaml" <<'YAML'
+docker exec -i "$CONTAINER" sh -c "cat > /workspace/vault.yaml" <<'YAML'
 entries:
   - id: p9-sandbox
     label: Phase 9 sandbox
@@ -185,7 +192,8 @@ check "printf '%s' \"\$curation\" | grep -q '\"ok\": false'" \
   "a curation project without a writable base is refused (KB-05)"
 
 echo "-- running the first phase for real (BA-04, TP-07)"
-launched=$(mcp launch_phase "{\"projectId\":\"${PROJECT}\",\"phase\":\"shape-the-prompt\"}")
+request="Add a --version flag to the project's CLI that prints the version from package.json and exits 0. Nothing else changes. Do not ask about scope, packaging, distribution or future features: the answer to any such question is that it is out of scope."
+launched=$(mcp launch_phase "{\"projectId\":\"${PROJECT}\",\"phase\":\"shape-the-prompt\",\"input\":\"${request}\"}")
 check "printf '%s' \"\$launched\" | grep -q '\"taskId\"'" "launch_phase created the phase's task"
 
 gate_ref=""
@@ -194,10 +202,21 @@ for _ in $(seq 1 90); do
   phases=$(mcp list_phases "{\"projectId\":\"${PROJECT}\"}")
   first_status=$(jq_get "$phases" "j.phases[0].status")
   [ "$first_status" = "failed" ] && break
-  if [ "$first_status" = "done" ]; then
-    status=$(mcp project_status "{\"projectId\":\"${PROJECT}\"}")
-    gate_ref=$(jq_get "$status" "j.doubts.length ? j.doubts[0].ref : ''")
-    [ -n "$gate_ref" ] && break
+
+  # prompt-architect is told to raise a doubt for anything it cannot decide, so an
+  # unattended gate must answer those to reach the phase gate at all. A `gate` doubt is
+  # the one this test is about; everything else is answered with its recommendation.
+  status=$(mcp project_status "{\"projectId\":\"${PROJECT}\"}")
+  open_kind=$(jq_get "$status" "j.doubts.length ? j.doubts[0].kind : ''")
+  open_ref=$(jq_get "$status" "j.doubts.length ? j.doubts[0].ref : ''")
+  if [ "$open_kind" = "gate" ]; then
+    gate_ref="$open_ref"
+    break
+  fi
+  if [ -n "$open_ref" ]; then
+    choice=$(jq_get "$status" "j.doubts[0].recommendation || 'A'")
+    echo "  INFO  answering ${open_kind} doubt ${open_ref} with ${choice}"
+    mcp answer_doubt "{\"projectId\":\"${PROJECT}\",\"doubtId\":\"${open_ref}\",\"choice\":\"${choice}\",\"note\":\"phase 9 gate, unattended\"}" >/dev/null
   fi
 done
 echo "  INFO  first phase status: ${first_status:-unknown}"

@@ -311,6 +311,35 @@ CREATE TABLE toolchain_grants (
 CREATE INDEX ix_toolchain_grants ON toolchain_grants(project_id);
 `;
 
+/**
+ * Version 10 (PV-01..03): preview servers.
+ *
+ * A table rather than an in-memory map, so the panel and MCP read one truth and a preview left
+ * behind by a crash is visible rather than merely leaked. The rows are memory of processes the
+ * container owns, so the boot recovery pass clears them: a restart killed every one of them.
+ */
+const PREVIEWS_SQL = `
+CREATE TABLE previews (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES projects(id),
+  port          INTEGER NOT NULL,
+  command       TEXT NOT NULL,
+  normalised    TEXT,
+  cwd           TEXT NOT NULL,
+  pid           INTEGER,
+  log_path      TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'running'
+                CHECK (status IN ('running','stopped','exited','expired')),
+  started_by    TEXT NOT NULL,
+  started_at    TEXT NOT NULL,
+  expires_at    TEXT,
+  ended_at      TEXT,
+  exit_reason   TEXT
+);
+CREATE INDEX ix_previews_project ON previews(project_id, status);
+CREATE UNIQUE INDEX ix_previews_port_live ON previews(port) WHERE status = 'running';
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial schema", up: applyInitialSchema },
   {
@@ -336,6 +365,7 @@ export const MIGRATIONS: Migration[] = [
     up: TOOLCHAIN_SQL,
     foreignKeys: "off",
   },
+  { version: 10, name: "preview servers", up: PREVIEWS_SQL },
 ];
 
 /** The marker migration 4 writes, and the panel looks for (PM-09). */

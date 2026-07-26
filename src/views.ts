@@ -161,6 +161,17 @@ export function projectStatusView(deps: ViewDeps, project: ProjectRow) {
           lastUsedAt: row.last_used_at,
         })),
       },
+      // PV-01: the dev servers a person can open right now, with the URL their browser can use.
+      // `alive` is checked against the process, because a link that does not load is worse than
+      // no link at all.
+      previews: repos.previews.listRunning(project.id).map((row) => ({
+        id: row.id,
+        port: row.port,
+        url: `http://127.0.0.1:${row.port}`,
+        command: row.normalised ?? row.command,
+        startedAt: row.started_at,
+        expiresAt: row.expires_at,
+      })),
       pushPolicy: project.push_policy,
       verifyCmd: project.verify_cmd,
       remote: project.repo_remote,

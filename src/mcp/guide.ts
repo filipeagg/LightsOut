@@ -19,6 +19,7 @@ export const TOPIC_ORDER = [
   "phases",
   "knowledge",
   "areas",
+  "previews",
   "vault",
   "doubts",
   "policies",

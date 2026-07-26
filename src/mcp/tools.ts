@@ -605,6 +605,66 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
   );
 
   tool(
+    "preview_start",
+    "Start a development server the user can open in their own browser, and return its URL " +
+      "(PV-01). Use this and never run `npm run dev`, `vite` or `python -m http.server` in a " +
+      "terminal: those never return, so they hold the run open until the watchdog kills it — the " +
+      "policy refuses them for that reason. LightsOut owns the process, binds it to a published " +
+      "port, and keeps it alive after the run finishes so the result can be looked at.",
+    {
+      projectId: z.string().min(1),
+      command: z
+        .string()
+        .min(1)
+        .describe(
+          "The server command, without host or port: those are set for you (PV-04). " +
+            "e.g. `npm run dev`, or `node /opt/lightsout/dist/preview/serve.js --root dist --spa`.",
+        ),
+      port: z.number().int().optional().describe("A specific port from the pool; refused if taken."),
+      cwd: z.string().optional().describe("Directory inside the project to run in."),
+      ttlMinutes: z.number().int().positive().optional(),
+    },
+    async ({ projectId, command, port, cwd, ttlMinutes }) =>
+      (await actions.startPreview("mcp", {
+        projectId,
+        command,
+        ...(port !== undefined ? { port } : {}),
+        ...(cwd !== undefined ? { cwd } : {}),
+        ...(ttlMinutes !== undefined ? { ttlMinutes } : {}),
+      })) as unknown as Record<string, unknown>,
+  );
+
+  tool(
+    "preview_stop",
+    "Stop a preview server, by its id or every one of a project (PV-03).",
+    { previewId: z.string().optional(), projectId: z.string().optional() },
+    async ({ previewId, projectId }) =>
+      actions.stopPreview("mcp", {
+        ...(previewId ? { previewId } : {}),
+        ...(projectId ? { projectId } : {}),
+      }),
+  );
+
+  tool(
+    "list_previews",
+    "Development servers currently running, with their URL and whether the process is really " +
+      "alive (PV-03). `alive: false` on a running row means it died; the URL will not load.",
+    { projectId: z.string().optional() },
+    async ({ projectId }) =>
+      actions.listPreviews(projectId) as unknown as Record<string, unknown>,
+  );
+
+  tool(
+    "preview_log",
+    "The last lines of a preview's output. Where a server that started but serves nothing says " +
+      "why — a missing dependency, a port conflict, a bad proxy target (§21.3).",
+    { previewId: z.string().min(1), lines: z.number().int().positive().optional() },
+    async ({ previewId, lines }) => ({
+      lines: await actions.previewLog(previewId, lines),
+    }),
+  );
+
+  tool(
     "list_toolchain_grants",
     "Which package managers each project may install into its own durable toolchain with " +
       "(ST-07). A toolchain outlives the run, unlike .lightsout/tmp/deps, and is authorised once " +

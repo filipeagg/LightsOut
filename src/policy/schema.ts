@@ -24,6 +24,13 @@ export const ACTION_CLASSES = [
    * which is why it cannot simply be `deps_install` with a nicer target.
    */
   "toolchain_install",
+  /**
+   * Starting a long-lived server (PV-05, DESIGN §21.4). Its own class because it is the one
+   * command that does not end: run in the agent's terminal it holds the run open until the
+   * inactivity watchdog kills it, so inline it is denied and `preview_start` is the way. A pack
+   * grants the capability; the class exists so the refusal can say what to do instead.
+   */
+  "serve",
   "network",
   "delete",
   "outside_workspace",

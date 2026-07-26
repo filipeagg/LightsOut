@@ -899,6 +899,48 @@ function contextCard(p) {
  * Read-only workspace areas (PE-09). The answer to an agent that knows where the code is and is
  * denied every way of reading it: name the directory here, once, and it becomes readable.
  */
+/**
+ * The preview servers of this project (PV-01, PV-03). The URL is a real link: the port is
+ * published on this machine's loopback, so it opens in the browser the panel is already in.
+ */
+function previewCard(p) {
+  const previews = p.previews || [];
+  return `<div class="card pad" style="margin-bottom:24px">
+    <div><b>Preview</b>
+      <div class="tiny muted">Development servers LightsOut is running for this project. They stay
+        up after the run that started them finishes, and expire on their own.</div></div>
+    ${previews.length
+      ? `<table style="margin-top:12px"><tbody>${previews
+          .map(
+            (v) => `<tr>
+        <td><a href="${esc(v.url)}" target="_blank" rel="noreferrer" class="mono">${esc(v.url)}</a></td>
+        <td class="tiny mono muted">${esc(v.command)}</td>
+        <td class="tiny muted">since ${esc((v.startedAt || "").slice(11, 16))}${
+          v.expiresAt ? `, until ${esc(v.expiresAt.slice(11, 16))}` : ""
+        }</td>
+        <td style="text-align:right"><button class="btn sm danger"
+          onclick="act('DELETE','/api/previews/${esc(v.id)}')">Stop</button></td></tr>`,
+          )
+          .join("")}</tbody></table>`
+      : `<p class="tiny muted" style="margin-top:12px">Nothing is being served. An agent asks for one
+          with preview_start; a dev server it runs in its own terminal is refused, because it would
+          hang the run.</p>`}
+    <div class="row" style="gap:8px;margin-top:12px">
+      <input id="preview-cmd" placeholder="npm run dev" style="flex:2 1 280px">
+      <button class="btn" onclick="startPreview('${esc(p.id)}')">Serve it</button>
+    </div>
+  </div>`;
+}
+
+async function startPreview(projectId) {
+  const command = field("preview-cmd");
+  if (!command) {
+    store.error = "say what to run, e.g. npm run dev";
+    return paint();
+  }
+  await act("POST", `/api/projects/${encodeURIComponent(projectId)}/previews`, { command });
+}
+
 function areasCard(p) {
   const areas = p.areas || [];
   return `<div class="card pad" style="margin-bottom:24px">
@@ -1024,6 +1066,7 @@ function viewProject() {
     ${p.hostPath ? `<p class="tiny muted mono">on this machine: ${esc(p.hostPath)}</p>` : ""}
     ${projectTabs(p.id, null)}
     ${contextCard(p)}
+    ${previewCard(p)}
     ${areasCard(p)}
     <div class="row wrap" style="margin-bottom:24px">
       ${statusPill(s.chain ? s.chain.status : "idle")}

@@ -1,0 +1,31 @@
+# web-prototype: the pack for building something a person has to look at (PV-06, §21.4).
+#
+# It exists because no other pack combined the three things a prototype needs: writes anywhere in
+# the project, a durable toolchain so `npm install vite` survives to the next run (ST-07), and the
+# right to serve. `default` writes but cannot serve; `integrate` has the network, which a prototype
+# does not need and should not have.
+#
+# No network, deliberately. A prototype is buildable — scaffolded, styled, wired to fixtures — with
+# nothing that reaches off the machine, and the preview is served on the host's loopback. A
+# prototype that must call a real API is integration work and belongs on `integrate`.
+id: web-prototype
+vault:
+  test_only_required: false
+rules:
+  - { class: project_read, verdict: allow }
+  - { class: project_write, verdict: allow }
+  - { class: exec_check, verdict: allow }
+  - { class: script_exec, verdict: allow, reason: "own tooling; the body is inspected (PE-07)" }
+  - { class: serve, verdict: allow, reason: "the point of this pack; the process is LightsOut's, not the agent's (PV-02)" }
+  - { class: git_local, verdict: allow }
+  - { class: toolchain_install, verdict: require_human, reason: "the first install of a framework is the user's call; after that this project never asks again (ST-07)" }
+  - { class: deps_install, verdict: require_human, reason: "into the image is not the way; install into the project's toolchain instead (ST-07)" }
+  - { class: network, verdict: deny, reason: "a prototype does not need to reach off the machine; that is integration work" }
+  - { class: delete, verdict: require_human }
+  - { class: git_push, verdict: deny, reason: "pushing is the orchestrator's job (PM-05)" }
+  - { class: knowledge_write, verdict: deny }
+  - { class: outside_workspace, verdict: deny }
+  - { class: credentials, verdict: require_human }
+  - { class: publish_external, verdict: deny }
+  - { class: other, verdict: require_human }
+matchers: {}

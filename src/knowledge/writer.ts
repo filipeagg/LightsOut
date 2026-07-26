@@ -5,7 +5,8 @@
  * `$WORKSPACE/knowledge/<id>/`, and every document path is checked against the base directory
  * before it is touched, because the id and the path both arrive from a browser.
  */
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
+import { writeFileDurable } from "../workspace/durable.js";
 import path from "node:path";
 import { dump as dumpYaml } from "js-yaml";
 import { stat } from "node:fs/promises";
@@ -79,49 +80,62 @@ export async function listWorkspaceFolders(
   const bases = context.basesByPath ?? new Map<string, string>();
   const found: WorkspaceFolder[] = [];
 
-  const walk = async (relative: string, depth: number): Promise<void> => {
-    if (depth > MAX_DEPTH || found.length >= MAX_FOLDERS) return;
+  /**
+   * One pass over the tree. Every folder is read exactly once and its document count is the sum
+   * of what its children report, which is why this returns a total instead of pushing and moving
+   * on. The obvious version — count each folder's subtree with its own recursive scan, and probe
+   * each child again to see whether it has children — reads the same directories once per level
+   * of nesting above them. On a Docker Desktop bind mount, where a readdir costs milliseconds
+   * rather than microseconds, that turned a 309-folder workspace into a 4.5 s request and the
+   * Knowledge view appeared to hang.
+   */
+  const walk = async (
+    relative: string,
+    depth: number,
+  ): Promise<{ documents: number; hasFolders: boolean }> => {
+    if (depth > MAX_DEPTH || found.length >= MAX_FOLDERS) return { documents: 0, hasFolders: false };
     let entries;
     try {
       entries = await readdir(path.join(workspace, relative), { withFileTypes: true });
     } catch {
-      return;
+      return { documents: 0, hasFolders: false };
     }
+
     const folders = entries
       .filter((e) => e.isDirectory() && !e.name.startsWith(".") && e.name !== "node_modules")
       .filter((e) => !(relative === "" && reserved.has(e.name)))
       .sort((a, b) => a.name.localeCompare(b.name));
+    // Documents sitting directly in this folder; the children add theirs below.
+    let documents = entries.filter((e) => e.isFile() && isDocumentFile(e.name)).length;
 
     for (const entry of folders) {
-      if (found.length >= MAX_FOLDERS) return;
+      if (found.length >= MAX_FOLDERS) break;
       const child = relative === "" ? entry.name : `${relative}/${entry.name}`;
-
-      let hasChildren = false;
-      try {
-        hasChildren = (
-          await readdir(path.join(workspace, child), { withFileTypes: true })
-        ).some((i) => i.isDirectory() && !i.name.startsWith(".") && i.name !== "node_modules");
-      } catch {
-        // Unreadable folders are still shown: the user may want to know they are there.
-      }
-
-      // Counting subfolders is the whole point (KB-09): a folder whose documents all sit one
-      // level down is the normal case, and reporting 0 for it is what made the picker look empty.
-      const documents = (await scanDocuments(path.join(workspace, child))).length;
       const baseId = bases.get(child);
       const adoptInPlace = child.startsWith("knowledge/") && child.split("/").length === 2;
 
-      found.push({
+      // Pushed before the recursion so the list stays in pre-order, the order a tree renders;
+      // the two numbers are filled in once the subtree has answered.
+      const record: WorkspaceFolder = {
         path: child,
         name: entry.name,
         depth,
-        documents,
-        hasChildren,
+        documents: 0,
+        hasChildren: false,
         ...(baseId ? { baseId } : {}),
         ...(baseId ? {} : adoptInPlace ? { adoptInPlace: true } : {}),
-      });
-      await walk(child, depth + 1);
+      };
+      found.push(record);
+
+      const sub = await walk(child, depth + 1);
+      // Counting subfolders is the whole point (KB-09): a folder whose documents all sit one
+      // level down is the normal case, and reporting 0 for it is what made the picker look empty.
+      record.documents = sub.documents;
+      record.hasChildren = sub.hasFolders;
+      documents += sub.documents;
     }
+
+    return { documents, hasFolders: folders.length > 0 };
   };
 
   await walk("", 0);
@@ -174,15 +188,16 @@ export class KnowledgeWriter {
     const dir = this.dir(baseId);
     await mkdir(dir, { recursive: true });
     const { id: _id, ...body } = manifest;
-    await writeFile(path.join(dir, MANIFEST_FILE), dumpYaml(body, { lineWidth: 100 }), "utf8");
+    // Durable: the manifest *is* the base. A base created through the panel vanished because a
+    // plain write to the bind mount had not reached the host when the container died (§11.2b).
+    await writeFileDurable(path.join(dir, MANIFEST_FILE), dumpYaml(body, { lineWidth: 100 }));
     // Seed an index only when the folder has none — in any case, because a folder adopted in
     // place may have arrived with `INDEX.md` and a second `index.md` next to it would be a file
     // LightsOut invented on top of the user's own (KB-10).
     if ((await findIndexFile(dir)) === undefined) {
-      await writeFile(
+      await writeFileDurable(
         path.join(dir, INDEX_FILE),
         `# ${manifest.name}\n\nOne line per document, saying what is in it.\n`,
-        "utf8",
       );
     }
     await this.loader.load();
@@ -210,7 +225,7 @@ export class KnowledgeWriter {
       );
     }
     await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, content, "utf8");
+    await writeFileDurable(target, content);
     await this.loader.load();
     return path.relative(dir, target);
   }

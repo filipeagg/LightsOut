@@ -5,9 +5,10 @@
  * run only as environment variables of the adapter process; nothing else in the system ever
  * returns one, which is why the browser cannot leak one (VT-03).
  */
-import { chmod, readFile, writeFile } from "node:fs/promises";
+import { chmod, readFile } from "node:fs/promises";
 import path from "node:path";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
+import { writeFileDurable } from "../workspace/durable.js";
 import {
   envVarName,
   toView,
@@ -95,11 +96,10 @@ export class Vault {
   }
 
   private async write(entries: VaultEntry[]): Promise<void> {
-    await writeFile(this.file, dumpYaml({ entries }, { lineWidth: 120 }), {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-    // writeFile only applies the mode when it creates the file.
+    // Durable: a credential the user typed once must not be lost to an abnormal container exit
+    // (§11.2b, and the note in workspace/durable.ts about what that cost a knowledge base).
+    await writeFileDurable(this.file, dumpYaml({ entries }, { lineWidth: 120 }));
+    // The rename does not carry a mode, so it is applied afterwards either way.
     await chmod(this.file, 0o600).catch(() => undefined);
   }
 

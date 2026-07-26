@@ -6,7 +6,8 @@
  * image. Editing a template never rewrites a running project — phases are frozen at creation
  * (TP-05) — so the blast radius of a mistake here is the next project, not the current one.
  */
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
+import { writeFileDurable } from "../workspace/durable.js";
 import path from "node:path";
 import { dump as dumpYaml } from "js-yaml";
 import type { z } from "zod";
@@ -64,7 +65,7 @@ export class TemplateWriter {
     }
 
     const { id: _id, ...body } = merged;
-    await writeFile(this.file(id), dumpYaml(body, { lineWidth: 100 }), "utf8");
+    await writeFileDurable(this.file(id), dumpYaml(body, { lineWidth: 100 }));
     await this.loader.load();
     return this.loader.getOrThrow(id);
   }

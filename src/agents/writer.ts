@@ -6,7 +6,8 @@
  * never touched, so `docker pull` keeps updating it under whatever the user changed, and
  * deleting the workspace copy brings the builtin back rather than losing the profile.
  */
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
+import { writeFileDurable } from "../workspace/durable.js";
 import path from "node:path";
 import { dump as dumpYaml } from "js-yaml";
 import { agentProfileSchema, type AgentProfile } from "./schema.js";
@@ -61,7 +62,7 @@ export class AgentWriter {
     }
 
     const { id: _id, ...body } = merged;
-    await writeFile(this.file(id), dumpYaml(body, { lineWidth: 100 }), "utf8");
+    await writeFileDurable(this.file(id), dumpYaml(body, { lineWidth: 100 }));
     await this.loader.load();
     return this.loader.profileOrThrow(id);
   }

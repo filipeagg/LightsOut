@@ -5,6 +5,7 @@ rules:
   - { class: project_read, verdict: allow }
   - { class: project_write, verdict: deny, reason: "this agent answers, it does not change anything" }
   - { class: exec_check, verdict: deny }
+  - { class: script_exec, verdict: deny, reason: "this agent runs nothing" }
   - { class: git_local, verdict: deny }
   - { class: deps_install, verdict: deny }
   - { class: delete, verdict: deny }

@@ -7,7 +7,7 @@
  * audit row so the latency measured includes only the decision (PE-04).
  */
 import path from "node:path";
-import { Classifier, pathsInCommand, type ClassifyInput } from "./classify.js";
+import { Classifier, pathsInCommand, scratchRoot, type ClassifyInput } from "./classify.js";
 import {
   NEVER_ALLOW,
   NEVER_BELOW_HUMAN,
@@ -44,12 +44,18 @@ const FALLBACK_VERDICT: Verdict = "require_human";
 export class PolicyEngine {
   private readonly classifier: Classifier;
 
-  constructor(private readonly layers: PolicyLayers) {
-    this.classifier = new Classifier({
-      ...(layers.default?.matchers ?? {}),
-      ...(layers.agent?.matchers ?? {}),
-      ...(layers.project?.matchers ?? {}),
-    });
+  constructor(
+    private readonly layers: PolicyLayers,
+    options: { scriptScanBytes?: number } = {},
+  ) {
+    this.classifier = new Classifier(
+      {
+        ...(layers.default?.matchers ?? {}),
+        ...(layers.agent?.matchers ?? {}),
+        ...(layers.project?.matchers ?? {}),
+      },
+      options,
+    );
   }
 
   private lookup(
@@ -99,20 +105,34 @@ export class PolicyEngine {
   }
 
   /** Reject a write that lands outside the pack's scopes; undefined means it is allowed. */
-  private outOfScopeWrite(input: EvaluateInput, cls: ActionClass): string | undefined {
-    if (cls !== "project_write" && cls !== "delete") return undefined;
+  private outOfScopeWrite(
+    input: EvaluateInput,
+    cls: ActionClass,
+    scriptPaths?: string[],
+  ): string | undefined {
+    const scriptRun = cls === "script_exec";
+    if (cls !== "project_write" && cls !== "delete" && !scriptRun) return undefined;
     const confined = this.writeScopes();
     if (!confined) return undefined;
-    const targets = [
-      ...(input.paths ?? []),
-      ...[input.command, ...(input.commands ?? [])]
-        .filter((c): c is string => Boolean(c))
-        .flatMap((c) => pathsInCommand(c)),
-    ];
-    // A confined pack cannot approve a write whose target it cannot see.
-    if (targets.length === 0) return "(the request declares no path)";
+    const targets = scriptRun
+      ? (scriptPaths ?? [])
+      : [
+          ...(input.paths ?? []),
+          ...[input.command, ...(input.commands ?? [])]
+            .filter((c): c is string => Boolean(c))
+            .flatMap((c) => pathsInCommand(c)),
+        ];
+    // A confined pack cannot approve a write whose target it cannot see. A script is the
+    // exception: its body has been inspected and confined to the project (PE-07), and a body
+    // that names no path may well only be reading, so an invisible target is not a refusal —
+    // it is the limit of what static inspection can promise, and DESIGN §7.1 says so.
+    if (targets.length === 0) return scriptRun ? undefined : "(the request declares no path)";
+    const scratch = scratchRoot(input.projectPath);
     for (const target of targets) {
       const resolved = path.resolve(input.projectPath, target);
+      // The scratch directory is writable under every pack (PE-08): a confined agent still needs
+      // somewhere to put its tooling, and everything there is removed when the run ends.
+      if (Classifier.isInside(scratch, resolved)) continue;
       const allowed = confined.scopes.some((scope) =>
         Classifier.isInside(path.resolve(input.projectPath, scope), resolved),
       );
@@ -126,7 +146,11 @@ export class PolicyEngine {
     const classification = this.classifier.classify(input);
     const hit = this.lookup(classification.class);
 
-    const outOfScope = this.outOfScopeWrite(input, classification.class);
+    const outOfScope = this.outOfScopeWrite(
+      input,
+      classification.class,
+      classification.scriptPaths,
+    );
     if (outOfScope) {
       const confined = this.writeScopes()!;
       return {

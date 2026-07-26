@@ -5,8 +5,20 @@
  * over everything: anything resolving outside the project directory is `outside_workspace`
  * regardless of what the command looks like (PE-02).
  */
+import { openSync, readSync, closeSync, statSync } from "node:fs";
 import path from "node:path";
 import type { ActionClass } from "./schema.js";
+
+/**
+ * The project's scratch directory (PE-08, DESIGN §5.2b). Writes here are exempt from a pack's
+ * `write_scopes`, removals here are housekeeping rather than deletions, and the orchestrator
+ * empties it at the end of every run.
+ */
+export const SCRATCH_REL = path.join(".lightsout", "tmp");
+
+export function scratchRoot(projectPath: string): string {
+  return path.resolve(projectPath, SCRATCH_REL);
+}
 
 export type ClassifyInput = {
   /** ACP tool call kind: read, edit, delete, move, search, execute, think, fetch, other. */
@@ -40,6 +52,13 @@ export type Classification = {
   class: ActionClass;
   /** Why this class was chosen, for the audit row and for doubts. */
   reason: string;
+  /**
+   * Project-relative paths a script body names, when the class is `script_exec` (PE-07). The
+   * engine enforces `write_scopes` on them: a script cannot be a way around the confinement that
+   * stops the same agent from using `sed -i`. Paths a body builds at runtime are invisible here,
+   * and DESIGN §7.1 says so.
+   */
+  scriptPaths?: string[];
 };
 
 /** Built-in matcher table (DESIGN §7.2 ships defaults; packs extend it). */
@@ -118,6 +137,61 @@ export const DEFAULT_MATCHERS: Record<string, string[]> = {
     "^(twine|cargo)\\s+publish\\b",
   ],
 };
+
+/**
+ * Running code the agent supplied (PE-07). These patterns only say "this segment runs a script";
+ * the class is decided by reading the code itself (SCRIPT_BODY_FAMILIES below). A segment that
+ * matches here and whose body cannot be read falls to `other`, which is a human.
+ */
+export const SCRIPT_INTERPRETERS =
+  "(python3?|python3\\.\\d+|node|bun|deno|ruby|perl|php|bash|sh|zsh|Rscript|osascript)";
+
+/** `python3 script.py`, `node tools/x.mjs`, `bash ./x.sh`, `deno run x.ts`. */
+const SCRIPT_FILE_RE = new RegExp(`^${SCRIPT_INTERPRETERS}\\s+(?:run\\s+)?(?:-[^\\s]+\\s+)*([^\\s'\"-][^\\s]*)`, "i");
+/** `python3 -c '…'`, `node -e "…"`, `perl -e …`. */
+const SCRIPT_INLINE_RE = new RegExp(`^${SCRIPT_INTERPRETERS}\\s+(?:-[A-Za-z]*[ce])\\b\\s*(.*)$`, "i");
+/** A heredoc feeding an interpreter: `python3 - <<'EOF' … EOF`. */
+const SCRIPT_HEREDOC_RE = new RegExp(`^${SCRIPT_INTERPRETERS}\\b[^\\n]*<<-?\\s*['\"]?\\w+`, "i");
+
+/**
+ * What a script body may not contain and still count as `script_exec`. The class on the right is
+ * what the request gets instead, so the pack's own rule for that class decides — a body that
+ * fetches over the network is judged exactly as `curl` would be.
+ */
+const SCRIPT_BODY_FAMILIES: [ActionClass, RegExp, string][] = [
+  [
+    "credentials",
+    /\.env\b|\.npmrc|\.netrc|id_rsa|id_ed25519|\.pem\b|\.pfx\b|\.p12\b|credentials|ANTHROPIC_API_KEY|OPENAI_API_KEY|GIT_TOKEN|GITHUB_TOKEN|AWS_SECRET|PASSWORD/i,
+    "reads or carries credentials",
+  ],
+  // Dependencies before network: `pip install requests` is a dependency, and the package name
+  // would otherwise read as a network library.
+  [
+    "deps_install",
+    /\b(pip3?|uv|poetry|npm|pnpm|yarn|bun|apt|apt-get|cargo|go)\s+(install|add|sync|ci|get)\b/i,
+    "installs dependencies",
+  ],
+  [
+    "network",
+    /\b(requests|httpx|urllib|urllib2|urllib3|http\.client|socket|paramiko|smtplib|ftplib|websocket|axios|node-fetch|node:https?|got)\b|\bfetch\s*\(|https?:\/\//i,
+    "reaches the network",
+  ],
+  [
+    "delete",
+    /\b(shutil\.rmtree|os\.remove|os\.unlink|os\.rmdir|fs\.rm|rmSync|unlinkSync|Path\([^)]*\)\.unlink)\b|\brm\s+-[rf]/i,
+    "deletes files",
+  ],
+  [
+    "other",
+    /\b(subprocess|os\.system|os\.popen|os\.exec|child_process|execSync|spawnSync|Deno\.run|eval\s*\(|exec\s*\()/i,
+    "runs further commands of its own",
+  ],
+];
+
+/** Absolute paths and parent traversals inside a script body: PE-02 does not stop at the shell. */
+const SCRIPT_BODY_PATHS = /(^|['"\s(])(\/[A-Za-z0-9._][^\s'")]*|\.\.\/[^\s'")]+)/g;
+
+export type ScriptBody = { source: "file" | "inline"; target?: string; text: string };
 
 function compile(matchers: Record<string, string[]>): Map<ActionClass, RegExp[]> {
   const compiled = new Map<ActionClass, RegExp[]>();
@@ -239,10 +313,45 @@ export function pathsInCommand(command: string): string[] {
   return found;
 }
 
+/** Path-like literals in a script body: quoted relative paths that carry an extension. */
+export function scriptFileCandidates(text: string): string[] {
+  const found = new Set<string>();
+  for (const match of text.matchAll(/['"`]([A-Za-z0-9._][A-Za-z0-9._/\\-]*\.[A-Za-z0-9]{1,8})['"`]/g)) {
+    const target = match[1];
+    if (target) found.add(target);
+  }
+  return [...found];
+}
+
+/**
+ * Path-like arguments of one segment: everything after the command word that is not an option.
+ * Used to tell housekeeping inside the scratch directory from a real deletion (PE-08).
+ */
+export function argPaths(segment: string): string[] {
+  return segment
+    .split(/\s+/)
+    .slice(1)
+    .map((token) => token.replace(/^['"]|['"]$/g, ""))
+    .filter((token) => token.length > 0 && !token.startsWith("-"));
+}
+
+/** True when every path-like argument of the segment stays inside the scratch directory. */
+export function confinedToScratch(projectPath: string, segment: string): boolean {
+  const args = argPaths(segment);
+  if (args.length === 0) return false;
+  const root = scratchRoot(projectPath);
+  return args.every((arg) => Classifier.isInside(root, path.resolve(projectPath, arg)));
+}
+
 export class Classifier {
   private readonly table: Map<ActionClass, RegExp[]>;
+  private readonly scanBytes: number;
 
-  constructor(extraMatchers: Record<string, string[] | undefined> = {}) {
+  constructor(
+    extraMatchers: Record<string, string[] | undefined> = {},
+    options: { scriptScanBytes?: number } = {},
+  ) {
+    this.scanBytes = options.scriptScanBytes ?? 65536;
     const merged: Record<string, string[]> = { ...DEFAULT_MATCHERS };
     for (const [cls, patterns] of Object.entries(extraMatchers)) {
       if (!patterns?.length) continue;
@@ -337,6 +446,81 @@ export class Classifier {
     return { class: "outside_workspace", reason: `path outside the project: ${target}` };
   }
 
+  /**
+   * The code a segment is about to run, or undefined when the segment does not run a script.
+   * A file is read up to `scanBytes`; a body that cannot be read comes back with empty text and
+   * the caller treats that as `other` (a human), never as `script_exec`.
+   */
+  private scriptBody(segment: string, projectPath: string): ScriptBody | undefined {
+    const inline = SCRIPT_INLINE_RE.exec(segment);
+    if (inline) return { source: "inline", text: inline[2] ?? "" };
+    if (SCRIPT_HEREDOC_RE.test(segment)) {
+      // The heredoc body arrives in the same string when the adapter sends a multi-line command.
+      const body = segment.slice(segment.indexOf("<<"));
+      return { source: "inline", text: body };
+    }
+    const file = SCRIPT_FILE_RE.exec(segment);
+    if (!file) return undefined;
+    const target = file[2];
+    if (!target || /^-/.test(target)) return undefined;
+    // `bash -c` and friends are handled above; a bare interpreter with no file is not a script run.
+    if (!/[./]/.test(target) && !/\.[A-Za-z0-9]+$/.test(target)) return undefined;
+
+    const resolved = path.resolve(projectPath, target);
+    if (!Classifier.isInside(projectPath, resolved)) {
+      // Left for the escape check, which already ran; be explicit rather than reading it.
+      return { source: "file", target, text: "" };
+    }
+    try {
+      if (statSync(resolved).size > this.scanBytes) return { source: "file", target, text: "" };
+      const fd = openSync(resolved, "r");
+      try {
+        const buffer = Buffer.alloc(this.scanBytes);
+        const read = readSync(fd, buffer, 0, this.scanBytes, 0);
+        return { source: "file", target, text: buffer.subarray(0, read).toString("utf8") };
+      } finally {
+        closeSync(fd);
+      }
+    } catch {
+      return { source: "file", target, text: "" };
+    }
+  }
+
+  /**
+   * Classify a script run by its body (PE-07). An unreadable, empty or oversized body is `other`:
+   * the point of the class is that the code was inspected, so "could not inspect" is a human.
+   */
+  private classifyScript(input: ClassifyInput, segment: string, body: ScriptBody): Classification {
+    const where = body.source === "file" ? `script ${body.target}` : "inline code";
+    if (!body.text.trim()) {
+      return {
+        class: "other",
+        reason: `${where} could not be read before running it: ${segment.slice(0, 80)}`,
+      };
+    }
+
+    for (const match of body.text.matchAll(SCRIPT_BODY_PATHS)) {
+      const target = match[2];
+      if (!target) continue;
+      if (!Classifier.isInside(input.projectPath, path.resolve(input.projectPath, target))) {
+        return this.classifyEscape(input, target, true);
+      }
+    }
+
+    for (const [cls, re, why] of SCRIPT_BODY_FAMILIES) {
+      const hit = re.exec(body.text);
+      if (hit) {
+        return { class: cls, reason: `${where} ${why} (${hit[0].slice(0, 40)})` };
+      }
+    }
+
+    return {
+      class: "script_exec",
+      reason: `${where}, body inspected and confined to the project`,
+      scriptPaths: scriptFileCandidates(body.text),
+    };
+  }
+
   classify(input: ClassifyInput): Classification {
     const candidates = [input.command, ...(input.commands ?? [])]
       .map((c) => (c ?? "").trim())
@@ -358,21 +542,72 @@ export class Classifier {
       const parts = candidates.flatMap((c) => splitSegments(c));
       const segments = [...candidates, ...parts];
 
+      // Housekeeping inside the scratch directory is not a deletion (PE-08): an agent that
+      // tidies up after itself must not need a human. Only when every segment is a removal and
+      // every one of them stays inside the scratch directory — a chain that mixes it with
+      // anything else keeps the ordinary "worst segment wins" answer.
+      const removalPatterns = this.table.get("delete") ?? [];
+      const runs = parts.length > 0 ? parts : candidates;
+      if (
+        runs.length > 0 &&
+        runs.every(
+          (segment) =>
+            removalPatterns.some((re) => re.test(segment)) &&
+            confinedToScratch(input.projectPath, segment),
+        )
+      ) {
+        return {
+          class: "project_write",
+          reason: `housekeeping inside ${SCRATCH_REL}: ${runs[0]?.slice(0, 120)}`,
+        };
+      }
+
       // COMMAND_ORDER is ordered by danger, so the outer loop makes the most dangerous
-      // match win across all segments.
-      for (const cls of COMMAND_ORDER) {
-        if (cls === "project_read") continue; // handled below: it needs unanimity
-        const patterns = this.table.get(cls) ?? [];
-        for (const segment of segments) {
-          const hit = patterns.find((re) => re.test(segment));
-          if (hit) {
-            return {
-              class: cls,
-              reason: `command matched ${cls}: ${hit.source} (${segment.slice(0, 120)})`,
-            };
+      // match win across all segments. It is split in two around script inspection: a
+      // dangerous match on the command line still wins outright, but `exec_check`,
+      // `git_local` and `project_write` must not swallow `node x.mjs` before its body has
+      // been read (PE-07) — `node` matches `exec_check` by its first word alone.
+      const dangerous = COMMAND_ORDER.slice(0, COMMAND_ORDER.indexOf("exec_check"));
+      const benign = COMMAND_ORDER.slice(COMMAND_ORDER.indexOf("exec_check"));
+
+      const matchInOrder = (order: ActionClass[]): Classification | undefined => {
+        for (const cls of order) {
+          if (cls === "project_read") continue; // handled below: it needs unanimity
+          const patterns = this.table.get(cls) ?? [];
+          for (const segment of segments) {
+            const hit = patterns.find((re) => re.test(segment));
+            if (hit) {
+              return {
+                class: cls,
+                reason: `command matched ${cls}: ${hit.source} (${segment.slice(0, 120)})`,
+              };
+            }
           }
         }
+        return undefined;
+      };
+
+      const dangerousHit = matchInOrder(dangerous);
+      if (dangerousHit) return dangerousHit;
+
+      // Running the agent's own code (PE-07): read the body and let it decide the class. The
+      // worst answer across the scripts in a chain wins, and `other` (could not inspect) is
+      // worse than `script_exec`.
+      const scriptVerdicts: Classification[] = [];
+      for (const segment of runs) {
+        const body = this.scriptBody(segment, input.projectPath);
+        if (body) scriptVerdicts.push(this.classifyScript(input, segment, body));
       }
+      if (scriptVerdicts.length > 0) {
+        return (
+          scriptVerdicts.find((v) => v.class !== "script_exec" && v.class !== "other") ??
+          scriptVerdicts.find((v) => v.class === "other") ??
+          scriptVerdicts[0]!
+        );
+      }
+
+      const benignHit = matchInOrder(benign);
+      if (benignHit) return benignHit;
 
       // `project_read` is the one class that needs unanimity: a chain is read-only only if
       // every command in it is. Otherwise `echo hi && some-unknown-tool` would pass as a read

@@ -259,6 +259,7 @@ Pilot mechanism: an egress HTTP(S) proxy sidecar (tinyproxy) with an allowlist f
 | `LO_INACTIVITY_MIN` | `8` | Inactivity watchdog (SR-04) |
 | `LO_PERMISSION_WAIT_HOURS` | `24` | Max wait on a human-gated permission before cancel (§8.4) |
 | `LO_ADVISOR_CONFIDENCE` | `0.7` | Threshold for auto-continue on second opinion (DO-02) |
+| `LO_SCRIPT_SCAN_BYTES` | `65536` | Max bytes of a script body read to classify it; larger scripts are never `script_exec` (PE-07, §7.1) |
 | `LO_ADAPTER_CLAUDE` | `claude-agent-acp` | Command to spawn the Claude ACP adapter |
 | `LO_ADAPTER_CODEX` | `codex-acp` | Command to spawn the Codex ACP adapter |
 | `LO_EVENT_RETENTION_DAYS` | `90` | Event pruning (DB-04) |
@@ -465,6 +466,8 @@ Aggregations (costs per project/day, runs by state — OB-05) are SQL views over
 | `config.changed` | `{kind, id, actor}` | an agent, template, knowledge manifest or vault entry was written, deleted or reloaded; `kind` is `agent\|policy\|template\|knowledge\|vault` and the payload never carries a value (AP-06, TP-04, VT-03, WP-11) |
 | `knowledge.attached` / `knowledge.detached` | `{baseId, kind, actor}` | knowledge attachment changed (KB-03) |
 | `vault.read` | `{entryId, fields}` | a run read a vault entry; never values (VT-05) |
+| `scratch.swept` / `scratch.sweep_failed` | `{files, bytes}` / `{error}` | the scratch directory was emptied at run close, or could not be (PE-08, §5.2b) |
+| `run.untracked` | `{count, paths}` | the run left untracked files outside the scratch directory; reported, not deleted (PE-08) |
 
 `actor` is `'mcp'`, `'panel'` or `'system'` on every event a human can trigger from either
 surface (WP-11). It is how the history explains who did what when both surfaces are in use.
@@ -496,6 +499,7 @@ Chain: `active → paused` on any non-ok task end (except doubt auto-resolved); 
 ```
 onTaskFinished(task, result):
   persist run row, final events
+  hygiene.sweep(project, run)                     # PE-08, before anything commits
   if result == ok:
       git.consolidate(task)                       # PM-04
       docs.updateState(project)                   # PM-02
@@ -507,6 +511,23 @@ onTaskFinished(task, result):
   else if result == doubt: handled by doubt flow (§8); chain stays active but waiting
   else: task=<failure state>; chain=paused; persist recovery info
 ```
+
+### 5.2b Hygiene sweep (PE-08, `src/projects/hygiene.ts`)
+
+Called on **every** terminal outcome, including failures and doubts, and before the consolidated
+commit, so temporary files never enter history:
+
+1. `<project>/.lightsout/tmp/` is emptied — its contents removed, the directory kept. An event
+   `scratch.swept` records `{files, bytes}`; nothing is recorded when it was already empty.
+2. `git status --porcelain` lists what the run left behind. Untracked paths outside the scratch
+   directory are recorded as `run.untracked` with up to 50 paths and **are not deleted**: an agent
+   that created a file on purpose and a leftover look identical from here, and deleting real work to
+   tidy up is the worse error. The consolidated commit makes them visible anyway, and the panel shows
+   the event on the run timeline.
+
+The sweep never throws: a failure to clean is an event (`scratch.sweep_failed`), not a reason to lose
+a finished task. Sweeping is confined to the scratch directory by construction — it resolves the path
+and refuses to act unless it is inside the project.
 
 ### 5.3 Concurrency and locks (SR-07, OR-08)
 
@@ -532,7 +553,7 @@ spawn(LO_ADAPTER_CLAUDE | LO_ADAPTER_CODEX, [], { cwd: project.path, env: scrubb
 The prompt for a run is assembled from seven blocks, in order:
 
 1. Agent profile `instructions` (AP-01).
-2. LightsOut protocol block (constant, versioned): how to report results (§6.4), how to raise a doubt, reminder that permissions are mediated and denials are not failures. It also states that missing credentials are a doubt, never a guess (VT-04), and that a phase without its deliverable is a failure, never a pass (BA-04).
+2. LightsOut protocol block (constant, versioned): how to report results (§6.4), how to raise a doubt, reminder that permissions are mediated and denials are not failures. It also states that missing credentials are a doubt, never a guess (VT-04), and that a phase without its deliverable is a failure, never a pass (BA-04). It grants the tooling licence of PE-07 explicitly — write and run your own helper scripts, no permission needed — and names `.lightsout/tmp/` as the place for temporary files, saying plainly that it is emptied at the end of the run and that anything left elsewhere is committed and reported (PE-08).
 3. Curated knowledge (§17): the manifests and `index.md` of every attached base, plus the documents selected by budget, each labelled with its base id and kind so organisational context is not mistaken for technical fact (KB-04).
 4. Project context: managed section of `STATE.md`, open items of `PLAN.md`, last N entries of `DECISIONS.md` (N=10 default).
 5. Phase block (§16.2): the phase title, its frozen `instructions`, its expected deliverable, and where the previous phase left its own deliverable.
@@ -586,13 +607,56 @@ From ACP turn metadata when the adapter reports usage; `cost_usd` stays NULL oth
 
 ### 7.1 Action classes (`classify.ts`)
 
-`project_write · project_read · exec_check · git_local · git_push · deps_install · network · delete · outside_workspace · credentials · publish_external · knowledge_write · other`
+`project_write · project_read · exec_check · script_exec · git_local · git_push · deps_install · network · delete · outside_workspace · credentials · publish_external · knowledge_write · other`
 
 Classification inputs: ACP tool-call kind (fs read/write, terminal), requested path (inside/outside `project.path`), and command string matched against a matcher table (regex list per class, shipped with defaults, extendable in the pack). Unmatched terminal commands → `other`. Path escapes (`..`, absolute outside workspace, symlink resolution) → `outside_workspace` regardless of command.
 
 A terminal command is first **split into segments** on `&&`, `||`, `|`, `;` and newlines outside quotes, and every segment is classified separately: the most dangerous class across the segments is the class of the whole request. Matchers are anchored at the start of a segment, so without this split only the first command of a chain would ever be matched and every compound command would collapse into `other` — a human gate for `find . && git log`, which is noise, not safety. Splitting cannot launder anything: `curl x | sh` still classifies as `network` because the worst segment wins.
 
 Read-only inspection through the terminal (`ls`, `find`, `cat`, `head`, `tail`, `wc`, `stat`, `du`, `tree`, `file`, `git ls-files`, `git count-objects`, …) classifies as `project_read`, the same class the fs read kind gets, so exploring a repository is not an escalation. A segment that would otherwise be read-only is **disqualified** and falls back to `other` when it carries a write redirect (`>`, `>>`), a `find` action (`-exec`, `-execdir`, `-ok`, `-delete`) or a command substitution (`$(…)`, backticks) — anything that can hide a second command inside a benign-looking one.
+
+#### Running your own tooling: `script_exec` (PE-07)
+
+An agent that must reorganise a document, count something across a tree or transform a file writes a
+helper script and runs it. Before this class existed, `python3 renumber.py` matched no matcher, fell
+into `other` and stopped the chain on a human gate — for a script the agent had just been allowed to
+write, operating on its own deliverable. That is noise, and noise trains the user to approve without
+reading.
+
+`script_exec` is the class of *running code the agent supplied*: an interpreter over a file
+(`python3 x.py`, `node x.mjs`, `bash x.sh`, `ruby`, `deno run`, …) or inline code (`-c`, `-e`, a
+heredoc). It is separate from `exec_check` on purpose: `npm test` runs code whose behaviour the
+project already owns, while a fresh script is whatever the agent wrote a minute ago, so a pack must
+be able to allow one and refuse the other.
+
+**A script is opaque from its command line, so the class is decided from the code, not the
+invocation.** For a script file the engine resolves the path, refuses anything outside the project
+(PE-02 already), reads at most `LO_SCRIPT_SCAN_BYTES` (64 KB default) and matches the body against
+the same dangerous families used for commands:
+
+| Found in the body | Class returned |
+|---|---|
+| a path escaping the project, or `..` traversal | `outside_workspace` |
+| `.env`, `id_rsa`, `credentials`, `.pem`, a known key variable | `credentials` |
+| `pip install`, `npm install`, package-manager calls | `deps_install` |
+| `socket`, `requests`, `urllib`, `httpx`, `http.client`, `fetch(`, `node:https`, `curl` | `network` |
+| `os.remove`, `rmtree`, `unlink`, `rm -rf` | `delete` |
+| `subprocess`, `os.system`, `child_process`, `exec(`, `eval(` | `other` (a human sees it) |
+| none of the above | `script_exec` |
+
+The families are tested in that order, which is why dependencies come before network: `pip install
+requests` is a dependency, and the package name would otherwise read as a network library.
+
+A body that cannot be read, is larger than the scan limit, or is not on disk yet is **never**
+`script_exec`: it falls to `other`, which is a human. The same table is applied to inline code, where
+the body is the command's own argument. The reason string names what matched, so the audit row and
+any doubt say why.
+
+What this buys and what it does not: the boundary moves from "commands LightsOut can read" to "code
+LightsOut has read". A determined script can still do anything the container can, so the remaining
+containment is the container itself (no host access), the egress allowlist (RT-05), the git diff of
+every run and the audit trail. It is a deliberate trade: the alternative is a human gate on every
+helper script, which is worse security in practice because it is ignored.
 
 Two paths need naming explicitly now that the workspace holds shared material (§2):
 
@@ -603,6 +667,11 @@ Two paths need naming explicitly now that the workspace holds shared material (�
 - Writes under `/workspace/agents/`, `/workspace/templates/` or to the vault file always
   classify as `credentials`, regardless of pack, so an agent can never reconfigure the system
   that is running it. That is a hard floor like PE-03.
+- Writes under `<project>/.lightsout/tmp/` are `project_write` **and are exempt from
+  `write_scopes`** (PE-08). A `read-only` agent whose writes are confined to `doc/` still needs
+  somewhere to put a helper script and its intermediate output; without this exemption the only
+  place it could write its tooling is its own deliverable. The scratch directory is emptied at the
+  end of every run (§5.2), so nothing an agent leaves there survives it.
 
 ### 7.2 Policy pack format (`agents/policies/*.yaml`)
 
@@ -612,6 +681,7 @@ rules:                      # first match wins, evaluated top-down
   - { class: project_read,      verdict: allow }
   - { class: project_write,     verdict: allow }
   - { class: exec_check,        verdict: allow }
+  - { class: script_exec,       verdict: allow }   # own tooling, body inspected (PE-07)
   - { class: git_local,         verdict: allow }
   - { class: deps_install,      verdict: require_human }
   - { class: delete,            verdict: require_human }
@@ -709,7 +779,8 @@ Everything outside the markers is never touched. `PLAN.md` uses one checkbox lin
 
 ### 9.3 Git strategy (PM-04, PM-05)
 
-- `create_project`: `git init` if needed, initial commit of the scaffold.
+- `create_project`: `git init` if needed, `.lightsout/tmp/` created with a `.gitignore` that ignores
+  the whole `.lightsout/` directory (PE-08), then the initial commit of the scaffold.
 - During a run: wip commit every 10 min if dirty and at run end — `wip(lightsout): <taskId> <ts>`.
 - Task ok: consolidated commit `feat: <task title> [lo:<taskId>]` (wips remain in history; squashing is v2).
 - Provisional decision: annotated tag `lightsout/cp/<taskId>-<n>` at the pre-decision commit (the v2 rewind target).

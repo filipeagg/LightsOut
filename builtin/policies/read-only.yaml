@@ -6,6 +6,7 @@ rules:
   - { class: project_read, verdict: allow }
   - { class: project_write, verdict: allow, reason: "confined to doc/ by write_scopes" }
   - { class: exec_check, verdict: allow }
+  - { class: script_exec, verdict: allow, reason: "own tooling on its own deliverable; write_scopes still apply (PE-07)" }
   - { class: git_local, verdict: deny, reason: "this agent does not change history" }
   - { class: deps_install, verdict: deny }
   - { class: delete, verdict: deny }

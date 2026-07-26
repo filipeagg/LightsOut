@@ -6,6 +6,7 @@ rules:
   - { class: project_read, verdict: allow }
   - { class: project_write, verdict: allow, reason: "confined to the test directories and doc/" }
   - { class: exec_check, verdict: allow }
+  - { class: script_exec, verdict: allow, reason: "test tooling; write_scopes still apply (PE-07)" }
   - { class: network, verdict: allow, reason: "loopback only; egress is allowlisted (RT-05)" }
   - { class: git_local, verdict: allow }
   - { class: deps_install, verdict: require_human }

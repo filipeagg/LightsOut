@@ -14,6 +14,7 @@ import type { ChainRow, DoubtRow, ProjectRow, TaskLevel, TaskRow } from "../db/t
 import { TaskRunner, type HealthInvalidator } from "../acp/runner.js";
 import { ProjectGit } from "../projects/git.js";
 import { ProjectDocs } from "../projects/docs.js";
+import { ensureScratch, sweep } from "../projects/hygiene.js";
 import { readProjectConfig } from "../projects/config.js";
 import { runVerify } from "./verify.js";
 import { RunLocks } from "./locks.js";
@@ -276,6 +277,38 @@ export class Orchestrator {
     void this.closePhase(task.id);
   }
 
+  /**
+   * End-of-run hygiene (PE-08, DESIGN §5.2b): empty the scratch directory and report what the run
+   * left untracked elsewhere. Never throws — housekeeping cannot cost a finished task.
+   */
+  private async sweepScratch(project: ProjectRow, runId: string): Promise<void> {
+    try {
+      const result = await sweep(project.path);
+      if (result.error) {
+        this.repos.events.append({
+          runId,
+          type: "scratch.sweep_failed",
+          payload: { error: result.error },
+        });
+      } else if (result.files > 0) {
+        this.repos.events.append({
+          runId,
+          type: "scratch.swept",
+          payload: { files: result.files, bytes: result.bytes },
+        });
+      }
+      if (result.untracked.length > 0) {
+        this.repos.events.append({
+          runId,
+          type: "run.untracked",
+          payload: { count: result.untracked.length, paths: result.untracked },
+        });
+      }
+    } catch (err) {
+      console.error(`[hygiene:${project.id}] ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   /** Returns true when the chain should continue with the next task. */
   private async runTask(project: ProjectRow, chain: ChainRow, task: TaskRow): Promise<boolean> {
     const docs = new ProjectDocs(this.repos, project);
@@ -284,6 +317,10 @@ export class Orchestrator {
 
     await docs.syncPlan(chain);
     await docs.updateState(chain);
+
+    // The scratch directory exists before the agent needs it, including for projects created
+    // before PE-08 (DESIGN §5.2b).
+    await ensureScratch(project.path).catch(() => undefined);
 
     const result = await this.runner.run({
       project,
@@ -298,6 +335,9 @@ export class Orchestrator {
       type: "task.state",
       payload: { taskId: task.id, status: outcome.status },
     });
+
+    // Hygiene before anything commits, on every outcome including failures (PE-08, §5.2b).
+    await this.sweepScratch(project, runId);
 
     // The advisor settled the doubt: the task is queued again and will run with the decision
     // in its context (DO-02). No commit and no gate for a turn that did not finish the work.

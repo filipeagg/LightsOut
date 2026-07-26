@@ -48,6 +48,8 @@ Priority levels: MUST (pilot fails without it), SHOULD (build if cheap, else bac
 - PE-04 MUST. Every permission decision is logged with rule, verdict, run and timestamp (audit trail).
 - PE-05 SHOULD. Per-project policy overrides layered on top of the agent's default pack.
 - PE-06 SHOULD. A `provisional` verdict: allow the action, tag the decision, create a git checkpoint. This is the foundation for v2 optimistic execution and rewind.
+- PE-07 MUST. An agent may build and run its own tooling — a helper script in Python, Node or shell — without asking a human, as long as the tooling stays inside the project and does nothing its policy pack forbids. This is the action class `script_exec`. Because a script is opaque from its command line, the engine reads the code it is about to run and classifies it by content: a body that escapes the project, touches credentials, reaches the network, installs dependencies or deletes files carries that class instead, and unreadable or oversized code is never `script_exec`. Inline code (`-c`, heredoc) is inspected the same way.
+- PE-08 MUST. Every project has one scratch directory for temporary files, `.lightsout/tmp/`, writable under every policy pack whatever its write scopes, and ignored by git. At the end of every run the system empties it and records what it removed; files the agent left untracked anywhere else in the project are reported, never deleted. An agent that leaves the project dirty is visible, not silently tolerated.
 
 ## 5. OR — Orchestrator and chains
 

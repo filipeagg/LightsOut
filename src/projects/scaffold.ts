@@ -10,6 +10,7 @@ import type { Repos } from "../db/repos/index.js";
 import type { ProjectRow, PushPolicy } from "../db/types.js";
 import { slugify } from "../ids.js";
 import { ProjectGit } from "./git.js";
+import { ensureScratch } from "./hygiene.js";
 import { CONFIG_FILE, readProjectConfig } from "./config.js";
 import type { TemplatesLoader } from "../templates/loader.js";
 import type { KnowledgeLoader } from "../knowledge/loader.js";
@@ -149,6 +150,9 @@ export async function createProject(
       await writeFile(file, content.replace(`# ${doc}`, `# ${doc} — ${input.name}`), "utf8");
     }
   }
+
+  // The scratch directory and its self-ignoring .gitignore, before the first commit (PE-08).
+  await ensureScratch(projectPath);
 
   const git = new ProjectGit(projectPath);
   await git.init();

@@ -246,6 +246,15 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
 
   app.post("/api/projects", async (request, reply) =>
     envelope(reply, async () => {
+      // Checked before the schema, so the answer is the sentence a person needs rather than a
+      // dump of validation issues (PM-09).
+      const raw = (request.body ?? {}) as { context?: unknown };
+      if (typeof raw.context !== "string" || !raw.context.trim()) {
+        throw new Error(
+          "a context brief is required (PM-09): what is this project for? " +
+            "goal, actors, systems involved, constraints, definition of done, what is out of scope",
+        );
+      }
       const input = body(
         z.object({
           name: z.string().min(1),

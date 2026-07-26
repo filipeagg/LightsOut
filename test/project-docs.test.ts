@@ -152,6 +152,11 @@ describe("listing and reading the documents (PM-10)", () => {
     expect(hostPathFor(container, host, "/workspace/projects/x/doc/ANALYSIS.md")).toBe(
       "C:\\Users\\me\\Documents\\LightsOut\\projects\\x\\doc\\ANALYSIS.md",
     );
+    // A Windows mount written with forward slashes still answers in backslashes: the point of
+    // this path is that a person can paste it into their editor.
+    expect(hostPathFor(container, "C:/Users/me/LightsOut", "/workspace/projects/x/doc/A.md")).toBe(
+      "C:\\Users\\me\\LightsOut\\projects\\x\\doc\\A.md",
+    );
     expect(hostPathFor(container, "/home/me/LightsOut", "/workspace/projects/x")).toBe(
       "/home/me/LightsOut/projects/x",
     );

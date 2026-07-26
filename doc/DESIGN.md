@@ -725,6 +725,16 @@ The bridge holds no state and no DB handle (single-writer preserved, ST-02).
 
 Uniform envelope: success `{ok:true, …}`; failure `{ok:false, error:{code,message}}`. Codes: `NOT_FOUND`, `INVALID_INPUT`, `PROJECT_LOCKED`, `AUTH_REQUIRED`, `CONFLICT`, `INTERNAL`. All ids are strings. Fields marked `?` optional.
 
+**Parity with the panel (MC-07).** Every action in `src/control/actions.ts` is reachable from both
+surfaces, with one deliberate exception: **the vault**. `list_vault` shows labels, URLs and field
+names; there is no tool that writes one. A value written through MCP would travel through the
+Desktop conversation to get here, and VT-02 says values reach the adapter's environment and
+nowhere else. Vault entries are edited in the panel, on loopback, or not at all.
+
+The exception is the only one. A new action that the panel can call and no tool can is a review
+failure, the same way a route that skips `actions.ts` is — the whole point of §12.0 is that the
+two surfaces are skins, and a skin that is missing a control is a fork in slow motion.
+
 | tool | input | output (`ok:true` +) | notes |
 |---|---|---|---|
 | `health` | `{}` | `{db, engines:{claude:{installed,auth},codex:{…}}, network, activeRuns, version}` | RT-06 |
@@ -734,12 +744,25 @@ Uniform envelope: success `{ok:true, …}`; failure `{ok:false, error:{code,mess
 | `create_project` | `{name, template?, knowledge?:[baseId], writableKnowledge?:baseId, remote?, verify?, push?}` | `{project:{id,path}, phases:[{phaseId,title,agentId,gate}]}` | scaffolds and materialises the phases (PM-01, TP-05); `writableKnowledge` is required by the curation template and refused by every other (KB-05) |
 | `project_status` | `{projectId}` | `{project:{…,templateId,knowledge:[…]}, phases:[{phaseId,title,agentId,status,deliverable,gate,startedAt,endedAt}], chain?:{id,title,tasks:[…]}, run?:{id,status,engine,model,elapsedS,inactivityS,lastAction,timeoutS}, doubts:[…], state:{phase,lastDecision,next}}` | one call = full picture including what is done, running and pending (MC-06, TP-06) |
 | `list_agents` | `{}` | `{agents:[{id,name,engine,model,enabled,source,valid,error?}]}` | AP-02, AP-07, BA-01 |
-| `list_templates` | `{}` | `{templates:[{id,name,description,source,phases:[{id,title,agentId,gate,optional,repeatable}],valid,error?}]}` | TP-03 |
-| `launch_phase` | `{projectId, phaseId?, skip?:bool}` | `{phaseId, taskId?, runId?, queued?, skipped?}` | `phaseId` omitted means the next pending one; `skip` requires `optional` (TP-07) |
-| `list_knowledge` | `{kind?}` | `{bases:[{id,name,kind,description,tags,updated,docs,attachedTo:[projectId]}]}` | KB-01 |
-| `read_knowledge` | `{baseId, path}` | `{content, kind, updated}` | fetches a document the budget left out (KB-06); read-only, no project needed |
-| `attach_knowledge` | `{projectId, baseId, detach?:bool, writable?:bool}` | `{attached:[baseId]}` | `writable` only for a curation project (KB-05) |
+| `write_agent` | `{agentId, name?, engine?, model?, reasoning?, instructions?, policy?, tags?, deliverable?, advisor?, enabled?}` | `{agent:{…}}` | create or edit; on a builtin it writes the workspace copy that shadows it (AP-06). An unknown model is rejected with the accepted list (AP-08) |
+| `set_agent_enabled` | `{agentId, enabled:bool}` | `{agent:{id,enabled}}` | AP-07 |
+| `delete_agent` | `{agentId}` | `{revealedBuiltin:bool}` | deletes the workspace copy; a builtin of the same id reappears under it (AP-06) |
 | `reload_agents` | `{}` | `{loaded,rejected:[{file,error}]}` | AP-03 |
+| `list_templates` | `{}` | `{templates:[{id,name,description,source,phases:[{id,title,agentId,gate,optional,repeatable}],valid,error?}]}` | TP-03 |
+| `write_template` | `{templateId, name?, description?, requiresWritableKnowledge?, phases?:[{id,title,agent,instructions,deliverable?,verify?,gate?,optional?,repeatable?}]}` | `{template:{…}}` | create, clone a builtin, or replace the phase list in order (TP-04) |
+| `delete_template` | `{templateId}` | `{revealedBuiltin:bool}` | workspace copies only (TP-04) |
+| `list_phases` | `{projectId}` | `{phases:[{phaseId,title,agentId,status,gate,deliverable,optional,repeatable,startedAt,endedAt}]}` | TP-06 |
+| `launch_phase` | `{projectId, phaseId?, input?}` | `{phaseId, taskId?, runId?, queued?}` | `phaseId` omitted means the next pending one; `input` is what is being asked for this time (TP-07, §16.2 amendment) |
+| `skip_phase` | `{projectId, phaseId}` | `{phase:{…}}` | requires `optional` (TP-07) |
+| `add_phase` | `{projectId, title, agentId, instructions, position?, deliverable?, verifyCmd?, gate?}` | `{phase:{…}}` | ad-hoc phase, not in the template (TP-08) |
+| `list_knowledge` | `{kind?}` | `{bases:[{id,name,kind,description,tags,updated,source?,docs,attachedTo:[projectId]}]}` | KB-01 |
+| `read_knowledge` | `{baseId, path}` | `{content, kind, updated}` | fetches a document the budget left out (KB-06); read-only, no project needed |
+| `write_knowledge` | `{baseId, name?, kind?, description?, tags?, owner?, source?:string\|null}` | `{base:{…}}` | create or edit the manifest; `source` links a workspace folder, `null` unlinks (KB-08) |
+| `write_knowledge_doc` | `{baseId, file, content}` | `{file}` | text only — `.md`, `.markdown`, `.txt` (KB-08) |
+| `delete_knowledge_doc` | `{baseId, file}` | `{deleted:true}` | refused on a linked base: that folder belongs to something else (KB-08) |
+| `delete_knowledge` | `{baseId}` | `{deleted:true}` | refused while attached to a project (KB-03); a linked folder is left alone |
+| `attach_knowledge` | `{projectId, baseId, detach?:bool, writable?:bool}` | `{baseId, writable}` | `writable` only for a curation project, and never a linked base (KB-03, KB-05, KB-08) |
+| `list_vault` | `{}` | `{entries:[{id,label,base_url,auth,test_only,scope,fields:[{name,present,updated}]}]}` | never a value (VT-03). There is no write tool: see the parity note above |
 | `launch_chain` | `{projectId, title, tasks:[{title,spec,agentId,level?,verify?}]}` | `{chainId, taskIds, started:bool, queued:bool}` | fire-and-forget (MC-06) |
 | `launch_task` | `{projectId, title, spec, agentId, level?, verify?, chainId?}` | `{taskId, runId?, queued}` | appends to chain if given |
 | `abort_run` | `{runId?, chainId?}` | `{aborted:[ids]}` | OR-06 |

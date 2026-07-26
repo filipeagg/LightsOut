@@ -26,6 +26,20 @@ edit_a_builtin: write_agent with its id clones it into the workspace with your c
 | advisor | boolean | may be consulted as a second opinion (DO-02) |
 | enabled | boolean | a disabled profile stays visible and refuses to run (AP-07) |
 
+## the_model_is_a_launch_decision
+
+rule: engine, model and reasoning on a profile are its **default**, not a fixed property (AP-09).
+override: launch_task, launch_chain (per task) and launch_phase all accept engine, model and reasoning for that launch alone.
+scope: nothing is written to the profile on disk; the next launch is back on the default.
+catalog: list_agents returns `models` — the accepted values per engine. Pass one of those; anything else is refused at launch, with the list, before a run starts (OR-11).
+engine_swap: passing engine without model drops the profile's model, because a Claude model name means nothing to Codex. Pass both when you swap engines.
+health: launching onto an engine that is not authenticated is refused at launch, not attempted.
+audit: an overridden run records config.changed {kind:"override"}, and the run row carries the engine and model that did the work.
+
+example.cheap: `launch_task { agentId:"builder", model:"haiku", reasoning:"low", … }` — a mechanical edit.
+example.deep: `launch_task { agentId:"builder", model:"opus", reasoning:"high", … }` — the same agent on a hard one.
+example.chain: one chain, `model:"haiku"` on the mechanical tasks and nothing on the rest, which then use the profile's.
+
 ## the_builtins
 
 prompt-architect: turns a rough request into doc/PROMPT.md. read-only.

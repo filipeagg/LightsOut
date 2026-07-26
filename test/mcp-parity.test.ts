@@ -44,6 +44,9 @@ const READ_ONLY = new Set([
   "phase",
   "knowledgeFolders",
   "adoptableFolders",
+  // AP-09: the engines and models a launch may name. `list_agents` serves the same catalog and
+  // `GET /api/agents/models` serves it to the panel, but it is a read either way.
+  "modelCatalog",
 ]);
 
 /**
@@ -57,6 +60,8 @@ const INTERNAL = new Set([
   "requireNotArchived",
   "requireLaunchable",
   "requireCapabilities",
+  // AP-09/OR-11: validates the launch's engine and model before a task row exists.
+  "requireModelChoice",
 ]);
 
 /** The one exception, with its reason (VT-02, MC-07). Adding to this list is a design decision. */
@@ -74,6 +79,7 @@ const TOOL_FOR: Record<string, string> = {
   skipPhase: "skip_phase",
   addPhase: "add_phase",
   launchTask: "launch_task",
+  launchChain: "launch_chain",
   answerDoubt: "answer_doubt",
   abortRun: "abort_run",
   stopRun: "stop_run",

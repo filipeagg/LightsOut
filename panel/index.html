@@ -778,6 +778,7 @@ function phaseList() {
               <label class="tiny">What must come back? (required)<br>
                 <textarea id="ph-expects" rows="3" style="width:100%"
                   placeholder="The artefact, its shape, and how you decide it was met."></textarea></label>
+              ${launchModelFields(p.agent)}
               <div class="row" style="gap:8px;margin-top:12px">
                 <button class="btn primary" onclick="launchPhase('${esc(p.id)}')">Launch ${esc(p.title)}</button>
                 <button class="btn" onclick="editing=null;paint()">Cancel</button>
@@ -788,6 +789,31 @@ function phaseList() {
     ${running ? `<p class="tiny muted" style="margin-top:8px">A phase is running; the rest wait for it (OR-08).</p>` : ""}`;
 }
 
+/**
+ * AP-09: the model for this run, on the launch form itself.
+ *
+ * "Same as the profile" is the first option and the default, because the profile is a considered
+ * choice and overriding it should be deliberate. The list is the same catalog the agent editor
+ * uses, so the panel cannot offer a model the server would refuse.
+ */
+function launchModelFields(agentId) {
+  const profile =
+    store.agents && store.agents.agents
+      ? store.agents.agents.find((a) => a.id === agentId)
+      : null;
+  const engine = (profile && profile.engine) || "claude";
+  const asIs = profile
+    ? `${engine} / ${profile.model || "engine default"}`
+    : "the agent's own setting";
+  return `<label class="tiny">Model for this run (AP-09)<br>
+      <select id="ph-model" style="width:100%">
+        <option value="">Same as the profile — ${esc(asIs)}</option>
+        ${modelChoices(engine, null)
+          .map((m) => `<option value="${esc(engine)}:${esc(m)}">${esc(engine)} / ${esc(m)}</option>`)
+          .join("")}
+      </select></label>`;
+}
+
 /** OR-10: a phase never starts without knowing what is asked and what must come back. */
 async function launchPhase(phaseId) {
   const input = field("ph-input");
@@ -796,7 +822,13 @@ async function launchPhase(phaseId) {
     store.error = "say what you are asking for and what must come back (OR-10)";
     return paint();
   }
-  await act("POST", `/api/phases/${encodeURIComponent(phaseId)}/launch`, { input, expects });
+  const chosen = field("ph-model");
+  const [engine, model] = chosen ? chosen.split(":") : [];
+  await act("POST", `/api/phases/${encodeURIComponent(phaseId)}/launch`, {
+    input,
+    expects,
+    ...(engine ? { engine, model } : {}),
+  });
 }
 
 /** Attach and detach knowledge for one project (KB-03). */
@@ -2060,6 +2092,10 @@ async function load() {
       const id = encodeURIComponent(route.id);
       store.project = await api(`/api/projects/${id}`);
       store.phases = await api(`/api/projects/${id}/phases`);
+      // AP-09: the launch form offers a model for this run, so the project view needs the same
+      // catalog the agent editor uses. Cached: neither list changes while the panel is open.
+      if (!store.models) store.models = await api("/api/agents/models").catch(() => null);
+      if (!store.agents) store.agents = await api("/api/agents").catch(() => null);
       if (route.tab === "history") {
         store.history = await api(`/api/projects/${id}/history?limit=50`);
       }

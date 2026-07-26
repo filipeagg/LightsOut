@@ -24,6 +24,8 @@ import type { Actions } from "../control/actions.js";
 import { askEngine } from "../acp/advisor.js";
 import { guide, TOPIC_ORDER } from "./guide.js";
 import { CAPABILITIES } from "../policy/capabilities.js";
+import { modelCatalog } from "../agents/effective.js";
+import { ENGINE_IDS, REASONING_LEVELS } from "../agents/models.js";
 import { conflict, failure, invalid, notFound, success, toolResult } from "./envelope.js";
 // One read model for both surfaces: the panel renders these exact shapes (DESIGN §12.0).
 import { activeRunFor, doubtView, projectListItem, projectStatusView } from "../views.js";
@@ -47,6 +49,25 @@ export type McpDeps = {
 
 const DOC_NAMES = ["STATE", "PLAN", "DECISIONS", "QUESTIONS"] as const;
 const levelSchema = z.enum(["quick", "full"]);
+
+/**
+ * What a launch may say about the engine and the model (AP-09). Spread into every launch schema so
+ * the three tools cannot drift. All optional: omitted means the agent profile decides. The model
+ * is a plain string rather than an enum because the accepted set depends on the engine, and
+ * `list_agents` publishes it — an invalid one is refused with the list, not silently accepted.
+ */
+const modelChoiceSchema = {
+  engine: z
+    .enum(ENGINE_IDS as unknown as [string, ...string[]])
+    .optional()
+    .describe("Run on this engine instead of the profile's, for this launch only."),
+  model: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Model for this launch only; one of those `list_agents` reports for the engine."),
+  reasoning: z.enum(REASONING_LEVELS).optional(),
+};
 
 function docPath(project: ProjectRow, doc: string): string {
   return path.join(project.path, "doc", `${doc}.md`);
@@ -211,15 +232,26 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       }),
   );
 
-  tool("list_agents", "Agent profiles, valid and rejected (AP-02).", {}, async () => {
+  tool(
+    "list_agents",
+    "Agent profiles, valid and rejected (AP-02), plus the engines and models a launch may " +
+      "choose from (AP-09). A profile's engine and model are its default: launch_task, " +
+      "launch_chain and launch_phase accept engine/model/reasoning to override them for one run.",
+    {},
+    async () => {
     const snapshot = agents.current();
     return {
+      // AP-09: what a launch may pass. Without this the client has to guess, and a guess is a
+      // refusal rather than a run.
+      models: modelCatalog(),
+      reasoning: [...REASONING_LEVELS],
       agents: [
         ...[...snapshot.profiles.values()].map((p) => ({
           id: p.id,
           name: p.name,
           engine: p.engine,
           model: p.model ?? null,
+          reasoning: p.reasoning ?? null,
           policy: p.policy,
           advisor: p.advisor,
           valid: true,
@@ -235,7 +267,8 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       ],
       packs: [...snapshot.packs.keys()],
     };
-  });
+    },
+  );
 
   tool("reload_agents", "Re-read profiles and policy packs from the workspace (AP-03).", {}, async () => {
     const report = await actions.reloadAgents("mcp");
@@ -245,7 +278,8 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
   tool(
     "launch_chain",
     "Queue a chain of tasks and start it if the project is free. Returns immediately (MC-06). " +
-      "Every task states its spec AND what it must give back (`expects`) — OR-10.",
+      "Every task states its spec AND what it must give back (`expects`) — OR-10. Each task may " +
+      "also choose its own engine/model, so the mechanical steps can run cheap (AP-09).",
     {
       projectId: z.string().min(1),
       title: z.string().min(1),
@@ -261,14 +295,15 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
             agentId: z.string().min(1),
             level: levelSchema.optional(),
             verify: z.string().optional(),
+            needs: z.array(z.enum(CAPABILITIES)).optional(),
+            grants: z.array(z.enum(CAPABILITIES)).optional(),
+            ...modelChoiceSchema,
           }),
         )
         .min(1),
     },
     async (args) => {
-      project(args.projectId);
-      for (const task of args.tasks) agents.profileOrThrow(task.agentId);
-      const launch = orchestrator.launchChain({
+      const launch = await actions.launchChain("mcp", {
         projectId: args.projectId,
         title: args.title,
         tasks: args.tasks.map((t) => ({
@@ -278,6 +313,11 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
           agentId: t.agentId,
           ...(t.level ? { level: t.level } : {}),
           ...(t.verify !== undefined ? { verifyCmd: t.verify } : {}),
+          ...(t.needs?.length ? { needs: t.needs } : {}),
+          ...(t.grants?.length ? { grants: t.grants } : {}),
+          ...(t.engine ? { engine: t.engine } : {}),
+          ...(t.model ? { model: t.model } : {}),
+          ...(t.reasoning ? { reasoning: t.reasoning } : {}),
         })),
       });
       return launch as unknown as Record<string, unknown>;
@@ -315,6 +355,7 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       level: levelSchema.optional(),
       verify: z.string().optional(),
       chainId: z.string().optional(),
+      ...modelChoiceSchema,
     },
     async (args) =>
       actions.launchTask("mcp", {
@@ -328,6 +369,9 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
         ...(args.level ? { level: args.level } : {}),
         ...(args.verify !== undefined ? { verifyCmd: args.verify } : {}),
         ...(args.chainId ? { chainId: args.chainId } : {}),
+        ...(args.engine ? { engine: args.engine } : {}),
+        ...(args.model ? { model: args.model } : {}),
+        ...(args.reasoning ? { reasoning: args.reasoning } : {}),
       }),
   );
 
@@ -726,9 +770,16 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
         .string()
         .min(1)
         .describe("What comes back, and how you decide it was met."),
+      ...modelChoiceSchema,
     },
-    async ({ projectId, phase, input, expects }) =>
-      actions.launchPhase("mcp", project(projectId).id, phase, { request: input, expects }),
+    async ({ projectId, phase, input, expects, engine, model, reasoning }) =>
+      actions.launchPhase("mcp", project(projectId).id, phase, {
+        request: input,
+        expects,
+        ...(engine ? { engine } : {}),
+        ...(model ? { model } : {}),
+        ...(reasoning ? { reasoning } : {}),
+      }),
   );
 
   tool(

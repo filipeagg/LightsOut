@@ -118,6 +118,7 @@ describe("migration 2", () => {
       "5:project read-only areas",
       "6:learned allows",
       "7:task capabilities",
+      "8:task engine and model override",
     ]);
     // Migration 4 gives the legacy project a brief it can be told apart from a real one (PM-09).
     expect(

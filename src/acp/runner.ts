@@ -9,6 +9,7 @@ import type { Config } from "../config.js";
 import type { Bus } from "../bus.js";
 import type { Repos } from "../db/repos/index.js";
 import type { AgentsLoader } from "../agents/loader.js";
+import { isOverridden, resolveProfile } from "../agents/effective.js";
 import { PolicyEngine } from "../policy/engine.js";
 import type { PolicyPack } from "../policy/schema.js";
 import type { ProjectRow, TaskRow } from "../db/types.js";
@@ -205,7 +206,10 @@ export class TaskRunner {
 
   async run(input: RunTaskInput): Promise<RunTaskResult> {
     const { project, task } = input;
-    const profile = this.agents.profileOrThrow(task.agent_id);
+    const declaredProfile = this.agents.profileOrThrow(task.agent_id);
+    // AP-09: the profile is the default; the launch may have chosen another engine or model for
+    // this run alone. Resolved once, here, so the adapter, the run row and the prompt agree.
+    const profile = resolveProfile(declaredProfile, task);
     const instructions = this.agents.instructionsFor(profile);
 
     const decisionContext = this.doubts.decisionContext(task.id);
@@ -257,6 +261,31 @@ export class TaskRunner {
       model: profile.model ?? null,
     });
     this.repos.tasks.setStatus(task.id, "running");
+
+    // AP-09: a run whose model nobody can account for is a cost nobody can explain. When the
+    // launch chose it rather than the profile, the trail says so, and says who asked.
+    if (isOverridden(declaredProfile, task)) {
+      this.repos.events.append({
+        runId: run.id,
+        type: "config.changed",
+        payload: {
+          kind: "override",
+          id: task.id,
+          op: "launch",
+          actor: "launch",
+          from: {
+            engine: declaredProfile.engine,
+            model: declaredProfile.model ?? null,
+            reasoning: declaredProfile.reasoning ?? null,
+          },
+          to: {
+            engine: profile.engine,
+            model: profile.model ?? null,
+            reasoning: profile.reasoning ?? null,
+          },
+        },
+      });
+    }
 
     // Field names only, never values (VT-05).
     for (const read of context.vaultReads) {

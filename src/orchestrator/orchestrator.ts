@@ -39,6 +39,14 @@ export type LaunchTaskInput = {
   /** Declared needs and per-run grants (PE-12); validated by the caller before it gets here. */
   needs?: Capability[];
   grants?: Capability[];
+  /**
+   * The engine, model and reasoning level chosen for this launch (AP-09). Validated against the
+   * catalog by the caller (`Actions`, OR-11); omitted means the agent profile decides, resolved at
+   * run time so a later profile edit still reaches the task.
+   */
+  engine?: string | null;
+  model?: string | null;
+  reasoning?: string | null;
   level?: TaskLevel;
   verifyCmd?: string | null;
   /** Append to this chain instead of creating one. */
@@ -135,6 +143,10 @@ export class Orchestrator {
         ...(task.verifyCmd !== undefined ? { verifyCmd: task.verifyCmd } : {}),
         ...(task.needs?.length ? { needs: task.needs } : {}),
         ...(task.grants?.length ? { grants: task.grants } : {}),
+        // AP-09: per task, so one chain can put a cheap model on the mechanical steps.
+        ...(task.engine ? { engine: task.engine } : {}),
+        ...(task.model ? { model: task.model } : {}),
+        ...(task.reasoning ? { reasoning: task.reasoning } : {}),
       })),
     );
     this.repos.events.append({
@@ -172,6 +184,10 @@ export class Orchestrator {
       ...(input.verifyCmd !== undefined ? { verifyCmd: input.verifyCmd } : {}),
       ...(input.needs?.length ? { needs: input.needs } : {}),
       ...(input.grants?.length ? { grants: input.grants } : {}),
+      // AP-09: the launch's choice of engine and model, already validated against the catalog.
+      ...(input.engine ? { engine: input.engine } : {}),
+      ...(input.model ? { model: input.model } : {}),
+      ...(input.reasoning ? { reasoning: input.reasoning } : {}),
     });
     if (chain.status !== "active") this.repos.chains.setStatus(chain.id, "active");
     this.bus.emit("overview");

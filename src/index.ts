@@ -126,7 +126,9 @@ async function main(): Promise<void> {
   // 5d. Templates and the phase layer (TP, §16).
   const templates = new TemplatesLoader(
     config.workspace,
-    (id) => agents.profile(id) !== undefined,
+    // A disabled profile makes every template that names it unusable, with the reason
+    // visible in the library rather than at launch time (AP-07, TP-03).
+    (id) => agents.profile(id)?.enabled === true,
     (report) => {
       console.log(`[templates] reloaded: ${report.loaded}`);
       for (const bad of report.rejected) {

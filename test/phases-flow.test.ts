@@ -72,8 +72,8 @@ const TEMPLATE = projectTemplateSchema.parse({
 async function harness(runnerOptions: { writeDeliverables: boolean; fail?: boolean }) {
   const config = loadConfig({ LO_WORKSPACE: workspace, LO_DB: ":memory:" });
   const agents = {
-    profile: (id: string) => ({ id }),
-    profileOrThrow: (id: string) => ({ id }),
+    profile: (id: string) => ({ id, enabled: true }),
+    profileOrThrow: (id: string) => ({ id, enabled: true }),
   } as never;
   const bus = createBus();
   const orch = new Orchestrator(

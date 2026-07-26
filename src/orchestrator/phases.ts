@@ -124,9 +124,11 @@ export class PhaseService {
     return found;
   }
 
+  /** A phase cannot run on a profile that is missing or switched off (AP-07, BA-06). */
   private requireAgent(agentId: string): void {
     const profile = this.agents.profile(agentId);
     if (!profile) throw new Error(`unknown agent profile: ${agentId}`);
+    if (!profile.enabled) throw new Error(`agent profile ${agentId} is disabled (AP-07)`);
   }
 
   /**

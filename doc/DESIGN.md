@@ -2201,3 +2201,86 @@ It runs in two places:
   short block naming the metrics and instructing the agent to compact the document and remove what
   repeats **before** adding anything. That is what makes the rule self-correcting without a gate: the
   agent that has to live with the file is the one told to fix it.
+
+## 21. Preview servers (PV-01..06)
+
+### 21.1 The three things that were broken
+
+A project whose deliverable is a page had no way to show it, and each cause is separate:
+
+1. **The container publishes 8484 and 1455 and nothing else.** A Vite on `:5173` inside is
+   invisible from the user's browser however well it runs.
+2. **A dev server never ends.** Run as an ordinary terminal command it holds the run's terminal
+   open, produces no further events, and the inactivity watchdog (SR-04) eventually kills the run
+   that started it. The agent did nothing wrong and the run failed anyway.
+3. **`vite`, `next dev` and `python -m http.server` matched no rule**, so they fell to `other` and
+   a human gate — for the one command the task exists to run.
+
+### 21.2 A preview is owned by LightsOut, not by the agent
+
+```
+preview_start { projectId, command, port?, cwd? }  → { port, url, previewId, logPath }
+preview_stop  { previewId | projectId }
+list_previews { projectId? }
+```
+
+`src/preview/manager.ts` allocates a free port from the pool, spawns the command **detached, in its
+own process group**, with `stdout`/`stderr` to `<project>/.lightsout/tmp/preview-<port>.log`, and
+returns within a few hundred milliseconds. Nothing about it is attached to the run: the run ends,
+the preview is still up, and that is the point — the user looks at the result after the agent has
+finished (PV-03).
+
+**The pool** is `127.0.0.1:5170-5189` in compose, twenty simultaneous previews, loopback only. The
+port is a fact about the host, so `preview_start` reports the URL the user's browser can actually
+open, not the container's.
+
+**Reaped by four things**, because a process nobody can see and nobody stops is worse than no
+feature: `LO_PREVIEW_TTL_MIN` (120 by default, checked by a one-minute sweep), an explicit
+`preview_stop`, the project being deleted or archived, and the boot recovery pass — the table is
+memory of a process the container restart already killed, so boot clears it.
+
+**Storage** is a table rather than a map, so the panel and MCP read one truth:
+migration 10, `previews(id, project_id, port, command, cwd, pid, log_path, started_at, expires_at,
+started_by, status)`.
+
+### 21.3 Two things that break a containerised dev server, handled here (PV-04)
+
+**Binding.** Vite, `next dev` and `http.server` bind `localhost` by default, which inside a
+container is the container's own loopback: publishing the port changes nothing and the browser gets
+a connection reset. This is the failure that looks like Docker being broken and is not. So the
+command is normalised before it runs — `--host 0.0.0.0`, the allocated port, `--strictPort` so a
+busy port is an error rather than a silent move to another one the publish does not cover — and the
+normalisation is recorded on the preview row, because a command the system rewrote must be visible.
+
+**CORS.** A prototype served from `:5173` calling an API on another origin fails in the browser, and
+the agent cannot fix it from inside the page. `lo-serve` (`src/preview/serve.ts`, Node, no
+dependencies) is the static server LightsOut ships: it answers `Access-Control-Allow-Origin: *`,
+handles `OPTIONS` preflight, and takes `--proxy /api=<upstream>` to forward a path to a declared
+upstream so the page talks to one origin. For a real Vite project the same job is Vite's own
+`server.proxy`, and the preview's log is where a misconfiguration shows up.
+
+### 21.4 The class, the capability and the pack (PV-05, PV-06)
+
+A new action class **`serve`**, matching `vite`, `next dev|start`, `nuxt dev`, `ng serve`,
+`npm|pnpm|yarn run dev|start|serve|preview`, `python -m http.server`, `http-server`, `serve`,
+`live-server`, `caddy`, `php -S`. Inline, it is **denied** with a reason that names the way to do
+it:
+
+> a development server run in the terminal never ends and the run's inactivity watchdog will kill
+> it. Start it with `preview_start` instead: LightsOut owns the process, publishes the port on the
+> user's machine and keeps it alive after this run finishes.
+
+That is deliberate: a `require_human` here would let a person approve the thing that hangs the run.
+Through `preview_start` it is governed by the `serve` capability, which packs grant.
+
+**`web-prototype` pack and the `web-prototyper` agent** (thirteenth builtin, ninth pack): writes
+anywhere in the project, `serve`, `toolchain_install`, `exec_check`, `script_exec`, `git_local`;
+**no network**. A prototype is buildable without anything that reaches off the machine, and the
+toolchain volume (§7.6) is what makes `npm install vite` survive to the next run.
+
+### 21.5 Where it shows
+
+`status_card` and `project_status` carry the live preview and its URL; the panel has a Preview card
+per project with the URL as a link, the age, the last lines of the log and a Stop button. A preview
+whose process has died is reported as dead rather than linked: the manager checks the pid before
+answering, because a URL that does not load is worse than no URL.

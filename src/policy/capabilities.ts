@@ -17,6 +17,8 @@ export const CAPABILITIES = [
   "deps_install",
   /** Installing into this project's durable toolchain (ST-07); authorised once, per manager. */
   "toolchain_install",
+  /** Starting a preview server for a person to look at (PV-05); only via `preview_start`. */
+  "serve",
   "execute",
   "write",
   "git",
@@ -31,6 +33,7 @@ const CLASS_OF: Record<Capability, ActionClass> = {
   network: "network",
   deps_install: "deps_install",
   toolchain_install: "toolchain_install",
+  serve: "serve",
   execute: "exec_check",
   write: "project_write",
   git: "git_local",

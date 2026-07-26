@@ -93,8 +93,9 @@ ENV NODE_ENV=production \
     CLAUDE_CONFIG_DIR=/home/app/.claude \
     CODEX_HOME=/home/app/.codex
 
-# 8484 panel/API/MCP, 1455 the engine OAuth callback the login forwarder serves (SU-04).
-EXPOSE 8484 1455
+# 8484 panel/API/MCP, 1455 the engine OAuth callback the login forwarder serves (SU-04),
+# 5170-5189 the preview pool (PV-01).
+EXPOSE 8484 1455 5170-5189
 ENTRYPOINT ["tini","--"]
 CMD ["node","dist/index.js"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \

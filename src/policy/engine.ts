@@ -222,6 +222,25 @@ export class PolicyEngine {
       }
     }
 
+    // PV-02: a development server run in the agent's terminal never returns, so the run's
+    // inactivity watchdog eventually kills it — the agent did nothing wrong and the run failed
+    // anyway. Denied rather than gated on purpose: `require_human` would let someone approve the
+    // thing that hangs the run. The refusal is the whole remedy, so it says what to do instead.
+    if (classification.class === "serve") {
+      return {
+        class: "serve",
+        verdict: "deny",
+        ruleSource: "default",
+        reason:
+          `${classification.reason}; a development server started here never ends and the ` +
+          `inactivity watchdog will kill this run. Use preview_start instead: LightsOut owns the ` +
+          `process, publishes the port on the user's machine, and keeps it alive after this run ` +
+          `finishes (PV-02)`,
+        floored: true,
+        latencyMs: performance.now() - startedAt,
+      };
+    }
+
     // ST-07: the user authorised this project to install with this package manager, so the same
     // project does not ask again. Scoped to the project and to the manager, and revocable on its
     // own — the whole reason this is not a learned shape.

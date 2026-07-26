@@ -112,6 +112,20 @@ export const DEFAULT_MATCHERS: Record<string, string[]> = {
     // would be disqualified from `project_read` and reach a human for `ls > listing.txt`.
     "^(ls|find|wc|cat|grep|rg|awk|sort|uniq|head|tail|jq|yq|diff|stat|du|tree|xxd|od)\\b[^|]*>>?\\s*\\S",
   ],
+  // PV-05: a server does not end, so it is not an `exec_check` and must be matched before one.
+  // `npm run dev` would otherwise never reach here — `npm run …` is an ordinary check.
+  serve: [
+    "^(npx\\s+)?vite\\b(?!\\s+build)",
+    "^(npx\\s+)?next\\s+(dev|start)\\b",
+    "^(npx\\s+)?(nuxt|remix|astro|gatsby)\\s+(dev|start|preview)\\b",
+    "^(npx\\s+)?ng\\s+serve\\b",
+    "^(npm|pnpm|yarn|bun)\\s+(run\\s+)?(dev|start|serve|preview)\\b",
+    "^python3?\\s+-m\\s+http\\.server\\b",
+    "^(npx\\s+)?(http-server|serve|live-server|lo-serve)\\b",
+    "^php\\s+-S\\b",
+    "^caddy\\s+(run|file-server)\\b",
+    "^(uvicorn|gunicorn|flask\\s+run|rails\\s+server|hugo\\s+server|jekyll\\s+serve)\\b",
+  ],
   exec_check: [
     "^(npm|pnpm|yarn|bun) (test|run (test|build|lint|typecheck|check))\\b",
     "^(node|tsc|eslint|prettier|vitest|jest|pytest|ruff|mypy|go test|cargo (test|build|check))\\b",
@@ -282,6 +296,8 @@ const COMMAND_ORDER: ActionClass[] = [
   "delete",
   "deps_install",
   "toolchain_install",
+  // Before exec_check, and before git: `npm run dev` matches both and only one of them is true.
+  "serve",
   "git_push",
   "network",
   "exec_check",

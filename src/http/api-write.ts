@@ -427,6 +427,36 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
     }),
   );
 
+  // Preview servers (PV-01..03).
+  app.post("/api/projects/:id/previews", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = idParam.parse(request.params);
+      const input = body(
+        z.object({
+          command: z.string().min(1),
+          port: z.number().int().optional(),
+          cwd: z.string().optional(),
+          ttlMinutes: z.number().int().positive().optional(),
+        }),
+        request.body,
+      );
+      return (await actions.startPreview("panel", {
+        projectId: id,
+        command: input.command,
+        ...(input.port !== undefined ? { port: input.port } : {}),
+        ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
+        ...(input.ttlMinutes !== undefined ? { ttlMinutes: input.ttlMinutes } : {}),
+      })) as unknown as Record<string, unknown>;
+    }),
+  );
+
+  app.delete("/api/previews/:previewId", async (request, reply) =>
+    envelope(reply, async () => {
+      const { previewId } = z.object({ previewId: z.string().min(1) }).parse(request.params);
+      return actions.stopPreview("panel", { previewId });
+    }),
+  );
+
   // Toolchain authorisations (ST-07). Usually granted by answering the doubt; these are for
   // seeing them and withdrawing them.
   app.post("/api/projects/:id/toolchain", async (request, reply) =>

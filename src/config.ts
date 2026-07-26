@@ -36,6 +36,17 @@ const schema = z.object({
    */
   scriptScanBytes: intFromEnv(65536, 1024),
   eventRetentionDays: intFromEnv(90),
+  /**
+   * The loopback port pool published for preview servers (PV-01), and how long one lives without
+   * being stopped (PV-03). The range must match the `ports:` line in compose: a port published
+   * there but not offered here is unused, and one offered here but not published is a preview the
+   * user's browser cannot reach.
+   */
+  previewPortFrom: intFromEnv(5170, 1024),
+  previewPortTo: intFromEnv(5189, 1024),
+  previewTtlMin: intFromEnv(120, 1),
+  /** Where preview processes are managed from; empty disables the feature in this process. */
+  toolchainsRoot: z.string().default("/toolchains"),
   adapterClaude: z.string().min(1).default("claude-agent-acp"),
   adapterCodex: z.string().min(1).default("codex-acp"),
   /** "proxy" when the egress allowlist overlay is active, "unrestricted" otherwise (RT-05). */
@@ -62,6 +73,10 @@ function raw(env: NodeJS.ProcessEnv) {
     knowledgeBudgetChars: env.LO_KNOWLEDGE_BUDGET_CHARS,
     scriptScanBytes: env.LO_SCRIPT_SCAN_BYTES,
     eventRetentionDays: env.LO_EVENT_RETENTION_DAYS,
+    previewPortFrom: env.LO_PREVIEW_PORT_FROM,
+    previewPortTo: env.LO_PREVIEW_PORT_TO,
+    previewTtlMin: env.LO_PREVIEW_TTL_MIN,
+    toolchainsRoot: env.LO_TOOLCHAINS_ROOT,
     adapterClaude: env.LO_ADAPTER_CLAUDE,
     adapterCodex: env.LO_ADAPTER_CODEX,
     egress: env.LO_EGRESS,

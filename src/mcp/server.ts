@@ -32,6 +32,8 @@ Rules that are expensive to get wrong:
   its project, declare a read-only area (add_area) rather than weakening anything.
 - The workspace is the user's own folder: call resolve_path before telling anyone where a file is.
 - Documents the system reads back are machine-first: key: value, no prose.
+- A profile's engine and model are defaults; any launch may override them (list_agents.models).
+- Nothing that serves runs in an agent's terminal: it never returns. preview_start gives a URL.
 
 Call guide{} for the list of sections and guide{topic:"overview"} to learn the system. The live
 view for a person is the panel at http://127.0.0.1:8484.`;

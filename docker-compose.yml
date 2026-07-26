@@ -7,6 +7,10 @@ services:
     ports:
       - "127.0.0.1:${LO_PORT:-8484}:8484"      # panel + API + /mcp (WP-09)
       - "127.0.0.1:1455:1455"                  # engine OAuth callback (SU-04, phase 8)
+      # PV-01: the preview pool. Twenty simultaneous dev servers, loopback only. This range and
+      # LO_PREVIEW_PORT_FROM/TO must agree: a port published here but not offered to the allocator
+      # is wasted, and one offered but not published is a preview the browser cannot reach.
+      - "127.0.0.1:5170-5189:5170-5189"
     volumes:
       # RT-02: a folder on the user's own machine, so projects are openable in their own editor.
       # Headless installs use the managed volume: add -f docker-compose.volume.yml.
@@ -30,6 +34,10 @@ services:
       # Diagnostic only (OB-06): records the raw ACP tool notifications so a timeline that says
       # nothing useful can be diagnosed. Noisy; leave empty unless you are looking at something.
       - LO_DEBUG_ACP=${LO_DEBUG_ACP:-}
+      # PV-01, PV-03. The range must match the ports line above.
+      - LO_PREVIEW_PORT_FROM=${LO_PREVIEW_PORT_FROM:-5170}
+      - LO_PREVIEW_PORT_TO=${LO_PREVIEW_PORT_TO:-5189}
+      - LO_PREVIEW_TTL_MIN=${LO_PREVIEW_TTL_MIN:-120}
     env_file: .env
 
   # Egress allowlist proxy (RT-05). Enable with: docker compose --profile secure up -d

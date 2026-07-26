@@ -50,6 +50,9 @@ const READ_ONLY = new Set([
   // ST-07: what a project may install into its own toolchain with. `list_toolchain_grants` and
   // `GET /api/projects/:id` both serve it, but it is a read.
   "listToolchainGrants",
+  // PV-03: what is being served, and why it is not. Both have tools; both are reads.
+  "listPreviews",
+  "previewLog",
 ]);
 
 /**
@@ -90,6 +93,8 @@ const TOOL_FOR: Record<string, string> = {
   addArea: "add_area",
   removeArea: "remove_area",
   forgetLearnedAllow: "forget_learned_allow",
+  startPreview: "preview_start",
+  stopPreview: "preview_stop",
   grantToolchain: "grant_toolchain",
   revokeToolchainGrant: "revoke_toolchain_grant",
   resumeChain: "resume_chain",

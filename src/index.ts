@@ -25,6 +25,7 @@ import { KnowledgeLoader } from "./knowledge/loader.js";
 import { Vault } from "./vault/vault.js";
 import { Actions } from "./control/actions.js";
 import { LoginFlows } from "./setup/login-flows.js";
+import { PreviewManager } from "./preview/manager.js";
 
 async function readVersion(): Promise<string> {
   try {
@@ -161,6 +162,15 @@ async function main(): Promise<void> {
     onGateAnswered: (doubt, choice) => phases.onGateAnswered(doubt, choice),
   });
 
+  // 5d. Preview servers (PV-01..03). The rows describe processes the previous container owned, so
+  // a restart invalidates every one of them before anything is offered as a link that loads.
+  const previews = new PreviewManager(config, repos, bus);
+  const previewsClosed = previews.reconcileAtBoot();
+  if (previewsClosed > 0) {
+    console.log(`[boot] previews: ${previewsClosed} closed (the container restarted)`);
+  }
+  previews.startReaper();
+
   // 5e. The one entry point both surfaces mutate through (§12.0).
   const actions = new Actions({
     config,
@@ -173,6 +183,7 @@ async function main(): Promise<void> {
     phases,
     // OR-11: so a launch onto an engine that is not authenticated is refused, not attempted.
     health,
+    previews,
   });
 
   // 5c. Interactive engine logins driven from the browser (SU-04).

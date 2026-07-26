@@ -18,6 +18,7 @@ import { VaultAuditRepo } from "./vault-audit.js";
 import { AreasRepo } from "./areas.js";
 import { LearnedRepo } from "./learned.js";
 import { ToolchainGrantsRepo } from "./toolchain-grants.js";
+import { PreviewsRepo } from "./previews.js";
 
 export type Repos = {
   db: Db;
@@ -39,6 +40,8 @@ export type Repos = {
   learned: LearnedRepo;
   /** Package managers authorised for a project's durable toolchain (ST-07). */
   toolchainGrants: ToolchainGrantsRepo;
+  /** Development servers LightsOut is running for a person to look at (PV-01). */
+  previews: PreviewsRepo;
 };
 
 export function createRepos(db: Db): Repos {
@@ -59,6 +62,7 @@ export function createRepos(db: Db): Repos {
     areas: new AreasRepo(db),
     learned: new LearnedRepo(db),
     toolchainGrants: new ToolchainGrantsRepo(db),
+    previews: new PreviewsRepo(db),
   };
 }
 
@@ -78,4 +82,5 @@ export {
   AreasRepo,
   LearnedRepo,
   ToolchainGrantsRepo,
+  PreviewsRepo,
 };

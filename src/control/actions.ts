@@ -46,6 +46,7 @@ import {
   toolchainRoot,
 } from "../projects/toolchain.js";
 import type { ToolchainGrantRow } from "../db/repos/toolchain-grants.js";
+import type { PreviewManager, PreviewView } from "../preview/manager.js";
 import {
   CAPABILITIES,
   checkCapabilities,
@@ -79,6 +80,8 @@ export type ActionDeps = {
    * does not make that check.
    */
   health?: { engines(): Promise<{ engine: string; detected: boolean; auth: boolean }[]> };
+  /** Development servers a person can open (PV-01); absent in a process that runs none. */
+  previews?: PreviewManager;
 };
 
 export const DOC_NAMES = ["STATE", "PLAN", "DECISIONS", "QUESTIONS"] as const;
@@ -184,6 +187,11 @@ export class Actions {
       type: "project.deleted",
       payload: { projectId: project.id, name: project.name, dir, keepFiles: !!opts.keepFiles, actor },
     });
+    // PV-03: a preview of a project that no longer exists is a process nobody will ever stop.
+    await this.deps.previews
+      ?.stop({ projectId: project.id }, "the project was deleted")
+      .catch(() => undefined);
+    this.deps.repos.previews.removeForProject(project.id);
     // ST-07: the grants are a power over a directory that is about to stop existing, and a row
     // pointing at a deleted project is a foreign key waiting to fail.
     this.deps.repos.toolchainGrants.removeForProject(project.id);
@@ -512,6 +520,55 @@ export class Actions {
     if (!removed) return { revoked: false };
     this.changed("toolchain_grant", `${projectId}:${manager}`, actor, "delete");
     return { revoked: true };
+  }
+
+  // --- Previews (PV-01..03) ------------------------------------------------
+
+  /**
+   * Start a development server the user can open in their own browser.
+   *
+   * It is here rather than in the agent's terminal because a server does not end: run as an
+   * ordinary command it holds the run open until the watchdog kills it (PV-02). LightsOut owns
+   * the process, publishes the port and keeps it alive after the run finishes.
+   */
+  async startPreview(
+    actor: Actor,
+    input: { projectId: string; command: string; port?: number; cwd?: string; ttlMinutes?: number },
+  ): Promise<PreviewView> {
+    this.requireNotArchived(input.projectId);
+    const previews = this.need(this.deps.previews, "previews");
+    return previews.start({
+      projectId: input.projectId,
+      command: input.command,
+      ...(input.port !== undefined ? { port: input.port } : {}),
+      ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
+      ...(input.ttlMinutes !== undefined ? { ttlMinutes: input.ttlMinutes } : {}),
+      startedBy: actor,
+    });
+  }
+
+  async stopPreview(
+    actor: Actor,
+    selector: { previewId?: string; projectId?: string },
+  ): Promise<{ stopped: number }> {
+    const previews = this.need(this.deps.previews, "previews");
+    if (!selector.previewId && !selector.projectId) {
+      throw new Error("give previewId or projectId: stopping every preview is not a default");
+    }
+    return previews.stop(selector, `stopped from ${actor}`);
+  }
+
+  listPreviews(projectId?: string): { previews: PreviewView[]; pool: string } {
+    const previews = this.need(this.deps.previews, "previews");
+    return {
+      previews: previews.list(projectId),
+      pool: `${this.deps.config.previewPortFrom}-${this.deps.config.previewPortTo}`,
+    };
+  }
+
+  /** The last lines of a preview's log: where a misconfiguration actually shows up (§21.3). */
+  previewLog(previewId: string, lines?: number): Promise<string[]> {
+    return this.need(this.deps.previews, "previews").log(previewId, lines);
   }
 
   /** The engines, models and reasoning levels a launch or a profile may name (AP-08, AP-09). */

@@ -12,6 +12,10 @@ services:
       # Headless installs use the managed volume: add -f docker-compose.volume.yml.
       - ${LIGHTSOUT_WORKSPACE:-~/LightsOut}:/workspace
       - lightsout-db:/data                      # DB-01
+      # ST-07: durable per-project development environments. A managed volume rather than a
+      # folder in the workspace: it is build output the size of node_modules, and RT-02 exists so
+      # the workspace stays the user's own source tree.
+      - lightsout-toolchains:/toolchains
       - claude-auth:/home/app/.claude           # RT-03
       - codex-auth:/home/app/.codex             # RT-03
       # - ${SSH_DIR:-~/.ssh}:/home/app/.ssh:ro  # optional, git push (PM-05)
@@ -45,6 +49,8 @@ services:
 volumes:
   lightsout-db:
     name: lightsout-db
+  lightsout-toolchains:
+    name: lightsout-toolchains
   claude-auth:
     name: claude-auth
   codex-auth:

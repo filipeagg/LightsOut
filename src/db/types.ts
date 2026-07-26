@@ -20,7 +20,7 @@ export type TaskStatus =
 /** Runs share the task states plus waiting_human, and never sit in queued. */
 export type RunStatus = Exclude<TaskStatus, "queued"> | "waiting_human";
 
-export type DoubtKind = "functional" | "permission" | "gate" | "hard_rule";
+export type DoubtKind = "functional" | "permission" | "gate" | "hard_rule" | "toolchain";
 export type PhaseGate = "auto" | "human";
 export type PhaseStatus = "pending" | "running" | "done" | "failed" | "skipped";
 export type DoubtStatus = "open" | "answered" | "closed";

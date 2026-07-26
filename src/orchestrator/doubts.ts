@@ -14,6 +14,7 @@ import type { Repos } from "../db/repos/index.js";
 import type { AgentsLoader } from "../agents/loader.js";
 import type { DoubtOption, DoubtRow, Engine, ProjectRow, TaskRow } from "../db/types.js";
 import { NEVER_LEARNED, type ActionClass } from "../policy/schema.js";
+import { isToolchainManager, managerOf } from "../projects/toolchain.js";
 import type { PermissionOption } from "@agentclientprotocol/sdk";
 import { consultAdvisor, otherEngine, type AdvisorResult } from "../acp/advisor.js";
 import { ProjectDocs } from "../projects/docs.js";
@@ -45,6 +46,10 @@ export function isReversible(actionClass?: string): boolean {
 const NEVER_AUTO_ALLOWED: ReadonlySet<ActionClass> = new Set<ActionClass>([
   "deps_install",
   "network",
+  // ST-07: answering this one grants a standing power over a directory that outlives every run,
+  // for the whole project. The requirement says the user authorises it; an advisor is not the
+  // user, however confident.
+  "toolchain_install",
 ]);
 
 /**
@@ -71,8 +76,12 @@ export type RaiseDoubtInput = {
   project: ProjectRow;
   task: TaskRow;
   runId: string;
-  /** `hard_rule` is the one kind that never sees the advisor and never auto-continues (KB-11b). */
-  kind: "functional" | "permission" | "hard_rule";
+  /**
+   * `hard_rule` (KB-11b) and `toolchain` (ST-08) never see the advisor and never auto-continue.
+   * They exist for the same reason from two directions: one asks to break something a person
+   * decided, the other asks for something only a person can carry out.
+   */
+  kind: "functional" | "permission" | "hard_rule" | "toolchain";
   context: string;
   blocks: string;
   options: DoubtOption[];
@@ -128,7 +137,9 @@ export class DoubtService {
     // whether breaking it is reasonable would be exactly the failure the flag prevents, so the
     // advisor is not consulted at all — not consulted and overridden, not consulted for the
     // record. This is the only doubt kind that gets no second opinion.
-    if (input.kind === "hard_rule") return undefined;
+    // ST-08 joins it: a system package needs root and a rebuild the user runs in their own
+    // terminal. There is no version of this the other engine could settle.
+    if (input.kind === "hard_rule" || input.kind === "toolchain") return undefined;
     if (!isReversible(input.actionClass)) return undefined;
     if (input.options.length < 2) return undefined;
 
@@ -179,7 +190,7 @@ export class DoubtService {
     // Belt as well as braces: `secondOpinion` already refuses to consult on a hard rule, and this
     // makes the guarantee independent of that — a hard-rule doubt cannot auto-continue even if
     // some future caller hands one an advisor result.
-    if (input.kind === "hard_rule") return false;
+    if (input.kind === "hard_rule" || input.kind === "toolchain") return false;
     if (!advisor?.ok) return false;
     if (!input.recommendation) return false;
     const threshold = input.derivedRecommendation
@@ -209,6 +220,7 @@ export class DoubtService {
     // it would only let earlier auto-continues change what this doubt reports (KB-11b).
     const exhausted =
       input.kind !== "hard_rule" &&
+      input.kind !== "toolchain" &&
       this.autoContinuesSoFar(input.project.id, input.task.id) >= DoubtService.MAX_AUTO_CONTINUE;
     if (exhausted) {
       this.repos.events.append({
@@ -652,6 +664,35 @@ export class DoubtService {
         type: "config.changed",
         payload: { kind: "learned_allow", id: learned.shape, op: "add", actor: "human" },
       });
+    }
+
+    // ST-07: allowing a toolchain install authorises this project to use that package manager
+    // from now on. Scoped to the project and to the manager rather than remembered as a command
+    // shape, because a shape is system-wide and this is a standing power over one directory.
+    if (
+      doubt.kind === "permission" &&
+      input.choice === "A" &&
+      doubt.action_class === "toolchain_install"
+    ) {
+      const manager = managerOf((doubt.context.match(/`([^`]+)`/)?.[1] ?? doubt.context).trim());
+      if (manager && isToolchainManager(manager)) {
+        const grant = this.repos.toolchainGrants.add({
+          projectId: doubt.project_id,
+          manager,
+          note: `authorised answering ${doubt.ref}`,
+          grantedBy: "human",
+        });
+        this.repos.events.append({
+          runId: doubt.run_id,
+          type: "config.changed",
+          payload: {
+            kind: "toolchain_grant",
+            id: `${grant.project_id}:${grant.manager}`,
+            op: "add",
+            actor: "human",
+          },
+        });
+      }
     }
 
     // A permission doubt has a run holding the ACP response: release it now.

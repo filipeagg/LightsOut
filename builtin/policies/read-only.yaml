@@ -9,6 +9,7 @@ rules:
   - { class: script_exec, verdict: allow, reason: "own tooling on its own deliverable; write_scopes still apply (PE-07)" }
   - { class: git_local, verdict: deny, reason: "this agent does not change history" }
   - { class: deps_install, verdict: deny }
+  - { class: toolchain_install, verdict: deny, reason: "this pack does not build anything" }
   - { class: delete, verdict: deny }
   - { class: git_push, verdict: deny }
   - { class: network, verdict: deny }

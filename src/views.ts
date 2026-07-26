@@ -14,6 +14,7 @@ import type { ChainRow, DoubtRow, ProjectRow, RunRow } from "./db/types.js";
 import type { EngineHealth } from "./health.js";
 import { hostPathFor } from "./projects/docs-index.js";
 import { narrate, type NarratedLine } from "./narrate.js";
+import { toolchainRoot } from "./projects/toolchain.js";
 
 export type ViewDeps = { config: Config; repos: Repos };
 
@@ -148,6 +149,18 @@ export function projectStatusView(deps: ViewDeps, project: ProjectRow) {
         note: row.note,
         addedBy: row.added_by,
       })),
+      // ST-07: the package managers this project may install into its own durable toolchain
+      // with. Alongside the areas because both answer "what has this project been allowed".
+      toolchain: {
+        root: toolchainRoot(project.id),
+        grants: repos.toolchainGrants.list(project.id).map((row) => ({
+          manager: row.manager,
+          grantedBy: row.granted_by,
+          note: row.note,
+          uses: row.uses,
+          lastUsedAt: row.last_used_at,
+        })),
+      },
       pushPolicy: project.push_policy,
       verifyCmd: project.verify_cmd,
       remote: project.repo_remote,

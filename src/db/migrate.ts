@@ -255,6 +255,62 @@ ALTER TABLE tasks ADD COLUMN model TEXT;
 ALTER TABLE tasks ADD COLUMN reasoning TEXT;
 `;
 
+/**
+ * Version 9 (ST-07, ST-08): the durable toolchain.
+ *
+ * `toolchain_grants` records which package managers the user has authorised for a project — per
+ * project and per manager, deliberately not the system-wide learned shapes of PE-10: a shape is
+ * one command, and this is a standing power over a directory that outlives every run. Allowing
+ * npm for a web project is not allowing it everywhere, and the row records who said so.
+ *
+ * The `toolchain` doubt kind (ST-08) is what asks for a system package, which needs root and a
+ * rebuild the user runs themselves. Like `hard_rule` it never sees the advisor and never
+ * auto-continues, so the CHECK has to grow — and a CHECK only grows by rebuilding the table, with
+ * `decisions` pointing at it. Same recipe as versions 2 and 3.
+ */
+const TOOLCHAIN_SQL = `
+CREATE TABLE doubts_v4 (
+  id             TEXT PRIMARY KEY,
+  ref            TEXT NOT NULL,
+  project_id     TEXT NOT NULL REFERENCES projects(id),
+  task_id        TEXT NOT NULL REFERENCES tasks(id),
+  run_id         TEXT REFERENCES runs(id),
+  kind           TEXT NOT NULL CHECK (kind IN ('functional','permission','gate','hard_rule','toolchain')),
+  status         TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','answered','closed')),
+  context        TEXT NOT NULL,
+  blocks         TEXT NOT NULL,
+  options        TEXT NOT NULL CHECK (json_valid(options)),
+  recommendation TEXT,
+  second_opinion TEXT CHECK (second_opinion IS NULL OR json_valid(second_opinion)),
+  answer         TEXT,
+  created_at     TEXT NOT NULL,
+  answered_at    TEXT,
+  action_class   TEXT,
+  action_shape   TEXT,
+  UNIQUE (project_id, ref)
+);
+INSERT INTO doubts_v4 SELECT
+  id, ref, project_id, task_id, run_id, kind, status, context, blocks, options,
+  recommendation, second_opinion, answer, created_at, answered_at, action_class, action_shape
+FROM doubts;
+DROP TABLE doubts;
+ALTER TABLE doubts_v4 RENAME TO doubts;
+CREATE INDEX ix_doubts_open ON doubts(status) WHERE status = 'open';
+
+CREATE TABLE toolchain_grants (
+  id           TEXT PRIMARY KEY,
+  project_id   TEXT NOT NULL REFERENCES projects(id),
+  manager      TEXT NOT NULL,
+  note         TEXT,
+  granted_by   TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  uses         INTEGER NOT NULL DEFAULT 0,
+  last_used_at TEXT,
+  UNIQUE (project_id, manager)
+);
+CREATE INDEX ix_toolchain_grants ON toolchain_grants(project_id);
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial schema", up: applyInitialSchema },
   {
@@ -274,6 +330,12 @@ export const MIGRATIONS: Migration[] = [
   { version: 6, name: "learned allows", up: LEARNED_ALLOWS_SQL },
   { version: 7, name: "task capabilities", up: TASK_CAPABILITIES_SQL },
   { version: 8, name: "task engine and model override", up: TASK_MODEL_OVERRIDE_SQL },
+  {
+    version: 9,
+    name: "toolchain grants and the toolchain doubt kind",
+    up: TOOLCHAIN_SQL,
+    foreignKeys: "off",
+  },
 ];
 
 /** The marker migration 4 writes, and the panel looks for (PM-09). */

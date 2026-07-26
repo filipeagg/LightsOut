@@ -26,6 +26,7 @@ import type { AgentProfile } from "../agents/schema.js";
 import path from "node:path";
 import { spawnAdapter, type AdapterProcess } from "./adapter.js";
 import { SCRATCH_REL } from "../policy/classify.js";
+import { toolchainEnv } from "../projects/toolchain.js";
 import { parseResult, type AgentResult, type DoubtPayload } from "./result.js";
 import { composePrompt, readDocContext } from "./prompt.js";
 
@@ -397,6 +398,9 @@ export class RunSession {
 
     const decision = this.deps.policy.evaluate({
       projectPath: this.deps.project.path,
+      // ST-07: so an install into this project's own toolchain is told apart from one that
+      // changes the image for everything.
+      projectId: this.deps.project.id,
       // Without these two the workspace-aware rules of §7.1 cannot fire and every path
       // outside the project stays `outside_workspace`, which is the safe reading.
       ...(this.deps.workspacePath ? { workspacePath: this.deps.workspacePath } : {}),
@@ -435,11 +439,20 @@ export class RunSession {
     if (decision.learnedShape) {
       this.deps.repos.learned.recordUse(decision.learnedShape);
     }
+    // ST-07: same reasoning for a toolchain authorisation — a grant nobody uses should be easy
+    // to find and withdraw.
+    if (decision.toolchainManager) {
+      this.deps.repos.toolchainGrants.recordUse(
+        this.deps.project.id,
+        decision.toolchainManager,
+      );
+    }
     this.event("perm.verdict", {
       class: decision.class,
       verdict: decision.verdict,
       ruleSource: decision.ruleSource,
       ...(decision.learnedShape ? { learned: decision.learnedShape } : {}),
+      ...(decision.toolchainManager ? { toolchain: decision.toolchainManager } : {}),
     });
 
     const respond = (want: "allow" | "reject"): RequestPermissionResponse => {
@@ -536,9 +549,19 @@ export class RunSession {
 
     // Anything installed into the scratch directory is importable without the agent having to
     // work out how (ST-03b): `pip install --target .lightsout/tmp/deps X` then `import X`.
+    // ST-07: and anything installed into the project's durable toolchain is on PATH and on the
+    // language search paths for every later run. A toolchain the agent has to be told how to
+    // reach is a toolchain it will not use.
     const runEnv: Record<string, string> = {
       PYTHONPATH: `${path.join(project.path, SCRATCH_REL, "deps")}:${process.env.PYTHONPATH ?? ""}`
         .replace(/:$/, ""),
+      ...toolchainEnv(project.id, {
+        PATH: process.env.PATH,
+        PYTHONPATH: `${path.join(project.path, SCRATCH_REL, "deps")}:${process.env.PYTHONPATH ?? ""}`.replace(
+          /:$/,
+          "",
+        ),
+      }),
       ...(this.deps.vaultEnv ?? {}),
     };
     const adapter = spawnAdapter({

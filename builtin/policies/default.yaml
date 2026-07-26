@@ -9,6 +9,7 @@ rules:
   - { class: script_exec, verdict: allow, reason: "own tooling; the body was inspected (PE-07)" }
   - { class: git_local, verdict: allow }
   - { class: deps_install, verdict: require_human, reason: "dependencies change the build" }
+  - { class: toolchain_install, verdict: require_human, reason: "a durable toolchain is authorised once per project and manager (ST-07)" }
   - { class: delete, verdict: require_human, reason: "deletions are hard to undo" }
   - { class: git_push, verdict: deny, reason: "pushing is the orchestrator's job (PM-05)" }
   - { class: network, verdict: deny, reason: "outbound access is allowlisted (RT-05)" }

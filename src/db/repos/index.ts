@@ -17,6 +17,7 @@ import { ProjectKnowledgeRepo } from "./knowledge.js";
 import { VaultAuditRepo } from "./vault-audit.js";
 import { AreasRepo } from "./areas.js";
 import { LearnedRepo } from "./learned.js";
+import { ToolchainGrantsRepo } from "./toolchain-grants.js";
 
 export type Repos = {
   db: Db;
@@ -36,6 +37,8 @@ export type Repos = {
   areas: AreasRepo;
   /** Command shapes a human has already allowed (PE-10). */
   learned: LearnedRepo;
+  /** Package managers authorised for a project's durable toolchain (ST-07). */
+  toolchainGrants: ToolchainGrantsRepo;
 };
 
 export function createRepos(db: Db): Repos {
@@ -55,6 +58,7 @@ export function createRepos(db: Db): Repos {
     vaultAudit: new VaultAuditRepo(db),
     areas: new AreasRepo(db),
     learned: new LearnedRepo(db),
+    toolchainGrants: new ToolchainGrantsRepo(db),
   };
 }
 
@@ -73,4 +77,5 @@ export {
   VaultAuditRepo,
   AreasRepo,
   LearnedRepo,
+  ToolchainGrantsRepo,
 };

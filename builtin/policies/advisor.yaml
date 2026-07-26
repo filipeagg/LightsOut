@@ -8,6 +8,7 @@ rules:
   - { class: script_exec, verdict: deny, reason: "an advisory session runs nothing" }
   - { class: git_local, verdict: deny }
   - { class: deps_install, verdict: deny }
+  - { class: toolchain_install, verdict: deny, reason: "this pack does not build anything" }
   - { class: delete, verdict: deny }
   - { class: git_push, verdict: deny }
   - { class: network, verdict: deny }

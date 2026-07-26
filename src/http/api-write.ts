@@ -427,6 +427,33 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
     }),
   );
 
+  // Toolchain authorisations (ST-07). Usually granted by answering the doubt; these are for
+  // seeing them and withdrawing them.
+  app.post("/api/projects/:id/toolchain", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = idParam.parse(request.params);
+      const input = body(
+        z.object({ manager: z.string().min(1), note: z.string().optional() }),
+        request.body,
+      );
+      return actions.grantToolchain(
+        "panel",
+        id,
+        input.manager,
+        ...(input.note !== undefined ? [input.note] : []),
+      ) as unknown as Record<string, unknown>;
+    }),
+  );
+
+  app.delete("/api/projects/:id/toolchain/:manager", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id, manager } = z
+        .object({ id: z.string().min(1), manager: z.string().min(1) })
+        .parse(request.params);
+      return actions.revokeToolchainGrant("panel", id, decodeURIComponent(manager));
+    }),
+  );
+
   // Read-only workspace areas (PE-09).
   app.post("/api/projects/:id/areas", async (request, reply) =>
     envelope(reply, async () => {

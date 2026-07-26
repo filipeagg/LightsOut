@@ -12,6 +12,7 @@ import type { Repos } from "../db/repos/index.js";
 import type { AgentsLoader } from "../agents/loader.js";
 import type { ChainRow, DoubtRow, ProjectRow, TaskLevel, TaskRow } from "../db/types.js";
 import { TaskRunner, type HealthInvalidator } from "../acp/runner.js";
+import { LiveRuns } from "../acp/live.js";
 import { ProjectGit } from "../projects/git.js";
 import { ProjectDocs } from "../projects/docs.js";
 import { ensureScratch, sweep } from "../projects/hygiene.js";
@@ -72,9 +73,17 @@ export class Orchestrator {
   ) {
     this.locks = new RunLocks(config.maxParallel);
     this.doubts = doubts ?? new DoubtService(config, repos, bus, agents);
-    this.runner =
-      runner ?? new TaskRunner(config, repos, bus, agents, this.doubts, health, context);
+    // The registry is shared with the runner, because stopping a run means reaching the session
+    // object the runner holds (OR-06, §5.4). An injected runner brings its own if it has one.
+    const real =
+      runner ??
+      new TaskRunner(config, repos, bus, agents, this.doubts, health, context, new LiveRuns());
+    this.runner = real;
+    this.live = (real as { live?: LiveRuns }).live ?? new LiveRuns();
   }
+
+  /** Sessions currently driving an adapter; the handle a stop needs (OR-06). */
+  readonly live: LiveRuns;
 
   /**
    * What the phase layer registers so a closed task can advance its phase (§16.2). It is a
@@ -356,8 +365,12 @@ export class Orchestrator {
     }
 
     if (outcome.status !== "ok") {
-      // doubt keeps the chain active but waiting (§8); everything else pauses it (OR-05).
-      if (outcome.status !== "doubt") {
+      // doubt keeps the chain active but waiting (§8); everything else pauses it (OR-05). One
+      // exception: a chain the user aborted is already in its final state, and the aborted task's
+      // outcome arrives after that decision — pausing it would erase what the user asked for
+      // (§5.4).
+      const current = this.repos.chains.getOrThrow(chain.id);
+      if (outcome.status !== "doubt" && current.status !== "aborted") {
         this.repos.chains.setStatus(chain.id, "paused");
         this.repos.events.append({
           type: "chain.state",
@@ -535,8 +548,60 @@ export class Orchestrator {
     return this.tryDrive(project, this.repos.chains.getOrThrow(chain.id));
   }
 
-  /** Abort a chain: queued tasks are dropped, the running one is left to finish (OR-06). */
-  abortChain(chainId: string): string[] {
+  /**
+   * Stop the work that is actually running (OR-06, OR-09, DESIGN §5.4): cancel the ACP turn, end
+   * the adapter process, and release any permission gate the run was holding. The session's own
+   * outcome becomes `aborted` and travels the ordinary path, so the run row, the task status and
+   * the hygiene sweep all happen exactly as they do for any other ending.
+   *
+   * `stopped: false` means there was nothing live to stop — said plainly rather than reported as
+   * a success. A row still claiming `running` with no session behind it is reconciled here.
+   */
+  async stopRun(
+    runId: string,
+    reason = "stopped by request",
+  ): Promise<{ runId: string; stopped: boolean; doubtsClosed: string[]; reconciled: boolean }> {
+    const handle = this.live.get(runId);
+    const doubtsClosed = await this.doubts.cancelForRun(runId, reason);
+
+    if (!handle) {
+      const run = this.repos.runs.get(runId);
+      const stale = run && (run.status === "running" || run.status === "waiting_human");
+      if (stale) {
+        this.repos.runs.setStatus(runId, "interrupted", reason);
+        this.repos.events.append({
+          runId,
+          type: "run.state",
+          payload: { status: "interrupted", reason: `${reason}: no live session` },
+        });
+        const task = this.repos.tasks.get(run.task_id);
+        if (task && task.status === "running") {
+          this.repos.tasks.setStatus(task.id, "interrupted");
+        }
+        this.bus.emit("overview");
+      }
+      return { runId, stopped: false, doubtsClosed, reconciled: Boolean(stale) };
+    }
+
+    this.repos.events.append({
+      runId,
+      type: "system",
+      payload: { reason, acpSession: handle.acpSession() ?? null },
+    });
+    await handle.abort();
+    this.bus.emit("overview");
+    return { runId, stopped: true, doubtsClosed, reconciled: false };
+  }
+
+  /**
+   * Abort a chain (OR-06, OR-09): the queued tasks are dropped and the run in flight is stopped
+   * too, unless `letCurrentFinish` is set. Dropping the queue while the agent kept typing was the
+   * old behaviour and the surprising one; finishing the current task is now the opt-in.
+   */
+  async abortChain(
+    chainId: string,
+    options: { letCurrentFinish?: boolean; reason?: string } = {},
+  ): Promise<{ aborted: string[]; stopped: string[] }> {
     const chain = this.repos.chains.getOrThrow(chainId);
     this.repos.chains.setStatus(chain.id, "aborted");
     const aborted: string[] = [];
@@ -546,12 +611,26 @@ export class Orchestrator {
         aborted.push(task.id);
       }
     }
+
+    const stopped: string[] = [];
+    if (!options.letCurrentFinish) {
+      for (const handle of this.live.forChain(chain.id)) {
+        const result = await this.stopRun(handle.runId, options.reason ?? "chain aborted");
+        if (result.stopped) stopped.push(handle.runId);
+      }
+    }
+
     this.repos.events.append({
       type: "chain.state",
-      payload: { chainId: chain.id, status: "aborted", tasks: aborted.length },
+      payload: {
+        chainId: chain.id,
+        status: "aborted",
+        tasks: aborted.length,
+        stopped: stopped.length,
+      },
     });
     this.bus.emit("overview");
-    return aborted;
+    return { aborted, stopped };
   }
 
   /**

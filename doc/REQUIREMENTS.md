@@ -58,7 +58,8 @@ Priority levels: MUST (pilot fails without it), SHOULD (build if cheap, else bac
 - OR-03 MUST. Task states: `queued`, `running`, `ok`, `doubt`, `verify_failed`, `timeout`, `stuck`, `error`, `aborted`, `interrupted`.
 - OR-04 MUST. Verify gate: optional per-project command executed inside the container after the task. Non-zero exit sets `verify_failed` and pauses the chain.
 - OR-05 MUST. Any failure state pauses the chain and produces recovery info: session id, last checkpoint, suggested resume.
-- OR-06 MUST. Abort task and abort chain are available from both control surfaces (MC-02, WP-02).
+- OR-06 MUST. Abort task and abort chain are available from both control surfaces (MC-02, WP-02), and both **stop the work that is actually running**, not only the queue. Stopping a run cancels the ACP turn and ends the adapter process (SIGTERM, then SIGKILL after the grace period), releases any permission gate the run was holding, and leaves the run `aborted` with its resume information. A stop that finds no live session says so instead of pretending; a run row left `running` by a dead session is reconciled to `interrupted`.
+- OR-09 MUST. Two verbs, because they are different intentions: **stop the run** leaves the chain paused, so the same or another task can be launched afterwards; **abort the chain** stops the live run *and* drops the queued tasks. Aborting is not a way of asking the current agent to finish first — that is the opt-in, not the default.
 - OR-07 SHOULD. Per-task cost cap when the engine reports cost (time caps already covered by SR-04).
 - OR-08 SHOULD. Launching against a locked project queues the task instead of rejecting it.
 

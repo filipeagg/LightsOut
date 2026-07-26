@@ -336,10 +336,19 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
     }),
   );
 
+  // Abort: the queue goes and the running session is stopped too (OR-06, §5.4).
   app.post("/api/runs/:id/abort", async (request, reply) =>
     envelope(reply, async () => {
       const { id } = idParam.parse(request.params);
       return actions.abortRun("panel", { runId: id });
+    }),
+  );
+
+  // Stop: only this run, chain left paused (OR-09). Sent with no body, like the other buttons.
+  app.post("/api/runs/:id/stop", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = idParam.parse(request.params);
+      return actions.stopRun("panel", { runId: id });
     }),
   );
 

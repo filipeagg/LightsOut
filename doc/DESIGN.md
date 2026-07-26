@@ -536,6 +536,40 @@ and refuses to act unless it is inside the project.
 - A global semaphore caps concurrent runs at `LO_MAX_PARALLEL`.
 - Crash consistency: locks are memory-only; on boot, recovery (§11.2) marks any `running`/`waiting_human` runs as `interrupted` before locks are rebuilt, so a stale lock can never survive a restart.
 
+### 5.4 Stopping work that is already running (OR-06, OR-09, SR-06)
+
+`RunSession.abort()` cancels the ACP turn and stops the adapter, and has done since phase 3 — but
+the session object lived in a local variable inside the runner, so nothing outside could reach it.
+`abort_run` could therefore only drop the queue, and the agent kept working and kept writing files.
+That is the gap this section closes.
+
+**`src/acp/live.ts` — `LiveRuns`.** One entry per session currently driving an adapter, keyed by run
+id, carrying `{runId, taskId, projectId, chainId, abort(), acpSession(), startedAt}`. The runner
+registers a session immediately after creating it and unregisters it in a `finally`, so the map is
+never a lie about what is running. Memory only: a process restart kills every adapter with it and
+the boot recovery pass (§11.2) reconciles the rows.
+
+**`orchestrator.stopRun(runId, reason)`** — the full stop:
+
+1. Release any permission gate the run is holding (`DoubtService.cancelForRun`): the held ACP
+   request is answered as refused and the doubt is closed with "cancelled: the run was stopped", so
+   an abandoned gate does not sit in the attention strip forever.
+2. `handle.abort()` → `session/cancel`, then the adapter process, SIGTERM then SIGKILL after
+   `CANCEL_GRACE_MS`. The session's own outcome becomes `aborted` and travels the ordinary path:
+   the run row is finished, the task is `aborted`, the sweep of §5.2b still runs.
+3. No live handle? Then nothing is running. If the row still claims `running` or `waiting_human` it
+   is reconciled to `interrupted` with its recovery info, and the answer says `stopped: false` —
+   an honest "there was nothing to stop" instead of a silent success.
+
+**Chain abort = stop plus drop.** `abortChain(chainId, {letCurrentFinish})` marks the chain
+`aborted`, drops the queued tasks and, unless `letCurrentFinish` is set, stops the live run first.
+Aborting a chain and leaving its agent typing was the surprising behaviour; it is now the opt-in.
+
+Two consequences worth stating. The chain loop must not pause a chain that is already `aborted`:
+the aborted task's outcome arrives after the abort, and `paused` would erase the user's decision.
+And a stop is recorded as `run.state {status:'aborted', reason, actor}` plus a `system` event
+naming who asked, so the timeline says "the user stopped this" rather than "the task failed".
+
 ## 6. ACP session runner (SR-01..08)
 
 ### 6.1 Adapter processes

@@ -67,6 +67,7 @@ const TOOL_FOR: Record<string, string> = {
   launchTask: "launch_task",
   answerDoubt: "answer_doubt",
   abortRun: "abort_run",
+  stopRun: "stop_run",
   resumeChain: "resume_chain",
   writeDoc: "write_doc",
   writeAgent: "write_agent",

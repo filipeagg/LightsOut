@@ -238,9 +238,13 @@ async function api(path) {
  * re-loaded from the API, because the server is the truth and a refusal is a normal answer.
  */
 async function write(method, path, payload) {
+  // The content-type only goes out with a body: Fastify rejects an empty body that claims to
+  // be JSON before the route ever runs, which is how every DELETE here used to fail.
   const response = await fetch(path, {
     method,
-    headers: { "content-type": "application/json", accept: "application/json" },
+    headers: payload === undefined
+      ? { accept: "application/json" }
+      : { "content-type": "application/json", accept: "application/json" },
     ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
   });
   const body = await response.json().catch(() => null);

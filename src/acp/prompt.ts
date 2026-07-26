@@ -7,9 +7,10 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { SENTINEL_CLOSE, SENTINEL_OPEN } from "./result.js";
 import { SCRATCH_REL } from "../policy/classify.js";
+import { HUMAN_MARKER } from "../projects/deliverable.js";
 
-/** 2: the tooling licence and the scratch directory (PE-07, PE-08). */
-export const PROTOCOL_VERSION = 2;
+/** 3: machine-first documents (BA-07). 2: tooling licence and scratch directory (PE-07, PE-08). */
+export const PROTOCOL_VERSION = 3;
 
 /** Constant, versioned protocol block (DESIGN §6.2 block 2). */
 export const PROTOCOL_BLOCK = `# LightsOut protocol v${PROTOCOL_VERSION}
@@ -27,6 +28,26 @@ credentials, installs dependencies or deletes files is judged as if you had type
 yourself. Put temporary files in \`${SCRATCH_REL}\`; it is emptied when this run ends, and it is
 the one place you may write regardless of any other restriction on where you can write.
 Anything you leave elsewhere is committed and reported.
+
+Every Markdown file this system writes and reads back — your deliverable, doc/STATE.md,
+doc/PLAN.md, doc/DECISIONS.md, doc/QUESTIONS.md, doc/OPEN-QUESTIONS.md, knowledge documents — is
+written for the machine that reads it next, not for a reader:
+
+- Every line is \`key: value\`, a table row, a heading or a fenced block. No paragraphs, ever.
+- Keys are English snake_case, dotted for structure. Ids are stable (\`f.1\`, \`G-3\`) so another
+  document can point at them instead of repeating them. Values may be in the project's language.
+- One fact per line. Every claim carries \`source:\` — \`code:<path>:<line>\`, \`schema:<object>\`,
+  \`doc:<path>#<id>\`, \`knowledge:<base>/<doc>\`, \`human:<doubt ref>\` — and \`confidence:\` when it
+  is not derived from one.
+- The document is the current state, not a log. Supersede in place. No "pass 4", no "as
+  established above", no reproducing what the previous version said; \`meta.passes: 4\` is all the
+  history anyone needs.
+- Three or more items of the same shape become a table. No emphasis for tone, no summary of what
+  the document just said, no closing paragraph.
+- Do not restate the task, these instructions or another document. Reference them.
+
+There is no size limit, and that is not a licence to pad: a line that carries no fact does not go
+in. If a human asks you for prose, put \`${HUMAN_MARKER}\` on the first line and write normally.
 
 End your final message with this block, and nothing after it:
 
@@ -69,6 +90,12 @@ export type ComposeInput = {
    * was resolved (DESIGN §8.2, §8.4). Binding: the agent must not reopen them.
    */
   decisionContext?: string | undefined;
+  /**
+   * Present when the deliverable that already exists fails the machine-first check (BA-08,
+   * DESIGN §20.4). It comes before the task on purpose: an agent that adds to a bloated document
+   * makes it worse, however good the addition is.
+   */
+  formatFeedback?: string | undefined;
 };
 
 const MANAGED_BEGIN = "<!-- lightsout:begin -->";
@@ -148,6 +175,7 @@ export function composePrompt(input: ComposeInput, docs: DocContext): string {
   }
 
   if (input.decisionContext?.trim()) blocks.push(input.decisionContext.trim());
+  if (input.formatFeedback?.trim()) blocks.push(input.formatFeedback.trim());
 
   const taskParts = [`# Task: ${input.taskTitle}`, input.taskSpec.trim()];
   if (input.verifyCmd) {

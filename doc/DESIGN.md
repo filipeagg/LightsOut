@@ -1620,3 +1620,100 @@ it was only supposed to describe.
 The deliverable is checked on disk when the phase closes (§16.2). An agent that reports success
 without producing its deliverable fails the phase, which is the cheapest available defence
 against a confident summary of work that did not happen (BA-04).
+
+## 20. Machine-first documents (BA-07, BA-08)
+
+### 20.1 Why
+
+A real deliverable on this machine reached **40 KB of Spanish prose** across six passes of a phase
+that had produced no practical work: a chronicle of what had been attempted, each pass restating the
+previous one, with the facts buried inside it. Every later run pays for that file in tokens, twice —
+once to write it, once to read it back — and the more it says the less it tells.
+
+The rule is therefore not a size limit. It is that these documents are **written for the machine that
+reads them next**: one fact per line, `key: value`, no prose, no history of attempts, and nothing
+that does not add a fact.
+
+### 20.2 What the rule applies to
+
+Every Markdown file **the system itself** writes or reads back:
+
+- phase deliverables (`doc/ANALYSIS.md`, `doc/PLAN.md`, `doc/AUDIT.md`, `doc/QA-REPORT.md`, …),
+- the managed project docs (`STATE.md`, `PLAN.md`, `DECISIONS.md`, `QUESTIONS.md`, `OPEN-QUESTIONS.md`),
+- documents written into a curated knowledge base (§17), because they are injected into prompts.
+
+It does **not** apply to anything a human asked for as a human document, nor to any other output
+format the user requested. A file that is deliberately prose declares it on its first line and every
+check skips it:
+
+```
+<!-- lightsout:audience=human -->
+```
+
+### 20.3 The format
+
+```
+# ANALYSIS :: curacionapi-efemis
+meta.doc: ANALYSIS
+meta.updated: 2026-07-26
+meta.phase: analyse
+meta.status: blocked
+meta.blocked_on: sources_missing
+
+## gaps
+| id | gap | needs | source | confidence |
+|---|---|---|---|---|
+| G-1 | endpoint list unknown | sources/ populated | doc/OPEN-QUESTIONS.md#q.4 | high |
+
+## facts
+f.1.claim: base efemis has 38 undocumented fields
+f.1.source: knowledge:efemis/tecnico/api.md
+f.1.kind: preference
+f.1.confidence: medium
+```
+
+`doc/examples/ANALYSIS.machine-first.md` is the canonical example: the 40 KB narrative that caused
+this rule, rewritten to 19 KB with every fact, id and source preserved and the chronicle of passes
+gone. It is also the file that was copied over the live deliverable.
+
+Rules, all of them stated in the protocol block so every agent gets them:
+
+1. Every line is a `key: value` pair, a table row, a heading or a fenced block. No paragraphs.
+2. Keys are English `snake_case`, dotted for structure. Ids are stable (`f.1`, `G-1`) so another
+   document can point at them instead of repeating them.
+3. One fact per line. Values carry no adjectives that do not change the fact, and no sentence that
+   could be a key.
+4. **Supersede in place.** The document is the current state, not a log. No "pass 6", no "as
+   established above", no reproducing what a previous version said. A counter (`meta.passes: 6`) is
+   the whole history anyone needs.
+5. Every claim carries `source:` — `code:<path>:<line>`, `schema:<object>`, `doc:<path>#<id>`,
+   `knowledge:<base>/<doc>`, `human:<doubt ref>` — and `confidence:` when it is not derived from one.
+6. Do not restate the task, the instructions, the protocol, or another document. Reference it.
+7. Three or more items with the same shape become a table.
+8. No decoration: no emphasis for tone, no summaries of what the document just said, no closing
+   paragraph.
+9. Keys are always English; values may be in the project's language (RT-08 governs this repository,
+   not the user's project).
+
+### 20.4 The check (`src/projects/deliverable.ts`)
+
+`lintDocument(text)` is a pure function returning metrics and a verdict:
+
+| metric | meaning | fails at |
+|---|---|---|
+| `structureRatio` | keyed, table, heading or fenced lines ÷ non-empty lines | `< 0.70` |
+| `proseLines` | non-keyed lines longer than 12 words | `> 5%` of non-empty lines |
+| `longestParagraph` | consecutive non-keyed, non-empty lines | `> 3` |
+| `duplicationRatio` | repeated normalised 3-line windows | `> 0.15` |
+
+`bytes` and `lines` are reported and **never** a verdict: there is no size limit. The thresholds are
+a heuristic and are named as such — the check exists to catch drift, not to grade writing.
+
+It runs in two places:
+
+- **At task close**, on the phase's deliverable: `deliverable.lint` event with the metrics and the
+  reasons, visible on the run timeline. A failing lint never fails the phase (BA-08).
+- **At prompt time**, on the deliverable that already exists: when it fails, the prompt carries a
+  short block naming the metrics and instructing the agent to compact the document and remove what
+  repeats **before** adding anything. That is what makes the rule self-correcting without a gate: the
+  agent that has to live with the file is the one told to fix it.

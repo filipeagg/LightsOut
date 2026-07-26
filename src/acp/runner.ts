@@ -3,6 +3,7 @@
  * Everything that outlives the ACP turn happens here: run row lifecycle, task status,
  * doubt creation from the sentinel, and the policy layers for the run.
  */
+import { readFile } from "node:fs/promises";
 import type { Config } from "../config.js";
 import type { Bus } from "../bus.js";
 import type { Repos } from "../db/repos/index.js";
@@ -12,6 +13,7 @@ import type { PolicyPack } from "../policy/schema.js";
 import type { ProjectRow, TaskRow } from "../db/types.js";
 import { RunSession, type HumanGate, type RunOutcome } from "./session.js";
 import { LiveRuns } from "./live.js";
+import { compactionBlock, deliverablePath, lintDocument } from "../projects/deliverable.js";
 import { DoubtService } from "../orchestrator/doubts.js";
 import type { KnowledgeLoader } from "../knowledge/loader.js";
 import { buildKnowledgeBlock } from "../knowledge/inject.js";
@@ -145,6 +147,28 @@ export class TaskRunner {
     };
   }
 
+  /**
+   * "Compact your deliverable first", when the deliverable this phase will write already fails the
+   * machine-first check (BA-08, DESIGN §20.4). Measured at prompt time rather than remembered:
+   * the file on disk is the only thing that matters, and the agent that has to live with it is the
+   * one told to fix it. Silent when there is nothing to say.
+   */
+  private async formatFeedback(
+    project: ProjectRow,
+    task: TaskRow,
+  ): Promise<string | undefined> {
+    const phase = this.repos.phases.getByTask(task.id);
+    const target = deliverablePath(this.config.workspace, project.path, phase?.deliverable);
+    if (!target || !phase?.deliverable) return undefined;
+    try {
+      const lint = lintDocument(await readFile(target, "utf8"));
+      if (lint.ok) return undefined;
+      return compactionBlock(phase.deliverable, lint);
+    } catch {
+      return undefined; // no deliverable yet, which is the normal first pass
+    }
+  }
+
   private adapterCommand(engine: "claude" | "codex"): string {
     return engine === "claude" ? this.config.adapterClaude : this.config.adapterCodex;
   }
@@ -165,6 +189,7 @@ export class TaskRunner {
 
 
     const decisionContext = this.doubts.decisionContext(task.id);
+    const formatFeedback = await this.formatFeedback(project, task);
 
     const agentPack = this.agents.pack(profile.policy);
     const context = await this.runContext(project, task, input.projectPack ?? agentPack);
@@ -205,6 +230,7 @@ export class TaskRunner {
       workspacePath: this.config.workspace,
       // On a re-run after a resolved doubt the agent must see what was settled (§8.2, §8.4).
       ...(decisionContext ? { decisionContext } : {}),
+      ...(formatFeedback ? { formatFeedback } : {}),
       ...(context.knowledgeBlock ? { knowledgeBlock: context.knowledgeBlock } : {}),
       ...(context.vaultIndex ? { vaultIndex: context.vaultIndex } : {}),
       ...(context.vaultEnv ? { vaultEnv: context.vaultEnv } : {}),

@@ -19,3 +19,14 @@ instructions: |
   audit that manufactures findings to look useful trains people to skip audits.
 
   Produce doc/AUDIT.md. You change no code.
+
+  doc/AUDIT.md is machine-first (see the protocol block): one finding per id, no prose,
+  a table when the findings share a shape. Shape:
+
+    meta.doc: AUDIT
+    meta.updated: <date>
+    meta.findings: <n>
+    | id | severity | file:line | defect | cost_if_ignored | source |
+    ok.1: <what is fine, said once, with its file>
+
+  Rewrite it in place on a later pass; never append a second audit to the first.

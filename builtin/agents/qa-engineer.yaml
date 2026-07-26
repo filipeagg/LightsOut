@@ -19,3 +19,15 @@ instructions: |
 
   Produce doc/QA-REPORT.md: what you ran, what passed, what failed, and the exact
   command to reproduce each failure.
+
+  It is machine-first (see the protocol block): no prose, one result per line. Shape:
+
+    meta.doc: QA-REPORT
+    meta.updated: <date>
+    meta.suites: <n>
+    meta.passed: <n>
+    meta.failed: <n>
+    | id | suite | case | result | repro | evidence |
+    fail.1.cause: <what the product does wrong, file:line>
+
+  Rewrite it in place on a later run; the report is the current state, not a history.

@@ -203,19 +203,25 @@ describe("managed docs", () => {
       ],
     });
 
+    // Machine-first: strict key: value, because an agent reads this on every run (BA-07).
     const block = new ProjectDocs(repos, project).buildStateBlock(chain);
-    expect(block).toContain('chain "Offline sync" 1/3');
-    expect(block).toContain("Last: one");
-    expect(block).toContain("Next: two");
-    expect(block).toContain("Last decision: incremental (human,");
-    expect(block).toContain("Open doubts: D-1");
+    expect(block).toContain("chain.title: Offline sync");
+    expect(block).toContain("chain.progress: 1/3");
+    expect(block).toContain("task.last_ok: one");
+    expect(block).toContain("task.next: two");
+    expect(block).toContain("decision.last: incremental");
+    expect(block).toContain("decision.kind: human");
+    expect(block).toContain("doubts.open: D-1");
+    // No prose anywhere in the block.
+    for (const line of block.split("\n")) expect(line).toMatch(/^[a-z_]+\.[a-z_]+: /);
   });
 
   it("names the blocking task when the chain is stuck", () => {
     const { project, chain, tasks } = seedChain();
     repos.tasks.setStatus(tasks[0]!.id, "verify_failed");
     const block = new ProjectDocs(repos, project).buildStateBlock(chain);
-    expect(block).toContain("blocked on: one (verify_failed)");
+    expect(block).toContain("chain.blocked_on: one");
+    expect(block).toContain("chain.blocked_status: verify_failed");
   });
 
   describe("on disk", () => {
@@ -242,7 +248,7 @@ describe("managed docs", () => {
       await docs.updateState(chain);
       const state = await readFile(path.join(dir, "doc", "STATE.md"), "utf8");
       expect(state).toContain("Hand-written notes stay.");
-      expect(state).toContain('chain "Offline sync" 0/3');
+      expect(state).toContain("chain.progress: 0/3");
 
       await docs.syncPlan(chain);
       let plan = await readFile(path.join(dir, "doc", "PLAN.md"), "utf8");
@@ -261,8 +267,10 @@ describe("managed docs", () => {
         rationale: "pilot",
       });
       const decisions = await readFile(path.join(dir, "doc", "DECISIONS.md"), "utf8");
-      expect(decisions).toContain("## push policy?");
-      expect(decisions).toContain("Decision: manual (human,");
+      expect(decisions).toContain("question: push policy?");
+      expect(decisions).toContain("choice: manual");
+      expect(decisions).toContain("kind: human");
+      expect(decisions).toContain("why: pilot");
 
       await docs.appendQuestion({
         ref: "D-1",
@@ -272,8 +280,9 @@ describe("managed docs", () => {
         recommendation: "A",
       });
       const questions = await readFile(path.join(dir, "doc", "QUESTIONS.md"), "utf8");
-      expect(questions).toContain("### D-1 — open");
-      expect(questions).toContain("- Option A: one way");
+      expect(questions).toContain("### D-1");
+      expect(questions).toContain("status: open");
+      expect(questions).toContain("option.A: one way");
       expect(questions).toContain("@DOUBT-OPEN D-1");
     });
   });

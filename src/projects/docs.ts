@@ -59,9 +59,12 @@ export class ProjectDocs {
     return path.join(this.project.path, "doc", name);
   }
 
-  /** Compose the machine-owned STATE.md block from the database (never from memory). */
+  /**
+   * Compose the machine-owned STATE.md block from the database (never from memory). Strict
+   * `key: value`, because an agent reads this block on every run (BA-07, DESIGN §20).
+   */
   buildStateBlock(chain: ChainRow | undefined): string {
-    const lines: string[] = [];
+    const lines: string[] = [`state.updated: ${new Date().toISOString().slice(0, 19)}Z`];
     if (chain) {
       const tasks = this.repos.tasks.listByChain(chain.id);
       const done = tasks.filter((t) => t.status === "ok").length;
@@ -73,27 +76,29 @@ export class ProjectDocs {
           t.status,
         ),
       );
-      lines.push(
-        `Phase: chain "${chain.title}" ${done}/${tasks.length} (${chain.status})` +
-          (failed ? ` · blocked on: ${failed.title} (${failed.status})` : ""),
-      );
+      lines.push(`chain.title: ${chain.title}`);
+      lines.push(`chain.status: ${chain.status}`);
+      lines.push(`chain.progress: ${done}/${tasks.length}`);
+      if (failed) {
+        lines.push(`chain.blocked_on: ${failed.title}`);
+        lines.push(`chain.blocked_status: ${failed.status}`);
+      }
       const lastOk = [...tasks].reverse().find((t) => t.status === "ok");
-      if (lastOk) lines.push(`Last: ${lastOk.title}`);
-      lines.push(current ? `Next: ${current.title}` : "Next: nothing queued");
+      if (lastOk) lines.push(`task.last_ok: ${lastOk.title}`);
+      lines.push(`task.next: ${current ? current.title : "none"}`);
     } else {
-      lines.push("Phase: no active chain");
+      lines.push("chain.status: none");
     }
 
     const decision = this.repos.decisions.latest(this.project.id);
     if (decision) {
-      const day = decision.created_at.slice(0, 10);
-      lines.push(`Last decision: ${decision.choice} (${decision.kind}, ${day})`);
+      lines.push(`decision.last: ${decision.choice}`);
+      lines.push(`decision.kind: ${decision.kind}`);
+      lines.push(`decision.at: ${decision.created_at.slice(0, 10)}`);
     }
 
     const open = this.repos.doubts.listOpen(this.project.id);
-    if (open.length > 0) {
-      lines.push(`Open doubts: ${open.map((d) => d.ref).join(", ")}`);
-    }
+    lines.push(`doubts.open: ${open.length > 0 ? open.map((d) => d.ref).join(",") : "none"}`);
     return lines.join("\n");
   }
 
@@ -134,10 +139,14 @@ export class ProjectDocs {
     const file = this.file("DECISIONS.md");
     await mkdir(path.dirname(file), { recursive: true });
     const current = (await readOrEmpty(file)) || "# DECISIONS\n";
-    const header = `## ${input.ref ? `${input.ref} — ` : ""}${input.question}`;
+    // Machine-first (BA-07): the heading is the id, the body is key: value, one fact per line.
+    const header = `## ${input.ref ?? "decision"}`;
     const body = [
-      `Decision: ${input.choice} (${input.kind}, ${new Date().toISOString().slice(0, 10)})`,
-      input.rationale ? `Why: ${input.rationale}` : undefined,
+      `question: ${input.question}`,
+      `choice: ${input.choice}`,
+      `kind: ${input.kind}`,
+      `at: ${new Date().toISOString().slice(0, 10)}`,
+      input.rationale ? `why: ${input.rationale}` : undefined,
     ]
       .filter(Boolean)
       .join("\n");
@@ -165,17 +174,18 @@ export class ProjectDocs {
     const status = input.status ?? "open";
     const marker = status === "open" ? "@DOUBT-OPEN" : "@DOUBT-CLOSED";
 
+    // Machine-first (BA-07, DESIGN §20): key: value only. The context is the agent's own
+    // sentence and is kept as one value, on one line, rather than reflowed into a paragraph.
     const block = [
       `${marker} ${input.ref}`,
-      `### ${input.ref} — ${status}`,
-      "",
-      input.context,
-      "",
-      `- Blocks: ${input.blocks}`,
-      ...input.options.map((o) => `- Option ${o.id}: ${o.text}`),
-      input.recommendation ? `- Recommendation: ${input.recommendation}` : "",
-      input.secondOpinion ? `- Second opinion: ${input.secondOpinion}` : "",
-      `- Answer: ${input.answer ?? "(pending)"}`,
+      `### ${input.ref}`,
+      `status: ${status}`,
+      `context: ${input.context.replace(/\s*\n\s*/g, " ").trim()}`,
+      `blocks: ${input.blocks.replace(/\s*\n\s*/g, " ").trim()}`,
+      ...input.options.map((o) => `option.${o.id}: ${o.text}`),
+      input.recommendation ? `recommendation: ${input.recommendation}` : "",
+      input.secondOpinion ? `second_opinion: ${input.secondOpinion}` : "",
+      `answer: ${input.answer ?? "pending"}`,
       `@DOUBT-END ${input.ref}`,
     ]
       .filter((line) => line !== "")

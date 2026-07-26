@@ -192,6 +192,8 @@ existing codebase is put together, how an API behaves, how the organisation does
 - BA-04 MUST. Each builtin declares its deliverable explicitly, and the phase that runs it fails rather than passing silently when the deliverable is absent.
 - BA-05 MUST. Each builtin declares the policy pack it needs, and the pack is what enforces it — not the instructions: `contract-prober` and `qa-engineer` need to execute code and reach the network; `software-auditor`, `prompt-architect` and `planner` are read-and-document only and must not modify source; `codebase-analyst` writes only into the knowledge base its project declared writable; `answerer` writes nothing at all.
 - BA-06 SHOULD. A builtin whose engine is unavailable or unauthenticated is listed as such and its phases refuse to launch with that reason (RT-04), rather than starting and failing mid-run.
+- BA-07 MUST. Every Markdown file the system itself writes or reads back — phase deliverables, the managed project docs, open-question logs and curated knowledge documents — is written for a machine: `key: value` lines, tables and stable ids, no human prose. One fact per line, each with its source; the current state supersedes the previous one in place instead of accumulating a chronicle of attempts. There is no size limit, and no licence to pad: what does not add a fact does not go in. Documents a human explicitly asked for as prose are exempt and say so.
+- BA-08 SHOULD. The system measures its own deliverables and says when they drift: structure, free prose and internal repetition are computed when a task closes and recorded. A deliverable that fails the check is not a failed phase — but the next run on that deliverable is told to compact it and drop what repeats before adding anything.
 
 ---
 

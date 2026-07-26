@@ -56,6 +56,8 @@ export type RunSessionDeps = {
   limits: SessionLimits;
   /** Settled decisions prepended to the prompt when a task is re-run (DESIGN §8.2). */
   decisionContext?: string;
+  /** "Compact your deliverable first" when the existing one fails the format check (BA-08). */
+  formatFeedback?: string;
   /** Curated knowledge for this run, already budgeted (KB-04). */
   knowledgeBlock?: string;
   /** The vault index for the prompt, and the variables the adapter process gets (VT-02). */
@@ -409,6 +411,7 @@ export class RunSession {
         taskSpec: task.spec,
         verifyCmd: task.verify_cmd ?? project.verify_cmd,
         decisionContext: this.deps.decisionContext,
+        formatFeedback: this.deps.formatFeedback,
         knowledgeBase: this.deps.knowledgeBlock,
         vaultIndex: this.deps.vaultIndex,
       },

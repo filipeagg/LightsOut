@@ -7,8 +7,9 @@
  * state, which is why it is answerable from Claude Desktop, from the panel and from
  * QUESTIONS.md with no code beyond a `kind`.
  */
-import { readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { deliverablePath, lintDocument } from "../projects/deliverable.js";
 import type { Config } from "../config.js";
 import type { Bus } from "../bus.js";
 import type { Repos } from "../db/repos/index.js";
@@ -230,6 +231,10 @@ export class PhaseService {
       return;
     }
 
+    // Machine-first format check (BA-08, §20.4): recorded, never a failure. The teeth are in the
+    // next prompt, which tells the agent to compact the document before adding to it.
+    await this.lintDeliverable(project, phase, taskId);
+
     const done = this.repos.phases.setStatus(phase.id, "done");
     this.emitPhase(done, "system");
 
@@ -354,6 +359,40 @@ export class PhaseService {
       }
     }
     return anyMatch(root, relative);
+  }
+
+  /**
+   * Measure the deliverable against the machine-first format (BA-07, BA-08). Only a Markdown file
+   * that is a real path is measured: a description cannot be read, and another format is not ours
+   * to judge (§20.2). Never throws and never changes the phase status.
+   */
+  private async lintDeliverable(
+    project: ProjectRow,
+    phase: ProjectPhaseRow,
+    taskId: string,
+  ): Promise<void> {
+    const target = deliverablePath(this.config.workspace, project.path, phase.deliverable);
+    if (!target) return;
+    try {
+      const text = await readFile(target, "utf8");
+      const lint = lintDocument(text);
+      const run = this.repos.runs.listByTask(taskId)[0];
+      this.repos.events.append({
+        ...(run ? { runId: run.id } : {}),
+        type: "deliverable.lint",
+        payload: {
+          phaseId: phase.id,
+          phaseRef: phase.phase_id,
+          file: phase.deliverable,
+          ok: lint.ok,
+          exempt: lint.exempt,
+          metrics: lint.metrics,
+          reasons: lint.reasons,
+        },
+      });
+    } catch {
+      // Unreadable or not a file: the presence check above already had its say.
+    }
   }
 
   private emitPhase(phase: ProjectPhaseRow, actor: PhaseActor, reason?: string): void {

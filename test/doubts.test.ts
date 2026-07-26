@@ -155,8 +155,8 @@ describe("raising a doubt", () => {
 
     const questions = await readFile(path.join(dir, "doc", "QUESTIONS.md"), "utf8");
     expect(questions).toContain("@DOUBT-OPEN D-1");
-    expect(questions).toContain("- Option A: incremental by timestamp");
-    expect(questions).toContain("- Answer: (pending)");
+    expect(questions).toContain("option.A: incremental by timestamp");
+    expect(questions).toContain("answer: pending");
   });
 
   it("opens the doubt when the advisor agrees but is not confident enough", async () => {
@@ -369,7 +369,8 @@ describe("answering a doubt", () => {
     expect(questions.match(/### D-1/g)).toHaveLength(1);
 
     const decisions = await readFile(path.join(dir, "doc", "DECISIONS.md"), "utf8");
-    expect(decisions).toContain("D-1 —");
+    expect(decisions).toContain("## D-1");
+    expect(decisions).toContain("choice: B: full dump");
   });
 
   it("refuses to answer twice and reports an unknown ref", async () => {

@@ -13,11 +13,16 @@ phases:
     deliverable: doc/ANALYSIS.md
     instructions: |
       Read the system named in the task spec: code first, then schema, then
-      configuration. Produce doc/ANALYSIS.md describing what it does, how it is
-      structured, what its invariants are and where its complexity actually lives.
-      Label every statement by what makes it true — a constraint, an invariant in the
-      code, a convention, or a historical accident. Relaunch this phase per subsystem
-      when one pass is not enough.
+      configuration. Produce doc/ANALYSIS.md: what it does, how it is structured, its
+      invariants, and where its complexity actually lives. Label every statement by what
+      makes it true — constraint, invariant, preference or accident — and give it a
+      source. Relaunch this phase per subsystem when one pass is not enough.
+
+      Machine-first (protocol block, DESIGN §20): key: value and tables, one fact per
+      line, no prose. A relaunch rewrites the document in place: raise meta.passes,
+      supersede what changed, and never append a second account of the same subject. If
+      you are blocked, meta.status and meta.blocked_on say so in two lines and you stop —
+      a report about being blocked is not a deliverable.
   - id: interrogate
     title: Ask what the code cannot answer
     agent: codebase-analyst
@@ -26,9 +31,10 @@ phases:
     instructions: |
       List in doc/OPEN-QUESTIONS.md everything you could not determine from the source:
       business rules, intent, why a workaround exists, which behaviours are load-bearing.
-      For each question you actually need answered in order to write the base, raise one
-      functional doubt with concrete options. Do not put the questions in the gate: the
-      gate only means a person has read the deliverable.
+      One question per id, machine-first: q.1.question, q.1.blocks, q.1.who_can_answer,
+      q.1.status, q.1.answer. For each question you actually need answered in order to
+      write the base, raise one functional doubt with concrete options. Do not put the
+      questions in the gate: the gate only means a person has read the deliverable.
   - id: write-base
     title: Write the knowledge base
     agent: codebase-analyst
@@ -38,4 +44,5 @@ phases:
       the manifest (id, name, kind, description, tags, owner, updated), index.md as a
       table of contents with one line per document saying what is in it, and one
       Markdown document per coherent subject. Fold in the answers you received. Write
-      for an agent that will read the index and then choose what to open.
+      for an agent that will read the index and then choose what to open: machine-first
+      throughout, one fact per line with its source, no prose anywhere.

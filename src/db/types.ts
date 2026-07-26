@@ -51,6 +51,8 @@ export type EventType =
   | "knowledge.attached"
   | "knowledge.detached"
   | "vault.read"
+  /** Machine-first document check (BA-08, DESIGN §20.4); recorded, never a failure. */
+  | "deliverable.lint"
   /** End-of-run hygiene (PE-08, DESIGN §5.2b). */
   | "scratch.swept"
   | "scratch.sweep_failed"

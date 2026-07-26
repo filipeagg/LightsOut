@@ -129,10 +129,18 @@ export class PhaseService {
     if (!profile) throw new Error(`unknown agent profile: ${agentId}`);
   }
 
+  /**
+   * `input` is what the person is actually asking for on this run of the phase. The template
+   * instructions say things like "the user's raw request is in the task spec", and without a
+   * way to put it there the first agent has nothing to work from and interrogates the empty
+   * set. It is per launch rather than per project because a repeatable phase is launched again
+   * for the next question, the next integration, the next piece of the plan.
+   */
   async launchPhase(
     actor: PhaseActor,
     projectId: string,
     phaseRef: string,
+    input?: string,
   ): Promise<LaunchPhaseResult> {
     const project = this.repos.projects.getOrThrow(projectId);
     const phase = this.resolve(projectId, phaseRef);
@@ -152,7 +160,7 @@ export class PhaseService {
       projectId: project.id,
       chainId: chain,
       title: phase.title,
-      spec: this.buildSpec(phase),
+      spec: this.buildSpec(phase, input),
       agentId: phase.agent_id,
       ...(phase.verify_cmd !== null ? { verifyCmd: phase.verify_cmd } : {}),
     });
@@ -178,9 +186,12 @@ export class PhaseService {
     return this.repos.chains.create({ projectId: project.id, title: project.name }).id;
   }
 
-  /** The task spec: the frozen instructions plus what the phase must leave behind (BA-04). */
-  buildSpec(phase: ProjectPhaseRow): string {
+  /** The task spec: the frozen instructions, the request, and what to leave behind (BA-04). */
+  buildSpec(phase: ProjectPhaseRow, input?: string): string {
     const parts = [phase.instructions.trim()];
+    if (input?.trim()) {
+      parts.push(`## Request\n\n${input.trim()}`);
+    }
     if (phase.deliverable) {
       parts.push(
         `Deliverable: ${phase.deliverable}. The phase is not complete until it exists; ` +

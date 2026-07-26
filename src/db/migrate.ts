@@ -15,6 +15,13 @@ export type Migration = {
   name: string;
   /** SQL to apply, or a function for migrations that need logic. */
   up: string | ((db: Db) => void);
+  /**
+   * Rebuild a table the way SQLite's own ALTER TABLE procedure requires: `foreign_keys` off
+   * around the whole transaction, then `foreign_key_check` before it is trusted. The pragma
+   * cannot be set from inside a transaction, so it has to be declared here rather than
+   * written into the migration's SQL.
+   */
+  foreignKeys?: "off";
 };
 
 /** Wrap the DDL file so version 1 is an ordinary migration like any other. */
@@ -45,13 +52,12 @@ function readSchemaSql(): string {
  * (TP-05/06, KB-03, VT-05), plus projects.template_id (PM-07) and the 'gate'
  * doubt kind (TP-01, §16.2).
  *
- * The doubts CHECK constraint can only grow by rebuilding the table. Enforcement
- * of decisions.doubt_id is deferred to commit, by which point the rebuilt table
- * carries the same ids under the same name.
+ * The doubts CHECK constraint can only grow by rebuilding the table, and a
+ * rebuild means dropping a table that `decisions` points at. That is what
+ * `foreignKeys: "off"` below is for: SQLite's documented rebuild procedure,
+ * with a `foreign_key_check` afterwards so nothing is taken on trust.
  */
 const PHASE9_SQL = `
-PRAGMA defer_foreign_keys = ON;
-
 ALTER TABLE projects ADD COLUMN template_id TEXT;
 
 CREATE TABLE doubts_v2 (
@@ -121,7 +127,12 @@ CREATE INDEX ix_vault_audit_run ON vault_audit(run_id, id);
 
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial schema", up: applyInitialSchema },
-  { version: 2, name: "phases, knowledge, vault audit", up: PHASE9_SQL },
+  {
+    version: 2,
+    name: "phases, knowledge, vault audit",
+    up: PHASE9_SQL,
+    foreignKeys: "off",
+  },
 ];
 
 function currentVersion(db: Db): number {
@@ -157,7 +168,25 @@ export function migrate(db: Db): MigrateResult {
         nowIso(),
       );
     });
-    apply();
+
+    if (migration.foreignKeys === "off") {
+      // The pragma is a no-op inside a transaction, so it goes around it (SQLite's own
+      // ALTER TABLE recipe). The check afterwards is what makes turning it off safe.
+      db.pragma("foreign_keys = OFF");
+      try {
+        apply();
+        const violations = db.pragma("foreign_key_check") as unknown[];
+        if (violations.length > 0) {
+          throw new Error(
+            `migration ${migration.version} left ${violations.length} foreign key violation(s)`,
+          );
+        }
+      } finally {
+        db.pragma("foreign_keys = ON");
+      }
+    } else {
+      apply();
+    }
     applied.push(`${migration.version}:${migration.name}`);
   }
 

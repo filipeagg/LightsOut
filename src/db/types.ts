@@ -33,6 +33,8 @@ export type EventType =
   | "task.state"
   | "chain.state"
   | "agent.message"
+  /** What the agent is working out, throttled like a message (OB-05). */
+  | "agent.thought"
   | "tool.call"
   | "file.edit"
   | "perm.request"

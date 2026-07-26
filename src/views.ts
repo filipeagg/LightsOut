@@ -13,6 +13,7 @@ import type { Repos } from "./db/repos/index.js";
 import type { ChainRow, DoubtRow, ProjectRow, RunRow } from "./db/types.js";
 import type { EngineHealth } from "./health.js";
 import { hostPathFor } from "./projects/docs-index.js";
+import { narrate, type NarratedLine } from "./narrate.js";
 
 export type ViewDeps = { config: Config; repos: Repos };
 
@@ -92,8 +93,12 @@ export function chainView(deps: ViewDeps, chain: ChainRow) {
  * The most recent run of a project that is no longer going, with the reason it stopped. Kept
  * small: the panel needs enough to say what happened and a run id to pull the timeline from.
  */
+function lastRunRow(deps: ViewDeps, projectId: string) {
+  return deps.repos.runs.history({ projectId, limit: 1 })[0];
+}
+
 function lastFinishedRun(deps: ViewDeps, projectId: string) {
-  const run = deps.repos.runs.history({ projectId, limit: 1 })[0];
+  const run = lastRunRow(deps, projectId);
   if (!run) return null;
   const task = deps.repos.tasks.get(run.task_id);
   return {
@@ -155,6 +160,10 @@ export function projectStatusView(deps: ViewDeps, project: ProjectRow) {
     // that the panel had no way to reach, so a container restart and a failed verify gate looked
     // exactly the same to the user.
     lastRun: run ? null : lastFinishedRun(deps, project.id),
+    // The last steps in plain English (OB-05): what it is doing right now, or what it last did.
+    // Here rather than behind another call, because "what is happening" is the question this
+    // view exists to answer.
+    recent: recentActivity(deps, project.id, 10),
     doubts: open.map((d) => doubtView(deps, d)),
     state: {
       phase: chain
@@ -166,6 +175,20 @@ export function projectStatusView(deps: ViewDeps, project: ProjectRow) {
       next: next ? next.title : null,
     },
   };
+}
+
+/**
+ * The last steps of the run in flight, or of the last one that ended, as plain lines (OB-05).
+ * Empty when the project has never run: an empty list is an answer, `null` would be a puzzle.
+ */
+export function recentActivity(deps: ViewDeps, projectId: string, limit = 10): NarratedLine[] {
+  const { repos } = deps;
+  const active = activeRunFor(deps, projectId);
+  const run = active ?? lastRunRow(deps, projectId);
+  if (!run) return [];
+  // Read more than we show: the narration drops the events that say nothing to a person and folds
+  // the repeats, so ten raw rows are rarely ten lines.
+  return narrate(repos.events.listByRun(run.id).slice(-120), limit);
 }
 
 /** One row of the project list (WP-10). */

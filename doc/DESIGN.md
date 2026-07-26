@@ -1296,6 +1296,35 @@ Forms post to §12.1b and re-fetch; nothing is optimistic, because the SSE strea
 Destructive buttons open a confirm dialog naming the object (WP-11). The HTML mockup already
 produced for this project is the visual reference for `#/` and `#/p/<id>`.
 
+### 12.4 A run told in words (OB-06, `src/narrate.ts`)
+
+The timeline was twenty rows of `tool.call {"kind":"execute","title":"Terminal"}`. That says
+something happened and nothing about what, and it was the same for the person watching the panel and
+for a client reading MCP.
+
+`describeEvent(type, payload)` turns one event into one line, and `narrate(events, limit)` folds the
+runs of the same verb:
+
+```
+18:04  work      runs: find src -name '*.py' | wc -l
+18:05  work      reads src/api/views.py (+7 more)
+18:06  work      thinking: which base classes govern every endpoint
+18:06  decision  judge: allowed — read-only count within the project
+18:07  result    wrote doc/ANALYSIS.md
+18:07  decision  run interrupted: container restart
+```
+
+Each line carries a `tone` — `work`, `decision`, `result`, `problem` — which is what the panel
+colours by, and the count of events folded into it. Two changes made this possible at the source: a
+`tool.call` now records the command it is about to run (`title` was often just "Terminal"), and the
+agent's thinking is recorded as `agent.thought`, throttled exactly like a message.
+
+**One implementation, three consumers.** `GET /api/runs/:id/narrative` serves the lines to the panel
+— which re-reads them at most once a second rather than reimplementing the rules in browser
+JavaScript — `project_status.recent` carries the last ten, and `status_card` prints them. The panel
+keeps a "Raw events" toggle: when the narration itself is what looks wrong, the rows are still
+there.
+
 ## 13. Build order and verification
 
 | Phase | Delivers | Verifies requirements | Done when |

@@ -130,6 +130,7 @@ Priority levels: MUST (pilot fails without it), SHOULD (build if cheap, else bac
 - OB-03 MUST. Status awareness happens through the web panel (no push channel in the pilot). The panel surfaces attention items prominently: open doubts with age, failure states, expired auth.
 - OB-04 SHOULD. Structured JSON logs to stdout (`docker logs`), tagged with run and task ids, for container-level diagnostics only (startup, crashes, DB unavailable). Never a data source for the panel or history.
 - OB-05 SHOULD. Basic metrics (runs by state, cost per project per day) available through `get_history`, computed from SQLite.
+- OB-06 MUST. A run is legible to a person without reading JSON: every event is told as one plain line — `reads src/api/views.py`, `runs: find … | wc -l`, `thinking: which base classes govern this`, `judge: allowed — read-only count` — and consecutive repetitions of the same verb are folded into one line that says how many. There is **one** implementation, shared by the panel and by MCP, so the two never describe the same run differently, and the raw events stay one click away. The last ten lines travel with `project_status` and `status_card`, so a client can show what is happening without a second call.
 
 ## 12. SU — Setup and distribution
 

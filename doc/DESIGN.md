@@ -729,6 +729,8 @@ Uniform envelope: success `{ok:true, …}`; failure `{ok:false, error:{code,mess
 |---|---|---|---|
 | `health` | `{}` | `{db, engines:{claude:{installed,auth},codex:{…}}, network, activeRuns, version}` | RT-06 |
 | `list_projects` | `{archived?:bool}` | `{projects:[{id,name,status,activeRun?,openDoubts,lastActivity}]}` | |
+| `archive_project` | `{projectId, archived?:bool}` | `{project:{id,archived}}` | reversible; hides it and refuses new launches (PM-08) |
+| `delete_project` | `{projectId, confirm, keepFiles?:bool}` | `{deleted:true, filesRemoved:bool}` | irreversible; `confirm` must equal `projectId`, refused while a run is active (PM-08) |
 | `create_project` | `{name, template?, knowledge?:[baseId], writableKnowledge?:baseId, remote?, verify?, push?}` | `{project:{id,path}, phases:[{phaseId,title,agentId,gate}]}` | scaffolds and materialises the phases (PM-01, TP-05); `writableKnowledge` is required by the curation template and refused by every other (KB-05) |
 | `project_status` | `{projectId}` | `{project:{…,templateId,knowledge:[…]}, phases:[{phaseId,title,agentId,status,deliverable,gate,startedAt,endedAt}], chain?:{id,title,tasks:[…]}, run?:{id,status,engine,model,elapsedS,inactivityS,lastAction,timeoutS}, doubts:[…], state:{phase,lastDecision,next}}` | one call = full picture including what is done, running and pending (MC-06, TP-06) |
 | `list_agents` | `{}` | `{agents:[{id,name,engine,model,enabled,source,valid,error?}]}` | AP-02, AP-07, BA-01 |
@@ -771,7 +773,8 @@ Adapter auth errors are recognized by the ACP error surface → run `error` with
 The panel and the MCP tools are two skins over the same functions. `src/control/actions.ts`
 exports every operation that changes anything — `createProject`, `launchPhase`, `skipPhase`,
 `abortRun`, `answerDoubt`, `writeAgent`, `writeTemplate`, `attachKnowledge`, `writeVaultEntry`,
-`writeDoc` — each taking an explicit `actor: 'mcp' | 'panel'` as its first argument. An MCP tool
+`writeDoc`, `archiveProject`, `deleteProject` — each taking an explicit `actor: 'mcp' | 'panel'`
+as its first argument. An MCP tool
 module and an HTTP route handler are both a dozen lines: validate input with zod, call the
 action, shape the response.
 
@@ -846,7 +849,19 @@ POST   /api/phases/:phaseId/skip     → skip an optional phase
 POST   /api/runs/:id/abort           → abort the run (OR-06)
 POST   /api/doubts/:id/answer        → answer a doubt (DO-04)
 POST   /api/projects/:id/doc         → write a file under the project's doc/ (MC-04 rules apply)
+POST   /api/projects/:id/archived    → archive or unarchive the project (PM-08)
+DELETE /api/projects/:id             → delete it for good; body {confirm:<the project id>, keepFiles?:bool} (PM-08, WP-11)
 ```
+
+Retiring a project (PM-08) is two operations, not one. `archiveProject` flips `projects.archived`
+and refuses new launches; nothing is removed, and unarchiving is the same call with `false`.
+`deleteProject` is the irreversible one: it refuses while a run is active, deletes the project row
+(every operational table cascades from it: chains, tasks, runs, events, doubts, decisions,
+permission audit, phases, knowledge attachments), then removes the project directory under
+`<workspace>/projects/` unless `keepFiles` is set — a path it recomputes from the workspace root
+and the project id rather than trusting `projects.path`, so a doctored row cannot make it delete
+somewhere else. The `project.deleted` event is written before the row goes, so the audit trail
+survives what it describes.
 
 Refusals are the same as through MCP, because they live in the actions: launching a phase on a
 locked project queues it (OR-08), launching a disabled agent is rejected with the reason

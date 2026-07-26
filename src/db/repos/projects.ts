@@ -1,5 +1,5 @@
 /** Projects repository (PM-01, DB-01). */
-import type { Db } from "../db.js";
+import { transaction, type Db } from "../db.js";
 import type { ProjectRow, PushPolicy } from "../types.js";
 import { nowIso } from "../../ids.js";
 
@@ -86,5 +86,35 @@ export class ProjectsRepo {
     values.push(id);
     this.db.prepare(`UPDATE projects SET ${sets.join(", ")} WHERE id = ?`).run(...values);
     return this.getOrThrow(id);
+  }
+
+  /**
+   * Delete the project and everything hanging off it (PM-08).
+   *
+   * The schema declares the references but no `ON DELETE CASCADE`, and `foreign_keys` is on, so
+   * the order below is the cascade written out by hand: children before parents, and within a
+   * generation the table that points sideways first (`decisions` before `doubts`,
+   * `project_phases` before `tasks`). One transaction, so a failure halfway leaves the project
+   * whole rather than half-shredded. System events — the ones with no `run_id` — are kept: they
+   * are the record that this project existed and was removed.
+   */
+  remove(id: string): void {
+    const runs = "SELECT id FROM runs WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)";
+    const statements = [
+      `DELETE FROM permission_audit WHERE run_id IN (${runs})`,
+      `DELETE FROM vault_audit WHERE run_id IN (${runs})`,
+      `DELETE FROM events WHERE run_id IN (${runs})`,
+      "DELETE FROM decisions WHERE project_id = ?",
+      "DELETE FROM doubts WHERE project_id = ?",
+      "DELETE FROM project_phases WHERE project_id = ?",
+      "DELETE FROM project_knowledge WHERE project_id = ?",
+      `DELETE FROM runs WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`,
+      "DELETE FROM tasks WHERE project_id = ?",
+      "DELETE FROM chains WHERE project_id = ?",
+      "DELETE FROM projects WHERE id = ?",
+    ];
+    transaction(this.db, () => {
+      for (const sql of statements) this.db.prepare(sql).run(id);
+    });
   }
 }

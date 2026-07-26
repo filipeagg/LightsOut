@@ -6,7 +6,7 @@
  * one is the only place its rule lives — a route handler or a tool module that reaches into a
  * repo directly is a review failure, because that is exactly how two surfaces drift apart.
  */
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Config } from "../config.js";
 import type { Repos } from "../db/repos/index.js";
@@ -94,12 +94,75 @@ export class Actions {
     return result;
   }
 
+  /**
+   * Archive or unarchive (PM-08). The reversible half of retiring a project: it drops out of the
+   * lists and refuses new launches, but every row and every file stays where it was.
+   */
+  archiveProject(actor: Actor, projectId: string, archived = true): ProjectRow {
+    const project = this.project(projectId);
+    if (archived && activeRunFor({ config: this.deps.config, repos: this.deps.repos }, project.id)) {
+      throw new Error(`a run is active on ${project.id}; try again when it finishes`);
+    }
+    const row = this.deps.repos.projects.update(project.id, { archived });
+    this.deps.repos.events.append({
+      type: archived ? "project.archived" : "project.unarchived",
+      payload: { projectId: project.id, actor },
+    });
+    return row;
+  }
+
+  /**
+   * Delete a project for good (PM-08). The irreversible half, so it asks to be told what it is
+   * about to destroy: `confirm` must be the project id, exactly as WP-11 requires of a
+   * destructive action. Files go too unless `keepFiles` is set, and the directory is recomputed
+   * from the workspace root rather than read out of `projects.path`, so a doctored row cannot
+   * point `rm` somewhere else. The event is written before the rows go: the audit trail has to
+   * outlive what it describes.
+   */
+  async deleteProject(
+    actor: Actor,
+    projectId: string,
+    opts: { confirm: string; keepFiles?: boolean },
+  ): Promise<{ deleted: true; filesRemoved: boolean }> {
+    const project = this.project(projectId);
+    if (opts.confirm !== project.id) {
+      throw new Error(`confirm must be the project id ("${project.id}") to delete it`);
+    }
+    if (activeRunFor({ config: this.deps.config, repos: this.deps.repos }, project.id)) {
+      throw new Error(`a run is active on ${project.id}; try again when it finishes`);
+    }
+
+    const dir = path.join(this.deps.config.workspace, "projects", project.id);
+    this.deps.repos.events.append({
+      type: "project.deleted",
+      payload: { projectId: project.id, name: project.name, dir, keepFiles: !!opts.keepFiles, actor },
+    });
+    this.deps.repos.projects.remove(project.id);
+
+    let filesRemoved = false;
+    if (!opts.keepFiles) {
+      await rm(dir, { recursive: true, force: true });
+      filesRemoved = true;
+    }
+    return { deleted: true, filesRemoved };
+  }
+
+  /** An archived project is retired, not paused: it takes no new work until it comes back. */
+  private requireNotArchived(projectId: string): ProjectRow {
+    const project = this.project(projectId);
+    if (project.archived === 1) {
+      throw new Error(`${project.id} is archived; unarchive it before launching anything`);
+    }
+    return project;
+  }
+
   async launchPhase(
     actor: Actor,
     projectId: string,
     phase: string,
     input?: string,
   ): Promise<LaunchPhaseResult> {
+    this.requireNotArchived(projectId);
     return this.need(this.deps.phases, "phases").launchPhase(actor, projectId, phase, input);
   }
 
@@ -125,6 +188,7 @@ export class Actions {
       gate?: "auto" | "human";
     },
   ): ProjectPhaseRow {
+    this.requireNotArchived(projectId);
     return this.need(this.deps.phases, "phases").addAdhoc(actor, projectId, input);
   }
 
@@ -140,7 +204,7 @@ export class Actions {
       chainId?: string;
     },
   ): { taskId: string; chainId: string; started: boolean; queued: boolean } {
-    this.project(input.projectId);
+    this.requireNotArchived(input.projectId);
     this.requireLaunchable(input.agentId);
     const launch = this.deps.orchestrator.launchTask(input);
     this.deps.repos.events.append({

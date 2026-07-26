@@ -10,6 +10,7 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { dump as dumpYaml } from "js-yaml";
 import { agentProfileSchema, type AgentProfile } from "./schema.js";
+import { isKnownModel, modelRejection } from "./models.js";
 import { AgentsLoader } from "./loader.js";
 
 export type AgentPatch = Partial<Omit<AgentProfile, "id">> & { id?: string };
@@ -49,6 +50,15 @@ export class AgentWriter {
       ...stripUndefined(patch),
       id,
     });
+
+    // AP-08: an unknown model is a rejection with a reason, not a failure at launch. Only
+    // checked when the patch touches the engine or the model, so enabling a profile that
+    // predates an entry in the table still works.
+    if ((patch.model !== undefined || patch.engine !== undefined) && merged.model) {
+      if (!isKnownModel(merged.engine, merged.model)) {
+        throw new Error(modelRejection(merged.engine, merged.model));
+      }
+    }
 
     const { id: _id, ...body } = merged;
     await writeFile(this.file(id), dumpYaml(body, { lineWidth: 100 }), "utf8");

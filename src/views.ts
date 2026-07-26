@@ -106,6 +106,7 @@ export function projectStatusView(deps: ViewDeps, project: ProjectRow) {
       pushPolicy: project.push_policy,
       verifyCmd: project.verify_cmd,
       remote: project.repo_remote,
+      archived: project.archived === 1,
     },
     chain: chain ? chainView(deps, chain) : null,
     run: run ? runView(deps, run, project) : null,
@@ -151,6 +152,7 @@ export function projectListItem(deps: ViewDeps, project: ProjectRow) {
     activeRun: run ? { id: run.id, status: run.status } : null,
     openDoubts: repos.doubts.listOpen(project.id).length,
     lastActivity: history[0]?.started_at ?? project.created_at,
+    archived: project.archived === 1,
   };
 }
 
@@ -159,9 +161,15 @@ export function projectListItem(deps: ViewDeps, project: ProjectRow) {
  * The attention items are derived here so the panel and any other surface agree on what
  * "needs attention" means (OB-03).
  */
-export function overviewView(deps: ViewDeps, engines: EngineHealth[]) {
+export function overviewView(
+  deps: ViewDeps,
+  engines: EngineHealth[],
+  opts: { includeArchived?: boolean } = {},
+) {
   const { repos } = deps;
-  const projects = repos.projects.list({ includeArchived: false });
+  // Archived projects are off the list by default (PM-08) but must stay reachable, or
+  // unarchiving from the panel would mean guessing a URL.
+  const projects = repos.projects.list({ includeArchived: opts.includeArchived ?? false });
   const items = projects.map((p) => projectListItem(deps, p));
   const doubts = repos.doubts.list({ status: "open" }).map((d) => doubtView(deps, d));
   const activeRuns = repos.runs

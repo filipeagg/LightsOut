@@ -6,8 +6,10 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { SENTINEL_CLOSE, SENTINEL_OPEN } from "./result.js";
+import { SCRATCH_REL } from "../policy/classify.js";
 
-export const PROTOCOL_VERSION = 1;
+/** 2: the tooling licence and the scratch directory (PE-07, PE-08). */
+export const PROTOCOL_VERSION = 2;
 
 /** Constant, versioned protocol block (DESIGN §6.2 block 2). */
 export const PROTOCOL_BLOCK = `# LightsOut protocol v${PROTOCOL_VERSION}
@@ -17,6 +19,14 @@ You are running unattended inside LightsOut. No human is watching this turn.
 Permissions are mediated by policy, not by a person. A denial is not a failure and not a
 reason to retry the same action: adapt, or finish by raising a doubt that explains what you
 needed. Never work outside the project directory.
+
+You may build and run your own tooling without asking: write a helper script and run it with
+python3, node or bash. Two conditions, both checked, not trusted: the script must live inside
+the project, and its code is read before it runs — anything that reaches the network, touches
+credentials, installs dependencies or deletes files is judged as if you had typed that command
+yourself. Put temporary files in \`${SCRATCH_REL}\`; it is emptied when this run ends, and it is
+the one place you may write regardless of any other restriction on where you can write.
+Anything you leave elsewhere is committed and reported.
 
 End your final message with this block, and nothing after it:
 

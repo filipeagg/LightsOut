@@ -5,6 +5,14 @@ export const ACTION_CLASSES = [
   "project_read",
   "project_write",
   "exec_check",
+  /**
+   * Running code the agent itself supplied: an interpreter over a script file, or inline code
+   * (PE-07, DESIGN §7.1). Separate from `exec_check` because `npm test` runs behaviour the project
+   * already owns, while a fresh script is whatever the agent wrote a minute ago — a pack must be
+   * able to allow one and refuse the other. The class is only reached when the body of the code has
+   * been read and carries none of the dangerous families.
+   */
+  "script_exec",
   "git_local",
   "git_push",
   "deps_install",

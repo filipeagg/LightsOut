@@ -148,11 +148,14 @@ export class TaskRunner {
     const profile = this.agents.profileOrThrow(task.agent_id);
     const instructions = this.agents.instructionsFor(profile);
 
-    const policy = new PolicyEngine({
-      project: input.projectPack,
-      agent: this.agents.pack(profile.policy),
-      default: this.agents.pack("default"),
-    });
+    const policy = new PolicyEngine(
+      {
+        project: input.projectPack,
+        agent: this.agents.pack(profile.policy),
+        default: this.agents.pack("default"),
+      },
+      { scriptScanBytes: this.config.scriptScanBytes },
+    );
 
 
     const decisionContext = this.doubts.decisionContext(task.id);

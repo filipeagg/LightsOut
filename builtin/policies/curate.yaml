@@ -8,6 +8,7 @@ rules:
   - { class: project_write, verdict: allow, reason: "confined to doc/; the base itself is knowledge_write" }
   - { class: knowledge_write, verdict: allow, reason: "this project owns one writable base (KB-05)" }
   - { class: exec_check, verdict: allow }
+  - { class: script_exec, verdict: allow, reason: "own tooling; write_scopes still apply (PE-07)" }
   - { class: git_local, verdict: deny }
   - { class: deps_install, verdict: deny }
   - { class: delete, verdict: require_human }

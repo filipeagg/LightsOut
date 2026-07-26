@@ -24,6 +24,11 @@ const schema = z.object({
   advisorConfidence: z.coerce.number().min(0).max(1).default(0.7),
   /** How much curated knowledge one prompt may carry (KB-06, DESIGN §17.2). */
   knowledgeBudgetChars: intFromEnv(120000, 0),
+  /**
+   * How many bytes of a script body are read to classify it (PE-07, DESIGN §7.1). A script
+   * larger than this is never `script_exec`: it reaches a human instead.
+   */
+  scriptScanBytes: intFromEnv(65536, 1024),
   eventRetentionDays: intFromEnv(90),
   adapterClaude: z.string().min(1).default("claude-agent-acp"),
   adapterCodex: z.string().min(1).default("codex-acp"),
@@ -48,6 +53,7 @@ function raw(env: NodeJS.ProcessEnv) {
     permissionWaitHours: env.LO_PERMISSION_WAIT_HOURS,
     advisorConfidence: env.LO_ADVISOR_CONFIDENCE,
     knowledgeBudgetChars: env.LO_KNOWLEDGE_BUDGET_CHARS,
+    scriptScanBytes: env.LO_SCRIPT_SCAN_BYTES,
     eventRetentionDays: env.LO_EVENT_RETENTION_DAYS,
     adapterClaude: env.LO_ADAPTER_CLAUDE,
     adapterCodex: env.LO_ADAPTER_CODEX,

@@ -66,6 +66,12 @@ export class ProjectGit {
     return { sha: result.commit || (await this.head()) || "", created: true };
   }
 
+  /** Untracked files, project-relative. Used by the end-of-run hygiene report (PE-08). */
+  async untracked(): Promise<string[]> {
+    const status = await this.git.status();
+    return status.not_added;
+  }
+
   /** Work-in-progress commit during a run (DESIGN §9.3). */
   wip(taskId: string): Promise<CommitResult> {
     return this.commitAll(`wip(lightsout): ${taskId} ${new Date().toISOString()}`);

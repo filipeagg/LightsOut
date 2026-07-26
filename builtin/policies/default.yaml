@@ -6,6 +6,7 @@ rules:
   - { class: project_read, verdict: allow }
   - { class: project_write, verdict: allow }
   - { class: exec_check, verdict: allow }
+  - { class: script_exec, verdict: allow, reason: "own tooling; the body was inspected (PE-07)" }
   - { class: git_local, verdict: allow }
   - { class: deps_install, verdict: require_human, reason: "dependencies change the build" }
   - { class: delete, verdict: require_human, reason: "deletions are hard to undo" }

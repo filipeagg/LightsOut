@@ -51,6 +51,10 @@ export type EventType =
   | "knowledge.attached"
   | "knowledge.detached"
   | "vault.read"
+  /** End-of-run hygiene (PE-08, DESIGN §5.2b). */
+  | "scratch.swept"
+  | "scratch.sweep_failed"
+  | "run.untracked"
   | "system";
 
 export type ProjectRow = {

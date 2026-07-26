@@ -162,19 +162,38 @@ describe("a linked base", () => {
 });
 
 describe("listWorkspaceFolders (KB-08)", () => {
-  it("offers the user's folders two deep and hides LightsOut's own", async () => {
+  it("walks the whole tree in render order and hides LightsOut's own folders", async () => {
+    await write("docs/erpagro/2026/q1.md", "q1");
     await write("docs/erpagro/a.md", "a");
+    await write("docs/erpagro/notes.txt", "n");
+    await write("docs/erpagro/diagram.png", "not text");
     await write("docs/margaret/b.md", "b");
     await write("notes/c.md", "c");
     await write("knowledge/base/knowledge.yaml", "name: x\nkind: other\n");
     await write("projects/p1/README.md", "p");
     await write(".hidden/x.md", "x");
+    await write("docs/node_modules/pkg/index.md", "no");
 
-    expect(await listWorkspaceFolders(workspace)).toEqual([
+    const folders = await listWorkspaceFolders(workspace);
+    // Depth first, alphabetical, so the list reads as the tree renders — no depth limit.
+    expect(folders.map((f) => f.path)).toEqual([
       "docs",
       "docs/erpagro",
+      "docs/erpagro/2026",
       "docs/margaret",
       "notes",
     ]);
+
+    const erpagro = folders.find((f) => f.path === "docs/erpagro")!;
+    expect(erpagro.name).toBe("erpagro");
+    expect(erpagro.depth).toBe(1);
+    // Only text files it holds directly: what linking here would actually give an agent.
+    expect(erpagro.documents).toBe(2);
+    expect(erpagro.hasChildren).toBe(true);
+
+    const docs = folders.find((f) => f.path === "docs")!;
+    expect(docs.depth).toBe(0);
+    expect(docs.documents).toBe(0);
+    expect(folders.find((f) => f.path === "notes")!.hasChildren).toBe(false);
   });
 });

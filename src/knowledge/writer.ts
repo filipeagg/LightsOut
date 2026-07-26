@@ -23,33 +23,74 @@ export type ManifestPatch = Partial<Omit<KnowledgeManifest, "id" | "source">> & 
   source?: string | null;
 };
 
+/** One folder in the workspace tree a base could be linked to (KB-08). */
+export type WorkspaceFolder = {
+  /** Path relative to the workspace root, forward slashes. */
+  path: string;
+  /** Just the folder name, so the panel can indent instead of repeating the parent. */
+  name: string;
+  /** How deep below the root it sits; the root's children are 0. */
+  depth: number;
+  /** Text documents directly inside it — what linking here would actually give an agent. */
+  documents: number;
+  /** Whether it has folders of its own, so the tree knows what can be expanded. */
+  hasChildren: boolean;
+};
+
 /**
- * Folders inside the workspace a base could be linked to (KB-08), two levels deep so
- * `docs/erpagro` is offered as well as `docs`. `knowledge/`, `projects/`, `agents/`, `templates/`
- * and anything hidden are left out: they belong to LightsOut, not to the user's documents.
+ * The whole workspace tree, depth first, in the order a tree renders (KB-08).
+ *
+ * There is no folder picker to offer instead: a browser cannot hand a server a path, and the
+ * container's filesystem is the workspace and nothing else (RT-02) — a folder elsewhere on the
+ * host is not forbidden, it is absent. So this walks what the container can actually open.
+ *
+ * `knowledge/`, `projects/`, `agents/`, `templates/` and anything hidden are skipped at the root:
+ * they belong to LightsOut, not to the user's documents. The walk is bounded (`MAX_FOLDERS`,
+ * `MAX_DEPTH`) so a workspace with a stray `node_modules` deep inside cannot hang the request.
  */
-export async function listWorkspaceFolders(workspace: string): Promise<string[]> {
-  const reserved = new Set(["knowledge", "projects", "agents", "templates", "node_modules"]);
-  const found: string[] = [];
+const MAX_FOLDERS = 2000;
+const MAX_DEPTH = 12;
+
+export async function listWorkspaceFolders(workspace: string): Promise<WorkspaceFolder[]> {
+  const reserved = new Set(["knowledge", "projects", "agents", "templates"]);
+  const found: WorkspaceFolder[] = [];
 
   const walk = async (relative: string, depth: number): Promise<void> => {
+    if (depth > MAX_DEPTH || found.length >= MAX_FOLDERS) return;
     let entries;
     try {
       entries = await readdir(path.join(workspace, relative), { withFileTypes: true });
     } catch {
       return;
     }
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    const folders = entries
+      .filter((e) => e.isDirectory() && !e.name.startsWith(".") && e.name !== "node_modules")
+      .filter((e) => !(relative === "" && reserved.has(e.name)))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const entry of folders) {
+      if (found.length >= MAX_FOLDERS) return;
       const child = relative === "" ? entry.name : `${relative}/${entry.name}`;
-      if (relative === "" && reserved.has(entry.name)) continue;
-      found.push(child);
-      if (depth > 0) await walk(child, depth - 1);
+      let documents = 0;
+      let hasChildren = false;
+      try {
+        for (const inner of await readdir(path.join(workspace, child), { withFileTypes: true })) {
+          if (inner.isDirectory()) {
+            if (!inner.name.startsWith(".") && inner.name !== "node_modules") hasChildren = true;
+          } else if (inner.isFile() && isDocumentFile(inner.name)) {
+            documents += 1;
+          }
+        }
+      } catch {
+        // Unreadable folders are still shown: the user may want to know they are there.
+      }
+      found.push({ path: child, name: entry.name, depth, documents, hasChildren });
+      await walk(child, depth + 1);
     }
   };
 
-  await walk("", 1);
-  return found.sort();
+  await walk("", 0);
+  return found;
 }
 
 export class KnowledgeWriter {

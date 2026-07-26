@@ -119,6 +119,21 @@ export class DoubtsRepo {
       .all(...params) as DoubtRow[];
   }
 
+  /**
+   * The last time a human answered a gate for this exact command shape (PE-10, DO-07). Asking the
+   * same question twice is the thing this looks for: with it, the doubt says "you allowed this at
+   * 21:12" and a decision becomes a confirmation.
+   */
+  lastAnsweredWithShape(shape: string): DoubtRow | undefined {
+    return this.db
+      .prepare(
+        `SELECT * FROM doubts
+          WHERE action_shape = ? AND status != 'open' AND answer IS NOT NULL
+          ORDER BY answered_at DESC LIMIT 1`,
+      )
+      .get(shape) as DoubtRow | undefined;
+  }
+
   listOpen(projectId?: string): DoubtRow[] {
     return projectId
       ? this.list({ projectId, status: "open" })

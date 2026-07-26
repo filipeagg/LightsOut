@@ -889,7 +889,8 @@ survive. So the same *kind* of command passes and a different one still asks.
 
 | decision | why |
 |---|---|
-| only `other` is learnable | a class the classifier understood is the packs' business; `credentials`, `delete`, `network` and the rest never become automatic |
+| every class is learnable except two | a person who read the command and said yes must not be asked again. `credentials` and `publish_external` are the exception: a wrong memory there leaks a secret or publishes something, and neither can be taken back. `outside_workspace` cannot be allowed at all |
+| a doubt says when the same shape was answered before (DO-07) | in those two classes the question *will* come back by design; naming the earlier answer turns a decision into a confirmation. It was the second identical question — D-1 allowed, D-2 asked again nine minutes later — that showed learning only `other` was too narrow |
 | the hard floor is untouched | PE-03 is not consulted differently: `other` was never on it |
 | shapes are system-wide | the user asked for it: a shape allowed once is allowed everywhere, because the same person owns every project here |
 | every use is counted | an unused rule is easy to revoke, and a much-used one is a matcher somebody should write into a pack |

@@ -118,20 +118,35 @@ describe("learning from an answered gate", () => {
     expect(sibling.verdict).toBe("allow");
   });
 
-  it("never learns a class the classifier understood", () => {
-    // Even with the shape remembered, a credential read is still a credential read.
+  it("remembers a delete a person allowed, so the same one does not ask twice", () => {
+    const command = "rm -rf build";
+    expect(engine().evaluate({ projectPath: PROJECT, command }).verdict).toBe("require_human");
     repos.learned.add({
-      shape: commandShape("cat /workspace/projects/demo/.env"),
-      sample: "cat .env",
-      actionClass: "other",
+      shape: commandShape(command),
+      sample: command,
+      actionClass: "delete",
       addedBy: "human",
     });
-    const decision = engine().evaluate({
-      projectPath: PROJECT,
-      command: "cat /workspace/projects/demo/.env",
-    });
-    expect(decision.class).toBe("credentials");
-    expect(decision.verdict).toBe("require_human");
+    const second = engine().evaluate({ projectPath: PROJECT, command });
+    expect(second.class).toBe("delete");
+    expect(second.verdict).toBe("allow");
+  });
+
+  it("never remembers a credential or a publication, however often you say yes", () => {
+    for (const [command, expected] of [
+      ["cat /workspace/projects/demo/.env", "credentials"],
+      ["npm publish", "publish_external"],
+    ] as const) {
+      repos.learned.add({
+        shape: commandShape(command),
+        sample: command,
+        actionClass: expected,
+        addedBy: "human",
+      });
+      const decision = engine().evaluate({ projectPath: PROJECT, command });
+      expect(decision.class).toBe(expected);
+      expect(decision.verdict).not.toBe("allow");
+    }
   });
 
   it("counts uses and can be forgotten", () => {

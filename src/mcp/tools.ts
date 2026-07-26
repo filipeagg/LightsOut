@@ -536,6 +536,8 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
         ? repos.projectKnowledge.list(project(projectId).id)
         : [];
       return {
+        // Folders holding documents and no manifest, offered for adoption (KB-10).
+        adoptable: loader.adoptable(),
         bases: loader.list().map((base) => ({
           id: base.manifest.id,
           name: base.manifest.name,
@@ -692,6 +694,26 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
         ...(source === undefined ? {} : { source }),
       }),
     }),
+  );
+
+  tool(
+    "adopt_knowledge",
+    "Turn a folder of documents that is already in the workspace into a knowledge base (KB-10), " +
+      "writing only what is missing: the manifest, and an index only if the folder has none. A " +
+      "folder directly under knowledge/ becomes the base in place; anywhere else it gets a base " +
+      "that links to it. `list_knowledge` reports the candidates under `adoptable`.",
+    {
+      folder: z.string().min(1),
+      id: z.string().min(1).optional(),
+      name: z.string().min(1).optional(),
+      kind: z
+        .enum(["technical", "functional", "organisational", "market", "other"])
+        .optional(),
+      description: z.string().optional(),
+      tags: z.array(z.string().min(1)).optional(),
+      owner: z.string().min(1).optional(),
+    },
+    async ({ folder, ...patch }) => actions.adoptKnowledge("mcp", folder, stripUndefined(patch)),
   );
 
   tool(

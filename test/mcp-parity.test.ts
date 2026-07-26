@@ -30,7 +30,13 @@ function toolNames(): string[] {
  * Actions that mutate something. Read-only helpers on `Actions` are not required to have a tool:
  * the read side is `src/views.ts`, shared by both surfaces already.
  */
-const READ_ONLY = new Set(["readDoc", "agentSource", "phase", "knowledgeFolders"]);
+const READ_ONLY = new Set([
+  "readDoc",
+  "agentSource",
+  "phase",
+  "knowledgeFolders",
+  "adoptableFolders",
+]);
 
 /**
  * Internal helpers. `private` in TypeScript is a compile-time promise, not a runtime one, so they
@@ -69,6 +75,7 @@ const TOOL_FOR: Record<string, string> = {
   writeTemplate: "write_template",
   deleteTemplate: "delete_template",
   writeKnowledge: "write_knowledge",
+  adoptKnowledge: "adopt_knowledge",
   writeKnowledgeDoc: "write_knowledge_doc",
   deleteKnowledgeDoc: "delete_knowledge_doc",
   deleteKnowledge: "delete_knowledge",

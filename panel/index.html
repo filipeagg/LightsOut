@@ -1193,6 +1193,7 @@ function viewKnowledge() {
     <div class="row" style="margin-bottom:16px">
       <button class="btn primary" onclick="editBase('new-base')">New base</button>
     </div>
+    ${adoptableCard(k)}
     ${editing === "new-base" ? baseForm(null) : ""}
     ${k.bases
       .map(
@@ -1219,6 +1220,45 @@ function viewKnowledge() {
     </div>`,
       )
       .join("")}`;
+}
+
+/**
+ * Folders under `knowledge/` that hold documents and no manifest (KB-10). They used to appear as
+ * red rejected bases, which told someone who had just dropped their documentation in there that
+ * they had done something wrong. They had not: the manifest is ours to write, not theirs.
+ */
+function adoptableCard(k) {
+  const folders = (k.adoptable || []).filter((f) => f.documents > 0);
+  if (folders.length === 0) return "";
+  return `<div class="card pad" style="margin-bottom:16px;border-color:var(--accent)">
+    <h3>Folders ready to become a base</h3>
+    <p class="tiny muted" style="margin:6px 0 12px">These hold documents but no
+      <code>knowledge.yaml</code>, so nothing reads them yet. Adopting one writes that file into
+      the folder — and an index only if it has none. Nothing is moved or overwritten.</p>
+    ${folders
+      .map(
+        (f) => `<div class="between" style="padding:6px 0">
+        <div><code>${esc(f.path)}</code>
+          <span class="tiny muted">${f.documents} document(s)${
+            f.hasIndex ? " · has an index already" : ""
+          }</span></div>
+        <button class="btn sm primary" onclick="adoptFolder('${esc(f.path)}','${esc(f.suggestedId)}')">
+          Adopt as a base</button>
+      </div>`,
+      )
+      .join("")}
+  </div>`;
+}
+
+/** Open the create form with the folder preselected, so adoption goes through the same one. */
+function adoptFolder(folderPath, suggestedId) {
+  sourcePick = folderPath;
+  editing = "new-base";
+  paint();
+  const id = $("kb-id");
+  if (id) id.value = suggestedId;
+  const name = $("kb-name");
+  if (name && !name.value) name.value = suggestedId;
 }
 
 /**
@@ -1317,25 +1357,50 @@ function folderTree(base, folders, known) {
     .join("");
 
   const rows = folders
-    .map((f) =>
-      row(
-        f.path,
-        esc(f.name),
-        f.documents
-          ? ` <span class="tiny muted">${f.documents} document(s)</span>`
-          : ` <span class="tiny muted">—</span>`,
-        f.depth,
-      ),
-    )
+    .map((f) => {
+      // What the folder is, said plainly: already a base, adoptable in place, or linkable.
+      const count = f.documents
+        ? ` <span class="tiny muted">${f.documents} document(s)</span>`
+        : ` <span class="tiny muted">empty</span>`;
+      const mark = f.baseId
+        ? ` <span class="pill">base <code>${esc(f.baseId)}</code></span>`
+        : f.adoptInPlace && f.documents
+          ? ` <span class="pill blue">ready to adopt</span>`
+          : "";
+      return row(f.path, esc(f.name), count + mark, f.depth);
+    })
     .join("");
 
   return `<input type="hidden" id="kb-source" value="${esc(chosen)}">
-    <div class="card" style="max-height:280px;overflow:auto;padding:6px">
+    <div class="card" style="max-height:320px;overflow:auto;padding:6px">
       ${row("", `this base's own folder <code>knowledge/${esc(base.id || "<id>")}</code>`, "", 0)}
       ${missing}
       ${rows || `<div class="tiny muted" style="padding:8px">The workspace has no other folders
         yet. Make one next to <code>knowledge/</code> in the workspace and it appears here.</div>`}
-    </div>`;
+    </div>
+    ${adoptHint(chosen, folders)}`;
+}
+
+/**
+ * What pressing Create will do to the folder that is selected (KB-10). Said before it happens,
+ * because "adopt" writes a file into a folder that belongs to the user.
+ */
+function adoptHint(chosen, folders) {
+  if (!chosen) return "";
+  const folder = folders.find((f) => f.path === chosen);
+  if (!folder) return "";
+  if (folder.baseId) {
+    return `<p class="tiny" style="margin-top:8px;color:var(--amber-fg)">
+      <code>${esc(chosen)}</code> already is the base <code>${esc(folder.baseId)}</code>.</p>`;
+  }
+  const where = folder.adoptInPlace
+    ? `a <code>knowledge.yaml</code> is written into <code>${esc(chosen)}</code> itself and the
+       folder becomes the base — nothing moves`
+    : `a base is created in <code>knowledge/&lt;id&gt;</code> that reads from
+       <code>${esc(chosen)}</code>; that folder is not touched`;
+  return `<p class="tiny muted" style="margin-top:8px">On Create: ${where}. Its
+    ${folder.documents} document(s), subfolders included, become readable to any project this base
+    is attached to. An existing index is kept as it is.</p>`;
 }
 
 /**
@@ -1388,19 +1453,37 @@ async function loadUpload() {
 }
 
 async function saveBase(id) {
+  const folder = field("kb-source") || null;
   const patch = {
     name: field("kb-name"),
     kind: field("kb-kind"),
     description: field("kb-description"),
     tags: csv("kb-tags"),
-    source: field("kb-source") || null,
   };
+
   if (id === null) {
+    // Creating against a folder is an adoption: the server writes the manifest into it, or a
+    // base that links to it, and either way only what is missing (KB-10).
+    if (folder) {
+      const suggested = folder.split("/").pop();
+      return act("POST", "/api/knowledge/adopt", {
+        folder,
+        id: field("kb-id") || suggested,
+        ...patch,
+        name: patch.name || field("kb-id") || suggested,
+      });
+    }
     const newId = field("kb-id");
     if (!newId) { store.error = "an id is required"; return paint(); }
-    return act("POST", "/api/knowledge", { id: newId, ...patch, name: patch.name || newId });
+    return act("POST", "/api/knowledge", {
+      id: newId,
+      ...patch,
+      name: patch.name || newId,
+      source: null,
+    });
   }
-  await act("PUT", `/api/knowledge/${encodeURIComponent(id)}`, patch);
+
+  await act("PUT", `/api/knowledge/${encodeURIComponent(id)}`, { ...patch, source: folder });
 }
 
 async function saveDoc(baseId) {

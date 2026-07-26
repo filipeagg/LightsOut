@@ -335,32 +335,32 @@ const TEMPLATES = [
 ];
 
 const KNOWLEDGE = [
- {id:'erpagro-core',name:'ERPagro core',kind:'technical',updated:'2026-07-21',docs:7,chars:96400,owner:'felipe.gomes@hispatec.com',tags:['erp','agro','sql-server','legacy'],attachedTo:['erpagro-sync','margaret-forecast'],
-  description:'How the ERPagro core is structured and what its invariants are. Written by a knowledge-curation project over the 2019 codebase.'},
- {id:'margaret-api',name:'Margaret public API',kind:'technical',updated:'2026-07-24',docs:4,chars:41200,owner:'felipe.gomes@hispatec.com',tags:['api','rest','margaret'],attachedTo:['margaret-forecast'],
-  description:'Endpoint-by-endpoint behaviour of the Margaret API as observed by probes, including the pagination quirk on /orders.'},
- {id:'agro-domain',name:'Agronomy domain',kind:'functional',updated:'2026-06-30',docs:11,chars:132000,owner:'product',tags:['domain','crops','irrigation'],attachedTo:['erpagro-sync','margaret-forecast'],
-  description:'What a plot, a campaign and a treatment actually mean to a customer, and which of those meanings differ by country.'},
- {id:'hispatec-ways',name:'How we work',kind:'organisational',updated:'2026-05-12',docs:5,chars:28900,owner:'engineering',tags:['process','review','release'],attachedTo:['erpagro-sync'],
+ {id:'legacy-core',name:'Legacy core',kind:'technical',updated:'2026-07-21',docs:7,chars:96400,owner:'platform@example.com',tags:['core','sql-server','legacy'],attachedTo:['legacy-sync','forecast-widget'],
+  description:'How the legacy core is structured and what its invariants are. Written by a knowledge-curation project over the 2019 codebase.'},
+ {id:'partner-api',name:'Partner public API',kind:'technical',updated:'2026-07-24',docs:4,chars:41200,owner:'platform@example.com',tags:['api','rest','partner'],attachedTo:['forecast-widget'],
+  description:'Endpoint-by-endpoint behaviour of the partner API as observed by probes, including the pagination quirk on /orders.'},
+ {id:'domain-model',name:'Business domain',kind:'functional',updated:'2026-06-30',docs:11,chars:132000,owner:'product',tags:['domain','orders','contracts'],attachedTo:['legacy-sync','forecast-widget'],
+  description:'What an order, a contract and a settlement actually mean to a customer, and which of those meanings differ by country.'},
+ {id:'team-ways',name:'How we work',kind:'organisational',updated:'2026-05-12',docs:5,chars:28900,owner:'engineering',tags:['process','review','release'],attachedTo:['legacy-sync'],
   description:'Branching, review expectations, release cadence, who signs off on what. Preferences, not constraints — and labelled as such on purpose.'},
  {id:'competitors-2026',name:'Market landscape 2026',kind:'market',updated:'2026-04-02',docs:3,chars:19800,owner:'strategy',tags:['market','pricing'],attachedTo:[],
   description:'Who else sells this, at what price, with which gaps. Ages fast — check the date before trusting it.'}
 ];
 
 const VAULT = [
- {id:'erpagro-sandbox',label:'ERPagro sandbox API',base_url:'https://sandbox.erpagro.example.com/api/v2',auth:'bearer',test_only:true,scope:['*'],
+ {id:'sandbox-api',label:'Sandbox API',base_url:'https://sandbox.example.com/api/v2',auth:'bearer',test_only:true,scope:['*'],
   notes:'Rate-limited to 60 rpm. /orders paginates from 1, not 0.',fields:[{name:'token',present:true,updated:'2026-07-24'}]},
- {id:'margaret-staging',label:'Margaret staging',base_url:'https://staging.margaret.example.com',auth:'api_key',test_only:true,scope:['margaret-forecast'],
-  notes:'Header is X-Margaret-Key, not Authorization.',fields:[{name:'api_key',present:true,updated:'2026-07-22'},{name:'tenant',present:true,updated:'2026-07-22'}]},
- {id:'weather-provider',label:'Weather provider',base_url:'https://api.weather.example.com/v3',auth:'api_key',test_only:false,scope:['margaret-forecast'],
+ {id:'partner-staging',label:'Partner staging',base_url:'https://staging.partner.example.com',auth:'api_key',test_only:true,scope:['forecast-widget'],
+  notes:'Header is X-Api-Key, not Authorization.',fields:[{name:'api_key',present:true,updated:'2026-07-22'},{name:'tenant',present:true,updated:'2026-07-22'}]},
+ {id:'metrics-provider',label:'Metrics provider',base_url:'https://api.metrics.example.com/v3',auth:'api_key',test_only:false,scope:['forecast-widget'],
   notes:'Production only — no sandbox exists, so the probe pack refuses it (VT-06).',fields:[{name:'api_key',present:true,updated:'2026-07-18'}]},
- {id:'erpagro-prod',label:'ERPagro production',base_url:'https://erpagro.example.com/api/v2',auth:'bearer',test_only:false,scope:[],
+ {id:'production-api',label:'Production API',base_url:'https://api.example.com/v2',auth:'bearer',test_only:false,scope:[],
   notes:'Placeholder. No value stored and none should be.',fields:[{name:'token',present:false,updated:null}]}
 ];
 
 const PROJECTS = [
- {id:'erpagro-sync',name:'ERPagro ⇄ Margaret sync',template:'full-development',knowledge:['erpagro-core','agro-domain','hispatec-ways'],
-  remote:'git@github.com:hispatec/erpagro-sync.git',verify:'npm test',lastActivity:'4 min ago',
+ {id:'legacy-sync',name:'Legacy ⇄ partner sync',template:'full-development',knowledge:['legacy-core','domain-model','team-ways'],
+  remote:'git@github.com:example/legacy-sync.git',verify:'npm test',lastActivity:'4 min ago',
   run:{id:'01JZ8Q','status':'running',engine:'claude',model:'claude-sonnet-5',elapsed:'12m 40s',timeout:'90m',inactivity:'18s',inactivityLimit:'8m',
        lastAction:'edit src/sync/orders.ts',phase:'build',tokens:'184k in / 21k out',cost:'$1.42'},
   phases:[
@@ -377,7 +377,7 @@ const PROJECTS = [
     recommendation:'A'}],
   state:{next:'Finish the build phase, then QA.',lastDecision:'D-6: paginate from 1, per the probe (provisional, both engines agreed).'}},
 
- {id:'margaret-forecast',name:'Margaret forecast widget',template:'quick-prototype',knowledge:['margaret-api','agro-domain'],
+ {id:'forecast-widget',name:'Forecast widget',template:'quick-prototype',knowledge:['partner-api','domain-model'],
   remote:null,verify:null,lastActivity:'1 h ago',run:null,
   phases:[
    {id:'shape-the-prompt',title:'Turn the idea into a workable prompt',agent:'prompt-architect',status:'done',gate:'human',deliverable:'doc/PROMPT.md',ended:'today 15:10'},
@@ -386,21 +386,21 @@ const PROJECTS = [
    {id:'qa-smoke',title:'Smoke test',agent:'qa-engineer',status:'pending',gate:'auto',optional:true}],
   doubts:[
    {ref:'D-3',kind:'functional',age:'1 h 12 min',blocks:'the chart renderer',
-    context:'The Margaret API returns forecast confidence as a band (p10/p50/p90), but the mockup shows a single line. Rendering only p50 throws away the information the customer asked for; rendering the band changes the agreed design.',
+    context:'The partner API returns forecast confidence as a band (p10/p50/p90), but the mockup shows a single line. Rendering only p50 throws away the information the customer asked for; rendering the band changes the agreed design.',
     options:[{id:'A',text:'Single p50 line, as the mockup shows'},{id:'B',text:'Shaded band with the p50 line on top'},{id:'C',text:'Line now, band behind a toggle'}],
     recommendation:'B',
     secondOpinion:{engine:'codex',agrees:false,confidence:0.55,reasoning:'Prefers A: the mockup is signed off, and widening scope mid-prototype is how prototypes stop being prototypes. Disagreement is why this doubt opened instead of auto-continuing (DO-03).'}}],
   state:{next:'Answer D-3, then re-launch the build phase.',lastDecision:'D-2: use the staging tenant for all probes (human).'}},
 
- {id:'erpagro-knowledge',name:'ERPagro knowledge base',template:'knowledge-curation',knowledge:['erpagro-core'],writable:'erpagro-core',
+ {id:'legacy-knowledge',name:'Legacy knowledge base',template:'knowledge-curation',knowledge:['legacy-core'],writable:'legacy-core',
   remote:null,verify:null,lastActivity:'3 days ago',run:null,
   phases:[
    {id:'analyse',title:'Analyse the existing system',agent:'codebase-analyst',status:'done',gate:'auto',deliverable:'doc/ANALYSIS.md',repeatable:true,ended:'22 Jul 12:40'},
    {id:'interrogate',title:'Ask what cannot be inferred',agent:'codebase-analyst',status:'done',gate:'human',deliverable:'doc/OPEN-QUESTIONS.md',ended:'22 Jul 17:05'},
-   {id:'write-base',title:'Write the knowledge base',agent:'codebase-analyst',status:'done',gate:'auto',deliverable:'workspace:knowledge/erpagro-core/index.md',ended:'22 Jul 19:31'}],
+   {id:'write-base',title:'Write the knowledge base',agent:'codebase-analyst',status:'done',gate:'auto',deliverable:'workspace:knowledge/legacy-core/index.md',ended:'22 Jul 19:31'}],
   doubts:[],state:{next:'Nothing pending. The base it produced is attached to two projects.',lastDecision:'D-9: treat the 2019 module as frozen, document rather than fix (human).'}},
 
- {id:'ask',name:'Questions',template:'quick-answers',knowledge:['erpagro-core','agro-domain','hispatec-ways'],
+ {id:'ask',name:'Questions',template:'quick-answers',knowledge:['legacy-core','domain-model','team-ways'],
   remote:null,verify:null,lastActivity:'26 min ago',run:null,
   phases:[
    {id:'answer',title:'Answer the question',agent:'answerer',status:'done',gate:'auto',repeatable:true,ended:'today 17:16'}],
@@ -558,7 +558,7 @@ function vOverview(){
       <div class="ic">${I.key}</div>
       <div style="flex:1">
         <div class="between"><div><b>Codex</b> is not authenticated</div><span class="tiny muted">since 14:02</span></div>
-        <div class="dim tiny" style="margin-top:3px">Two phases in <b>ERPagro ⇄ Margaret sync</b> use it and will refuse to launch (BA-06).</div>
+        <div class="dim tiny" style="margin-top:3px">Two phases in <b>Legacy ⇄ partner sync</b> use it and will refuse to launch (BA-06).</div>
       </div>
       <a class="btn sm" href="#/setup">Reconnect</a>
     </div>
@@ -1365,7 +1365,7 @@ function newProject(tid){
         <label>Knowledge to load</label>
         <div class="grid" style="gap:7px">
           ${KNOWLEDGE.map(k=>`<label class="opt" style="padding:8px 11px">
-            <input type="checkbox" ${['erpagro-core','agro-domain'].includes(k.id)?'checked':''}>
+            <input type="checkbox" ${['legacy-core','domain-model'].includes(k.id)?'checked':''}>
             <div style="flex:1"><b>${k.name}</b> <span class="pill ${KINDPILL[k.kind]}">${k.kind}</span>
               <div class="tiny muted">${k.description}</div></div>
           </label>`).join('')}

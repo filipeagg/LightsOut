@@ -1215,7 +1215,7 @@ phase 9.
 ### 17.1 Base format
 
 ```
-knowledge/erpagro-core/
+knowledge/legacy-core/
 ├── knowledge.yaml
 ├── index.md
 ├── architecture.md
@@ -1224,12 +1224,12 @@ knowledge/erpagro-core/
 ```
 
 ```yaml
-id: erpagro-core          # must equal the directory name
-name: ERPagro core
+id: legacy-core           # must equal the directory name
+name: Legacy core
 kind: technical           # technical | functional | organisational | market | other
-description: How the ERPagro core is structured and what its invariants are.
-tags: [erp, agro, legacy, sql-server]
-owner: felipe.gomes@hispatec.com
+description: How the legacy core is structured and what its invariants are.
+tags: [core, legacy, sql-server]
+owner: platform@example.com
 updated: 2026-07-25
 ```
 
@@ -1246,10 +1246,10 @@ sitting in the directory would be a document the agent is told exists and cannot
 A base may name a folder instead of holding the documents itself:
 
 ```yaml
-id: erpagro-docs
-name: ERPagro documentation
+id: platform-docs
+name: Platform documentation
 kind: technical
-source: docs/erpagro          # relative to the workspace root; the folder stays the source of truth
+source: docs/platform         # relative to the workspace root; the folder stays the source of truth
 ```
 
 With `source` set, `knowledge.yaml` and `index.md` still live in `knowledge/<id>/`, but the
@@ -1282,7 +1282,7 @@ project would be editing a folder that something else owns.
 Every document is wrapped with its base id and kind:
 
 ```
---- knowledge: erpagro-core (technical) — data-model.md ---
+--- knowledge: legacy-core (technical) — data-model.md ---
 ```
 
 That labelling is the point of KB-02: an agent that cannot tell "the organisation prefers X"
@@ -1306,8 +1306,8 @@ The curation project's pack, `curate`, is the only one whose `knowledge_write` v
 
 ```yaml
 entries:
-  - id: erpagro-sandbox
-    label: ERPagro sandbox API
+  - id: sandbox-api
+    label: Sandbox API
     base_url: https://sandbox.example.com/api/v2
     auth: bearer            # none | basic | bearer | api_key | oauth2_client_credentials
     test_only: true
@@ -1319,7 +1319,7 @@ entries:
 
 Reaching an agent: before a run whose agent's policy pack grants `network access`, the runner
 resolves the entries in scope for that project and injects each field as an environment
-variable of the adapter process — `LO_VAULT_ERPAGRO_SANDBOX_TOKEN` — and writes a `vault.read`
+variable of the adapter process — `LO_VAULT_SANDBOX_API_TOKEN` — and writes a `vault.read`
 event plus a `vault_audit` row with the field names only. The prompt gets the index (labels,
 URLs, notes, variable names), never a value (VT-02). Values are excluded from `scrubbedEnv` for
 every other run, so an agent with no network grant cannot see them at all.

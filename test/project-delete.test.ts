@@ -62,7 +62,7 @@ function seedFullProject(id: string): { taskId: string; runId: string } {
   });
   repos.projectKnowledge.attach({
     projectId: id,
-    baseId: "erpagro-core",
+    baseId: "legacy-core",
     kind: "technical",
     writable: false,
   });

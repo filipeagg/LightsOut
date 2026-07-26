@@ -210,20 +210,20 @@ describe("phases repo", () => {
 describe("project knowledge repo", () => {
   it("attaches, re-attaches and detaches a base", () => {
     const projectId = seedProject();
-    repos.projectKnowledge.attach({ projectId, baseId: "erpagro", kind: "technical" });
+    repos.projectKnowledge.attach({ projectId, baseId: "legacy-core", kind: "technical" });
     expect(repos.projectKnowledge.list(projectId)).toHaveLength(1);
     expect(repos.projectKnowledge.writableBase(projectId)).toBeUndefined();
 
     repos.projectKnowledge.attach({
       projectId,
-      baseId: "erpagro",
+      baseId: "legacy-core",
       kind: "technical",
       writable: true,
     });
     expect(repos.projectKnowledge.list(projectId)).toHaveLength(1);
-    expect(repos.projectKnowledge.writableBase(projectId)).toBe("erpagro");
+    expect(repos.projectKnowledge.writableBase(projectId)).toBe("legacy-core");
 
-    expect(repos.projectKnowledge.detach(projectId, "erpagro")).toBe(true);
+    expect(repos.projectKnowledge.detach(projectId, "legacy-core")).toBe(true);
     expect(repos.projectKnowledge.list(projectId)).toHaveLength(0);
   });
 });
@@ -233,7 +233,7 @@ describe("vault audit repo", () => {
     const projectId = seedProject();
     const taskId = seedTask(projectId);
     const run = repos.runs.start({ taskId, engine: "claude" });
-    repos.vaultAudit.record(run.id, "erpagro-sandbox", ["token", "user"]);
+    repos.vaultAudit.record(run.id, "sandbox-api", ["token", "user"]);
     const rows = repos.vaultAudit.listForRun(run.id);
     expect(rows).toHaveLength(1);
     expect(JSON.parse(rows[0].fields)).toEqual(["token", "user"]);

@@ -112,14 +112,14 @@ async function seedBase(
 describe("knowledge loader and injection", () => {
   it("reads a manifest, its index and its documents (KB-01)", async () => {
     await seedBase(
-      "erpagro",
-      "name: ERPagro core\nkind: technical\ntags: [erp, agro]\nupdated: 2026-07-01\n",
+      "legacy-core",
+      "name: Legacy core\nkind: technical\ntags: [core, legacy]\nupdated: 2026-07-01\n",
       { "index.md": "- data-model.md: the tables", "data-model.md": "TABLES" },
     );
     const loader = new KnowledgeLoader(workspace);
     const report = await loader.load();
     expect(report.loaded).toBe(1);
-    const base = loader.getOrThrow("erpagro");
+    const base = loader.getOrThrow("legacy-core");
     expect(base.manifest.kind).toBe("technical");
     expect(base.manifest.updated).toBe("2026-07-01");
     expect(base.index).toContain("data-model.md");
@@ -134,14 +134,14 @@ describe("knowledge loader and injection", () => {
   });
 
   it("refuses to read a document outside the base", async () => {
-    await seedBase("erpagro", "name: E\nkind: technical\n", { "a.md": "A" });
+    await seedBase("legacy-core", "name: E\nkind: technical\n", { "a.md": "A" });
     const loader = new KnowledgeLoader(workspace);
     await loader.load();
-    await expect(loader.readDocument("erpagro", "../../secret")).rejects.toThrow(/escapes/);
+    await expect(loader.readDocument("legacy-core", "../../secret")).rejects.toThrow(/escapes/);
   });
 
   it("always injects manifests and index.md, and lists what the budget left out (KB-06)", async () => {
-    await seedBase("erpagro", "name: ERPagro\nkind: technical\ntags: [erp]\n", {
+    await seedBase("legacy-core", "name: Legacy core\nkind: technical\ntags: [core]\n", {
       "index.md": "- big.md: everything",
       "big.md": "X".repeat(5000),
       "small.md": "SMALL FACT",
@@ -149,16 +149,16 @@ describe("knowledge loader and injection", () => {
     const loader = new KnowledgeLoader(workspace);
     await loader.load();
 
-    const generous = await buildKnowledgeBlock(loader, ["erpagro"], { budgetChars: 100000 });
+    const generous = await buildKnowledgeBlock(loader, ["legacy-core"], { budgetChars: 100000 });
     expect(generous.included.map((d) => d.file).sort()).toEqual(["big.md", "small.md"]);
-    expect(generous.text).toContain("--- knowledge: erpagro (technical) — small.md ---");
+    expect(generous.text).toContain("--- knowledge: legacy-core (technical) — small.md ---");
     expect(generous.omitted).toEqual([]);
 
-    const tight = await buildKnowledgeBlock(loader, ["erpagro"], { budgetChars: 1200 });
+    const tight = await buildKnowledgeBlock(loader, ["legacy-core"], { budgetChars: 1200 });
     expect(tight.included.map((d) => d.file)).toEqual(["small.md"]);
     expect(tight.omitted.map((d) => d.file)).toEqual(["big.md"]);
     expect(tight.text).toContain("index.md");
-    expect(tight.text).toContain('read_knowledge("erpagro", "big.md")');
+    expect(tight.text).toContain('read_knowledge("legacy-core", "big.md")');
   });
 
   it("returns nothing when no base is attached", async () => {
@@ -172,8 +172,8 @@ describe("knowledge loader and injection", () => {
 describe("vault", () => {
   it("stores values, returns views without them, and merges on update (VT-02, VT-03)", async () => {
     const vault = new Vault(workspace);
-    await vault.put("erpagro-sandbox", {
-      label: "ERPagro sandbox",
+    await vault.put("sandbox-api", {
+      label: "Sandbox API",
       base_url: "https://sandbox.example.com",
       auth: "bearer",
       test_only: true,
@@ -186,10 +186,10 @@ describe("vault", () => {
     expect(views[0]?.fields.map((f) => f.name).sort()).toEqual(["token", "user"]);
 
     // An omitted field keeps its value; a null clears it.
-    await vault.put("erpagro-sandbox", { fields: { user: null } });
+    await vault.put("sandbox-api", { fields: { user: null } });
     const after = await vault.readAll();
     expect(after[0]?.fields).toEqual({ token: "s3cret" });
-    expect(after[0]?.label).toBe("ERPagro sandbox");
+    expect(after[0]?.label).toBe("Sandbox API");
   });
 
   it("writes the file 600 and keeps it parseable", async () => {

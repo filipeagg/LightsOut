@@ -1266,9 +1266,9 @@ function baseForm(b) {
   return `<div class="card pad" style="margin-top:12px;margin-bottom:16px">
     <div class="row wrap" style="gap:16px">
       ${isNew
-        ? `<label class="tiny">Id<br><input id="kb-id" placeholder="erpagro-core"></label>`
+        ? `<label class="tiny">Id<br><input id="kb-id" placeholder="core-platform"></label>`
         : `<label class="tiny">Id<br><input value="${esc(base.id)}" readonly></label>`}
-      <label class="tiny">Name<br><input id="kb-name" value="${esc(base.name)}" placeholder="ERPagro core"></label>
+      <label class="tiny">Name<br><input id="kb-name" value="${esc(base.name)}" placeholder="Core platform"></label>
       <label class="tiny">Kind<br><select id="kb-kind">${kinds
         .map((k) => `<option ${k === base.kind ? "selected" : ""}>${k}</option>`)
         .join("")}</select></label>
@@ -1461,7 +1461,7 @@ function vaultForm(entry, isNew) {
   const auths = ["none", "basic", "bearer", "api_key", "oauth2_client_credentials"];
   return `<div class="card pad" style="margin-bottom:16px">
     <div class="row wrap" style="gap:16px">
-      ${isNew ? `<label class="tiny">Id<br><input id="vt-id" placeholder="erpagro-sandbox"></label>` : ""}
+      ${isNew ? `<label class="tiny">Id<br><input id="vt-id" placeholder="sandbox-api"></label>` : ""}
       <label class="tiny">Label<br><input id="vt-label" value="${esc(entry.label || "")}"></label>
       <label class="tiny">Base URL<br><input id="vt-url" value="${esc(entry.base_url || "")}"></label>
       <label class="tiny">Auth<br><select id="vt-auth">${auths

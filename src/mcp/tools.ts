@@ -753,6 +753,18 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
   );
 
   tool(
+    "set_project_unattended",
+    "Whether this project's runs finish without a person (OR-12). On — the default — a permission " +
+      "gate off the hard floor is settled by the judge or the advisor, or refused with its reason " +
+      "so the agent adapts; the run never parks waiting for someone to look. Off, gates open a " +
+      "doubt and wait. Writes outside the workspace, publishing, force push and credentials that " +
+      "are not the project's own vault always wait, in either mode.",
+    { projectId: z.string().min(1), unattended: z.boolean() },
+    async ({ projectId, unattended }) =>
+      actions.setProjectUnattended("mcp", projectId, unattended),
+  );
+
+  tool(
     "write_doc",
     "Overwrite one of the project's doc/ files. Refused while a run is active (MC-04).",
     { projectId: z.string().min(1), doc: z.enum(DOC_NAMES), content: z.string() },

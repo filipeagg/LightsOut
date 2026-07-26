@@ -419,6 +419,15 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
     }),
   );
 
+  // Unattended execution (OR-12, §7.7).
+  app.post("/api/projects/:id/unattended", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = idParam.parse(request.params);
+      const input = body(z.object({ unattended: z.boolean() }), request.body);
+      return actions.setProjectUnattended("panel", id, input.unattended);
+    }),
+  );
+
   // Learned allows (PE-10): forgetting one is the only mutation; they are created by answering.
   app.delete("/api/learned/:shape", async (request, reply) =>
     envelope(reply, async () => {

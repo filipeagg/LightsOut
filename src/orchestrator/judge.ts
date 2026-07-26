@@ -20,6 +20,25 @@ export const JUDGE_TIMEOUT_MS = 20_000;
 /** The only classes the judge may settle (PE-11). Everything else goes straight to the human. */
 export const JUDGEABLE: ReadonlySet<ActionClass> = new Set<ActionClass>(["other", "delete"]);
 
+/**
+ * What the judge may additionally settle when the project runs unattended (OR-12, §7.7). These
+ * are the classes that are worth a person's attention *when there is a person*: they change the
+ * build environment or leave the machine, and they are all recorded as provisional decisions and
+ * revocable afterwards. Nothing on the hard floor of PE-03 is here.
+ */
+export const JUDGEABLE_UNATTENDED: ReadonlySet<ActionClass> = new Set<ActionClass>([
+  "other",
+  "delete",
+  "deps_install",
+  "toolchain_install",
+  "network",
+  "script_exec",
+  "git_local",
+  "project_write",
+  "exec_check",
+  "knowledge_write",
+]);
+
 export const judgeAnswerSchema = z
   .object({
     verdict: z.enum(["allow", "escalate"]),
@@ -60,8 +79,18 @@ export function judgeable(input: {
   projectPath: string;
   command?: string | undefined;
   paths?: string[] | undefined;
+  /**
+   * The gate was `credentials`, but the whole of the evidence was this run's own vault entry
+   * (PE-13, §7.1d). Judgeable whatever the mode: this is the false positive that has stopped four
+   * runs, and the hard floor was never meant to catch the system's own key.
+   */
+  judgeEligible?: boolean | undefined;
+  /** The project runs unattended (OR-12), which widens the remit to everything off the floor. */
+  unattended?: boolean | undefined;
 }): boolean {
-  if (!JUDGEABLE.has(input.actionClass)) return false;
+  if (input.judgeEligible && input.actionClass === "credentials") return true;
+  const remit = input.unattended ? JUDGEABLE_UNATTENDED : JUDGEABLE;
+  if (!remit.has(input.actionClass)) return false;
   if (input.actionClass !== "delete") return true;
 
   // Both kinds of target: what the request declared, and what the command names. `rm -rf build`

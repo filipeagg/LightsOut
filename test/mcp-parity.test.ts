@@ -90,6 +90,7 @@ const TOOL_FOR: Record<string, string> = {
   abortRun: "abort_run",
   stopRun: "stop_run",
   setProjectContext: "set_project_context",
+  setProjectUnattended: "set_project_unattended",
   addArea: "add_area",
   removeArea: "remove_area",
   forgetLearnedAllow: "forget_learned_allow",

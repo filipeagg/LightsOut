@@ -340,6 +340,17 @@ CREATE INDEX ix_previews_project ON previews(project_id, status);
 CREATE UNIQUE INDEX ix_previews_port_live ON previews(port) WHERE status = 'running';
 `;
 
+/**
+ * Version 11 (OR-12, §7.7): a project declares whether its runs must finish without a person.
+ *
+ * Default 1 — on. Unattended execution is what the system is for, and the four incidents recorded
+ * in STATE.md are all the same story: a run that stopped, and nobody knew. A project that wants a
+ * person in the loop says so; the burden of the flag belongs on the exception.
+ */
+const UNATTENDED_SQL = `
+ALTER TABLE projects ADD COLUMN unattended INTEGER NOT NULL DEFAULT 1;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial schema", up: applyInitialSchema },
   {
@@ -366,6 +377,7 @@ export const MIGRATIONS: Migration[] = [
     foreignKeys: "off",
   },
   { version: 10, name: "preview servers", up: PREVIEWS_SQL },
+  { version: 11, name: "unattended projects", up: UNATTENDED_SQL },
 ];
 
 /** The marker migration 4 writes, and the panel looks for (PM-09). */

@@ -14,12 +14,14 @@ export type CreateProject = {
   policyPack?: string;
   verifyCmd?: string | null;
   templateId?: string | null;
+  /** OR-12: runs finish without a person. Defaults to on — that is what the system is for. */
+  unattended?: boolean;
 };
 
 export type UpdateProject = Partial<
   Pick<
     CreateProject,
-    "name" | "context" | "repoRemote" | "pushPolicy" | "policyPack" | "verifyCmd"
+    "name" | "context" | "repoRemote" | "pushPolicy" | "policyPack" | "verifyCmd" | "unattended"
   >
 > & { archived?: boolean };
 
@@ -31,8 +33,8 @@ export class ProjectsRepo {
       .prepare(
         `INSERT INTO projects
            (id, name, path, context, repo_remote, push_policy, policy_pack, verify_cmd,
-            template_id, archived, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+            template_id, unattended, archived, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
       )
       .run(
         input.id,
@@ -44,6 +46,7 @@ export class ProjectsRepo {
         input.policyPack ?? "default",
         input.verifyCmd ?? null,
         input.templateId ?? null,
+        input.unattended === false ? 0 : 1,
         nowIso(),
       );
     return this.getOrThrow(input.id);
@@ -76,6 +79,7 @@ export class ProjectsRepo {
       pushPolicy: "push_policy",
       policyPack: "policy_pack",
       verifyCmd: "verify_cmd",
+      unattended: "unattended",
       archived: "archived",
     };
     const sets: string[] = [];
@@ -87,7 +91,7 @@ export class ProjectsRepo {
       const value = patch[key];
       if (value === undefined) continue;
       sets.push(`${column} = ?`);
-      values.push(key === "archived" ? (value ? 1 : 0) : value);
+      values.push(key === "archived" || key === "unattended" ? (value ? 1 : 0) : value);
     }
     if (sets.length === 0) return this.getOrThrow(id);
     values.push(id);

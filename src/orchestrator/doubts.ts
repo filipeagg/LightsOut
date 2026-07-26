@@ -13,7 +13,12 @@ import type { Bus } from "../bus.js";
 import type { Repos } from "../db/repos/index.js";
 import type { AgentsLoader } from "../agents/loader.js";
 import type { DoubtOption, DoubtRow, Engine, ProjectRow, TaskRow } from "../db/types.js";
-import { NEVER_LEARNED, type ActionClass } from "../policy/schema.js";
+import {
+  NEVER_ALLOW,
+  NEVER_BELOW_HUMAN,
+  NEVER_LEARNED,
+  type ActionClass,
+} from "../policy/schema.js";
 import { isToolchainManager, managerOf } from "../projects/toolchain.js";
 import type { PermissionOption } from "@agentclientprotocol/sdk";
 import { consultAdvisor, otherEngine, type AdvisorResult } from "../acp/advisor.js";
@@ -413,6 +418,10 @@ export class DoubtService {
     paths?: string[];
     readAreas?: string[];
     writeScopes?: string[];
+    /** PE-13: a `credentials` gate whose only evidence was this run's own vault entry. */
+    judgeEligible?: boolean;
+    /** OR-12: the project runs unattended, which widens what the judge may settle. */
+    unattended?: boolean;
   }): Promise<boolean> {
     // Nothing here may break the gate: a judge that throws is a judge that abstains.
     let profile;
@@ -428,6 +437,8 @@ export class DoubtService {
         projectPath: input.project.path,
         command: input.title,
         paths: input.paths,
+        judgeEligible: input.judgeEligible,
+        unattended: input.unattended,
       })
     ) {
       return false;
@@ -499,6 +510,17 @@ export class DoubtService {
     readAreas?: string[];
     /** Where this pack confines writes (§19), for the judge's context. */
     writeScopes?: string[];
+    /**
+     * PE-13: the whole of the evidence for this `credentials` gate was a vault entry this run
+     * resolved, so the judge may look at it (§7.1d).
+     */
+    judgeEligible?: boolean;
+    /**
+     * OR-12: this project's runs must finish without a person (§7.7). Widens the judge's remit to
+     * everything off the hard floor and, when nothing clears the gate, refuses the action with the
+     * reason instead of holding the session open for somebody to notice.
+     */
+    unattended?: boolean;
     /** Override the slow clock; only tests use this. */
     waitMs?: number;
     /** Override the database poll interval; only tests use this. */
@@ -561,6 +583,50 @@ export class DoubtService {
     }
 
     const doubt = raised.doubt;
+
+    // OR-12 (§7.7): unattended, and neither the judge nor the advisor cleared it. Waiting is the
+    // one thing this mode exists to prevent, so the action is refused *with its reason* and the
+    // agent adapts — a denial is an answer. The doubt is still written and still answered, so the
+    // decision is in DECISIONS.md and in the panel under "Decided without you"; what does not
+    // happen is a session held open until somebody happens to look at it.
+    const onHardFloor =
+      NEVER_ALLOW.has(input.actionClass as ActionClass) ||
+      NEVER_BELOW_HUMAN.has(input.actionClass as ActionClass);
+    if (input.unattended && !onHardFloor && doubt.kind !== "hard_rule") {
+      const explanation =
+        `Refused automatically: this project runs unattended (OR-12), and neither the permission ` +
+        `judge nor the advisor could clear a ${input.actionClass} action. Policy said: ` +
+        `${input.reason}. Adapt — take another route, narrow the scope, or use a different tool — ` +
+        `and if there is no other route, record what you could not do in your deliverable and ` +
+        `carry on with the rest. Do not retry this action and do not wait for a person.`;
+      try {
+        this.repos.doubts.answer(doubt.id, `B: refused automatically (unattended, OR-12)`);
+        this.repos.decisions.record({
+          projectId: input.project.id,
+          taskId: input.task.id,
+          doubtId: doubt.id,
+          kind: "provisional",
+          question: `${input.actionClass}: ${input.title.slice(0, 200)}`,
+          choice: "refused automatically (unattended)",
+          rationale: input.reason.slice(0, 300),
+        });
+        this.repos.events.append({
+          runId: input.runId,
+          type: "perm.verdict",
+          payload: {
+            class: input.actionClass,
+            allowed: false,
+            unattended: true,
+            doubtRef: doubt.ref,
+            reason: "no judge or advisor allow; refused rather than waiting (OR-12)",
+          },
+        });
+      } catch {
+        // Recording must never be the reason a run stops. The refusal stands either way.
+      }
+      return { reject: true, explanation };
+    }
+
     const waitMs = input.waitMs ?? this.config.permissionWaitHours * 3_600_000;
     const answer = await this.waitForAnswer(doubt.id, waitMs, input.pollMs);
 

@@ -74,6 +74,12 @@ export type ProjectRow = {
   policy_pack: string;
   verify_cmd: string | null;
   template_id: string | null;
+  /**
+   * OR-12 (§7.7): runs of this project finish without a person. A `require_human` verdict off the
+   * hard floor is settled by the judge or the advisor, or refused with its reason — never parked.
+   * 1 by default: unattended is what the system is for.
+   */
+  unattended: number;
   archived: number;
   created_at: string;
 };

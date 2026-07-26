@@ -134,6 +134,9 @@ export type TaskRow = {
   status: TaskStatus;
   created_at: string;
   updated_at: string;
+  /** JSON arrays of capability names (PE-12): what the launch declared, what it was granted. */
+  needs: string | null;
+  grants: string | null;
 };
 
 export type RunRow = {

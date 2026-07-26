@@ -13,6 +13,9 @@ export type CreateTask = {
   verifyCmd?: string | null;
   /** Explicit position; appended after the last one when omitted. */
   position?: number;
+  /** What the launch said this task needs, and what was granted for it (PE-12). */
+  needs?: string[];
+  grants?: string[];
 };
 
 export class TasksRepo {
@@ -26,8 +29,8 @@ export class TasksRepo {
       .prepare(
         `INSERT INTO tasks
            (id, chain_id, project_id, position, title, spec, agent_id, level, verify_cmd,
-            status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
+            status, created_at, updated_at, needs, grants)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -41,6 +44,8 @@ export class TasksRepo {
         input.verifyCmd ?? null,
         ts,
         ts,
+        input.needs?.length ? JSON.stringify(input.needs) : null,
+        input.grants?.length ? JSON.stringify(input.grants) : null,
       );
     return this.getOrThrow(id);
   }

@@ -23,6 +23,7 @@ import type { ProjectRow } from "../db/types.js";
 import type { Actions } from "../control/actions.js";
 import { askEngine } from "../acp/advisor.js";
 import { guide, TOPIC_ORDER } from "./guide.js";
+import { CAPABILITIES } from "../policy/capabilities.js";
 import { conflict, failure, invalid, notFound, success, toolResult } from "./envelope.js";
 // One read model for both surfaces: the panel renders these exact shapes (DESIGN §12.0).
 import { activeRunFor, doubtView, projectListItem, projectStatusView } from "../views.js";
@@ -299,12 +300,26 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
             "Not the same as a phase's deliverable, which is a path checked on disk.",
         ),
       agentId: z.string().min(1),
+      needs: z
+        .array(z.enum(CAPABILITIES))
+        .optional()
+        .describe(
+          "What this task needs to succeed: network, deps_install, execute, write, git, delete, " +
+            "knowledge_write. Checked against the agent's policy before the run starts, so a " +
+            "mismatch is a refusal in one second rather than a wasted run (PE-12).",
+        ),
+      grants: z
+        .array(z.enum(CAPABILITIES))
+        .optional()
+        .describe("Grant these for this run only. Recorded on the task; gone when it ends."),
       level: levelSchema.optional(),
       verify: z.string().optional(),
       chainId: z.string().optional(),
     },
     async (args) =>
       actions.launchTask("mcp", {
+        ...(args.needs?.length ? { needs: args.needs } : {}),
+        ...(args.grants?.length ? { grants: args.grants } : {}),
         projectId: args.projectId,
         title: args.title,
         spec: args.spec,

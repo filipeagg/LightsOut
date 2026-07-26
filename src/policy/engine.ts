@@ -38,6 +38,12 @@ export type Decision = {
 };
 
 export type PolicyLayers = {
+  /**
+   * Capabilities granted for this one run (PE-12). The most specific layer there is: someone
+   * asked for it at launch, it is recorded on the task, and it dies with the run. The hard floor
+   * of PE-03 still applies on top.
+   */
+  grant?: PolicyPack | undefined;
   /** Per-project override pack from lightsout.yaml (PE-05). */
   project?: PolicyPack | undefined;
   /** The agent profile's pack. */
@@ -77,6 +83,8 @@ export class PolicyEngine {
     cls: ActionClass,
   ): { verdict: Verdict; source: RuleSource; reason?: string } | undefined {
     const order: [RuleSource, PolicyPack | undefined][] = [
+      // A per-run grant is the most specific thing anyone said about this run (PE-12).
+      ["project", this.layers.grant],
       ["project", this.layers.project],
       ["agent", this.layers.agent],
       ["default", this.layers.default],
@@ -109,6 +117,8 @@ export class PolicyEngine {
    */
   private writeScopes(): { scopes: string[]; source: RuleSource } | undefined {
     const order: [RuleSource, PolicyPack | undefined][] = [
+      // A per-run grant is the most specific thing anyone said about this run (PE-12).
+      ["project", this.layers.grant],
       ["project", this.layers.project],
       ["agent", this.layers.agent],
       ["default", this.layers.default],

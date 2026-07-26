@@ -20,6 +20,7 @@ import { readProjectConfig } from "../projects/config.js";
 import { runVerify } from "./verify.js";
 import { RunLocks } from "./locks.js";
 import { composeSpec, requireExpects, requireRequest } from "./spec.js";
+import type { Capability } from "../policy/capabilities.js";
 import type { RunTaskInput, RunTaskResult } from "../acp/runner.js";
 import { DoubtService } from "./doubts.js";
 import type { KnowledgeLoader } from "../knowledge/loader.js";
@@ -35,6 +36,9 @@ export type LaunchTaskInput = {
   /** What comes back, in the caller's words. Required on every launch (OR-10). */
   expects: string;
   agentId: string;
+  /** Declared needs and per-run grants (PE-12); validated by the caller before it gets here. */
+  needs?: Capability[];
+  grants?: Capability[];
   level?: TaskLevel;
   verifyCmd?: string | null;
   /** Append to this chain instead of creating one. */
@@ -129,6 +133,8 @@ export class Orchestrator {
         agentId: task.agentId,
         ...(task.level ? { level: task.level } : {}),
         ...(task.verifyCmd !== undefined ? { verifyCmd: task.verifyCmd } : {}),
+        ...(task.needs?.length ? { needs: task.needs } : {}),
+        ...(task.grants?.length ? { grants: task.grants } : {}),
       })),
     );
     this.repos.events.append({
@@ -164,6 +170,8 @@ export class Orchestrator {
       agentId: input.agentId,
       ...(input.level ? { level: input.level } : {}),
       ...(input.verifyCmd !== undefined ? { verifyCmd: input.verifyCmd } : {}),
+      ...(input.needs?.length ? { needs: input.needs } : {}),
+      ...(input.grants?.length ? { grants: input.grants } : {}),
     });
     if (chain.status !== "active") this.repos.chains.setStatus(chain.id, "active");
     this.bus.emit("overview");

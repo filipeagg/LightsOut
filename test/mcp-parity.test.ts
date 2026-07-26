@@ -56,6 +56,7 @@ const INTERNAL = new Set([
   "changed",
   "requireNotArchived",
   "requireLaunchable",
+  "requireCapabilities",
 ]);
 
 /** The one exception, with its reason (VT-02, MC-07). Adding to this list is a design decision. */

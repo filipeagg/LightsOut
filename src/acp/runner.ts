@@ -15,10 +15,22 @@ import type { ProjectRow, TaskRow } from "../db/types.js";
 import { RunSession, type HumanGate, type RunOutcome } from "./session.js";
 import { LiveRuns } from "./live.js";
 import { compactionBlock, deliverablePath, lintDocument } from "../projects/deliverable.js";
+import { grantPack, isCapability, type Capability } from "../policy/capabilities.js";
+
+/** The capability list stored on a task, tolerant of anything that is not one (PE-12). */
+function parseCapabilities(raw: string | null): Capability[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v): v is Capability => typeof v === "string" && isCapability(v)) : [];
+  } catch {
+    return [];
+  }
+}
 import { DoubtService } from "../orchestrator/doubts.js";
 import type { KnowledgeLoader } from "../knowledge/loader.js";
 import { buildKnowledgeBlock } from "../knowledge/inject.js";
-import { renderVaultIndex, type Vault } from "../vault/vault.js";
+import { renderVaultIndex, vaultHosts, type Vault } from "../vault/vault.js";
 
 export type RunTaskInput = {
   project: ProjectRow;
@@ -84,6 +96,8 @@ export class TaskRunner {
     vaultIndex?: string;
     vaultEnv?: Record<string, string>;
     vaultReads: { entryId: string; fields: string[] }[];
+    /** Hosts this run holds credentials for (VT-07); they carry a network grant with them. */
+    vaultHosts?: string[];
     writableKnowledgeBase?: string;
   }> {
     const attachments = this.repos.projectKnowledge.list(project.id);
@@ -123,10 +137,7 @@ export class TaskRunner {
       if (block.text) knowledgeBlock = block.text;
     }
 
-    const grantsNetwork = pack?.rules.some(
-      (rule) => rule.class === "network" && rule.verdict !== "deny",
-    );
-    if (!this.context?.vault || !grantsNetwork) {
+    if (!this.context?.vault) {
       return {
         ...(knowledgeBlock ? { knowledgeBlock } : {}),
         vaultReads: [],
@@ -134,16 +145,34 @@ export class TaskRunner {
       };
     }
 
+    // VT-07: a project holding credentials for an API is a project meant to call that API.
+    // Resolving the token and then denying the call is the contradiction the vault exists to
+    // remove — the exact shape of "the only agent with network is contract-prober". So the entries
+    // are resolved first, and if any of them names a host, the run gets the network for it.
     const resolved = await this.context.vault.resolveForRun({
       projectId: project.id,
       testOnlyRequired: pack?.vault?.test_only_required ?? false,
     });
+    const hosts = resolved.reads.length ? vaultHosts(resolved) : [];
+    const packGrantsNetwork = pack?.rules.some(
+      (rule) => rule.class === "network" && rule.verdict !== "deny",
+    );
+    if (!packGrantsNetwork && hosts.length === 0) {
+      // Nothing to call and no grant: behave as before and keep the values out of the process.
+      return {
+        ...(knowledgeBlock ? { knowledgeBlock } : {}),
+        vaultReads: [],
+        ...(writable ? { writableKnowledgeBase: writable } : {}),
+      };
+    }
+
     const index = renderVaultIndex(resolved);
     return {
       ...(knowledgeBlock ? { knowledgeBlock } : {}),
       ...(index ? { vaultIndex: index } : {}),
       ...(Object.keys(resolved.env).length > 0 ? { vaultEnv: resolved.env } : {}),
       vaultReads: resolved.reads,
+      ...(hosts.length ? { vaultHosts: hosts } : {}),
       ...(writable ? { writableKnowledgeBase: writable } : {}),
     };
   }
@@ -179,20 +208,6 @@ export class TaskRunner {
     const profile = this.agents.profileOrThrow(task.agent_id);
     const instructions = this.agents.instructionsFor(profile);
 
-    const policy = new PolicyEngine(
-      {
-        project: input.projectPack,
-        agent: this.agents.pack(profile.policy),
-        default: this.agents.pack("default"),
-      },
-      {
-        scriptScanBytes: this.config.scriptScanBytes,
-        // PE-10: what a person already allowed at a gate, so the same shape does not ask again.
-        learnedAllow: (shape) => this.repos.learned.shapes().has(shape),
-      },
-    );
-
-
     const decisionContext = this.doubts.decisionContext(task.id);
     const formatFeedback = await this.formatFeedback(project, task);
     // The directories this project may read outside itself (PE-09). Resolved here so the policy
@@ -204,6 +219,37 @@ export class TaskRunner {
 
     const agentPack = this.agents.pack(profile.policy);
     const context = await this.runContext(project, task, input.projectPack ?? agentPack);
+
+    // PE-12: what this launch was granted, as the most specific policy layer. VT-07 adds the
+    // network when the run holds credentials for a host — asking for the token and then denying
+    // the call is the contradiction the vault exists to remove.
+    const granted = parseCapabilities(task.grants);
+    if (context.vaultHosts?.length && !granted.includes("network")) {
+      granted.push("network");
+      this.repos.events.append({
+        type: "config.changed",
+        payload: {
+          kind: "grant",
+          id: `${task.id}:network`,
+          op: "vault",
+          hosts: context.vaultHosts,
+          actor: "system",
+        },
+      });
+    }
+    const policy = new PolicyEngine(
+      {
+        ...(granted.length ? { grant: grantPack(granted, task.id) } : {}),
+        project: input.projectPack,
+        agent: this.agents.pack(profile.policy),
+        default: this.agents.pack("default"),
+      },
+      {
+        scriptScanBytes: this.config.scriptScanBytes,
+        // PE-10: what a person already allowed at a gate, so the same shape does not ask again.
+        learnedAllow: (shape) => this.repos.learned.shapes().has(shape),
+      },
+    );
 
     const run = this.repos.runs.start({
       taskId: task.id,

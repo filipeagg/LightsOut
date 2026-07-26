@@ -52,6 +52,17 @@ launch_phase {
 }
 ```
 
+## say_what_the_task_needs
+
+field.needs: the capabilities the work requires — network, deps_install, execute, write, git, delete, knowledge_write.
+checked: against the agent's policy packs before the run starts (PE-12).
+refusal: names what is missing, which agent's pack grants it, and the exact `grants` to pass. One second, not twenty minutes.
+field.grants: widen the policy for this run only. Recorded on the task, gone when it ends, never reaches the hard floor of PE-03.
+rule_of_thumb: if the task calls an API, installs something, or writes outside doc/, declare it.
+vault: a project holding a vault entry with a base_url gets the network for that host automatically (VT-07) — you do not have to grant it.
+
+example: launch_task { …, needs: ["network","deps_install"], grants: ["deps_install"], agentId: "contract-prober" }
+
 ## levels_and_limits
 
 level.quick: LO_TIMEOUT_QUICK_MIN (30 min default). Exploration, small edits.

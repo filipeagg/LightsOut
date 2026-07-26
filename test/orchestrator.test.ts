@@ -73,11 +73,57 @@ describe("recovery", () => {
     repos.phases.markRunning(phase.id, task.id);
     expect(repos.phases.getOrThrow(phase.id).status).toBe("running");
 
-    recoverInterrupted(repos);
+    const report = recoverInterrupted(repos);
 
     // This is what the user saw: a phase row reading "running" with no run in flight.
     expect(repos.phases.getOrThrow(phase.id).status).toBe("pending");
     expect(repos.tasks.getOrThrow(task.id).status).toBe("interrupted");
+    expect(report.phasesReconciled).toEqual([phase.id]);
+  });
+
+  it("also fixes a phase an earlier restart left running, with no run to interrupt", () => {
+    // The leftover case, found on the live system: the run had been marked interrupted by a
+    // previous boot, so a pass that only looks at what it interrupts itself sees nothing to do
+    // and the panel goes on claiming the phase is working.
+    const { project, tasks } = seedChain();
+    const task = tasks[0]!;
+    const run = repos.runs.start({ taskId: task.id, engine: "claude" });
+    repos.runs.finish(run.id, { status: "interrupted", exitReason: "container restart" });
+    repos.tasks.setStatus(task.id, "interrupted");
+    const phase = repos.phases.create({
+      projectId: project.id,
+      position: 1,
+      phaseId: "analyse",
+      title: "Read the system",
+      agentId: "codebase-analyst",
+      instructions: "read",
+    });
+    repos.phases.markRunning(phase.id, task.id);
+
+    const report = recoverInterrupted(repos);
+
+    expect(report.runs).toBe(0); // nothing to interrupt this time
+    expect(report.phasesReconciled).toEqual([phase.id]);
+    expect(repos.phases.getOrThrow(phase.id).status).toBe("pending");
+  });
+
+  it("leaves a phase alone while its task is really working", () => {
+    const { project, tasks } = seedChain();
+    const task = tasks[0]!;
+    repos.tasks.setStatus(task.id, "queued");
+    const phase = repos.phases.create({
+      projectId: project.id,
+      position: 1,
+      phaseId: "analyse",
+      title: "Read the system",
+      agentId: "codebase-analyst",
+      instructions: "read",
+    });
+    repos.phases.markRunning(phase.id, task.id);
+
+    const report = recoverInterrupted(repos);
+    expect(report.phasesReconciled).toEqual([]);
+    expect(repos.phases.getOrThrow(phase.id).status).toBe("running");
   });
 
   it("marks orphaned runs interrupted and pauses their chains (RT-07)", () => {

@@ -61,6 +61,13 @@ async function main(): Promise<void> {
       `[boot] ${recovery.runs} run(s) marked interrupted, ${recovery.chainsPaused.length} chain(s) paused (RT-07)`,
     );
   }
+  // Reported separately: a phase can need reconciling with no run to interrupt, when an earlier
+  // restart left the row behind. Silence there is how the panel came to claim a phase was working.
+  if (recovery.phasesReconciled.length > 0) {
+    console.warn(
+      `[boot] ${recovery.phasesReconciled.length} phase(s) were left running and are pending again`,
+    );
+  }
 
   // 4. Workspace layout (RT-02, §11.1 step 4): the loaders and the scaffolder assume it exists.
   const layout = await ensureWorkspaceLayout(config.workspace);

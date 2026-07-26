@@ -795,6 +795,48 @@ Pack matchers are merged onto the built-in table and matched against each segmen
 
 `evaluate(request)`: classify → look up the class in, in order, project override pack (`lightsout.yaml`), agent profile pack, `default` pack → first hit wins; record `rule_source`. Hard floor (PE-03, not overridable): `outside_workspace` can never resolve to allow; `credentials`, `publish_external` and force-push can never resolve below `require_human`. Every evaluation writes a `permission_audit` row (PE-04). Target latency < 5 ms (pure in-memory tables).
 
+### 7.1b Text is not intent: three false positives that stopped a run (2026-07-26)
+
+All three came from matching words rather than what the code does, and all three cost a real run:
+
+| command | was | is | why it was wrong |
+|---|---|---|---|
+| `python3 -c "…os.environ.get('LO_VAULT_EFEMIS_PASSWORD')… print('present')"` | `credentials` | `script_exec` | `PASSWORD` inside a variable *name*. The agent was checking its own wiring; it printed `present`, never a value. And `credentials` is on the hard floor, so neither the judge nor a learned allow could rescue it — the run stopped dead. |
+| `python3 -c "…find_spec('requests')…"` | `network` | `script_exec` | `requests` as a *module name*. Asking whether a library is installed is not using it. |
+| `pip install --target .lightsout/tmp/deps openpyxl` | `deps_install` | `project_write` | An install into the scratch directory is swept when the run ends (PE-08), so the reason the gate exists — a dependency changes the build for every later run (ST-03) — does not apply. |
+
+The rules now: a credential match needs a secret *file* or a value *on its way out* (`$PASSWORD`
+expanded, `print(os.environ…)`, `printenv SECRET`, a named API key); a network match needs an
+`import`, a `require`, a call on the library, a `fetch(` or a URL; and a dependency install that
+names a `--target` inside `.lightsout/tmp/` is a write, not an install.
+
+### 7.5 What a task needs, checked before it starts (PE-12)
+
+The other half of the same afternoon: a task that had to call an API, install `openpyxl` and write
+an `.xlsx` was launched on `builder`, whose pack denies the network. The agent worked that out
+twenty minutes in, and explained it well — but the mismatch was knowable at launch and nobody
+looked.
+
+A launch may now declare `needs: ["network", "deps_install", "write"]`. The declaration is checked
+against the project pack, the agent's pack and `default`, in that order, and:
+
+- a capability the packs `allow` (or make `provisional`) is granted;
+- `require_human` does **not** count — a run that stops in the middle is the thing being avoided;
+- anything missing is a refusal, in one second, naming what is missing, which builtin's pack
+  already grants it, and the exact `grants: […]` to pass instead.
+
+`grants` widen the policy for **one run**: they become a `grant:` pack, the most specific layer
+ahead of the project override, recorded on the task in `tasks.grants` (migration 7) and visible in
+the panel. They cannot reach the hard floor of PE-03: `outside_workspace` still never allows, and
+`credentials` and `publish_external` still never fall below a human.
+
+**And VT-07**: when a run resolves a vault entry that declares a `base_url`, the run is granted the
+network and the host is recorded (`config.changed {kind:'grant', op:'vault', hosts:[…]}`). Handing
+an agent a token for an API and then denying the call was the contradiction that made
+`contract-prober` the only profile able to do integration work. Per-host enforcement is the egress
+allowlist of RT-05 when the proxy is enabled; with it disabled the grant is the whole network, and
+this section says so rather than implying otherwise.
+
 ### 7.4 What the classifier does not know, and how it stops asking twice (PE-10)
 
 **The failure.** A chain stopped for eleven minutes on this:

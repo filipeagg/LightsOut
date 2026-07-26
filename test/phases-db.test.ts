@@ -78,14 +78,16 @@ describe("migration 2", () => {
       )
       .run(nowIso());
     const chain = legacyRepos.chains.create({ projectId: "old", title: "c" });
-    const task = legacyRepos.tasks.create({
-      chainId: chain.id,
-      projectId: "old",
-      title: "t",
-      spec: "s",
-      agentId: "builder",
-      level: "quick",
-    });
+    // Raw SQL: TasksRepo now writes needs/grants, which migration 7 adds (PE-12).
+    const taskId = ulid();
+    legacy
+      .prepare(
+        `INSERT INTO tasks (id, chain_id, project_id, position, title, spec, agent_id, level,
+                            status, created_at, updated_at)
+         VALUES (?, ?, 'old', 1, 't', 's', 'builder', 'quick', 'queued', ?, ?)`,
+      )
+      .run(taskId, chain.id, nowIso(), nowIso());
+    const task = legacyRepos.tasks.getOrThrow(taskId);
     // Raw SQL again: DoubtsRepo now writes action_class/action_shape, which migration 6 adds and
     // a version-1 schema does not have. The point of this fixture is the old shape.
     const doubtId = ulid();
@@ -115,6 +117,7 @@ describe("migration 2", () => {
       "4:project context brief",
       "5:project read-only areas",
       "6:learned allows",
+      "7:task capabilities",
     ]);
     // Migration 4 gives the legacy project a brief it can be told apart from a real one (PM-09).
     expect(

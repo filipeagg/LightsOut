@@ -28,10 +28,18 @@ import type { VaultEntry, VaultEntryView } from "../vault/schema.js";
 import type { Orchestrator } from "../orchestrator/orchestrator.js";
 import type { PhaseService, LaunchPhaseResult } from "../orchestrator/phases.js";
 import { createProject, type CreateProjectInput } from "../projects/scaffold.js";
+import { readProjectConfig } from "../projects/config.js";
 import type { ProjectPhaseRow, ProjectRow, TaskLevel } from "../db/types.js";
 import { existsSync } from "node:fs";
 import { activeRunFor } from "../views.js";
 import { validateArea } from "../projects/areas.js";
+import {
+  CAPABILITIES,
+  checkCapabilities,
+  explainMismatch,
+  isCapability,
+  type Capability,
+} from "../policy/capabilities.js";
 import { Classifier } from "../policy/classify.js";
 import {
   hostPathFor,
@@ -213,7 +221,60 @@ export class Actions {
     return this.need(this.deps.phases, "phases").addAdhoc(actor, projectId, input);
   }
 
-  launchTask(
+  /**
+   * What a task needs, against what its agent's packs allow (PE-12). Returns the grant pack to
+   * apply, or throws the refusal that says how to fix it — before a single token is spent.
+   */
+  private async requireCapabilities(input: {
+    projectId: string;
+    agentId: string;
+    needs?: string[];
+    grants?: string[];
+  }): Promise<{ needs: Capability[]; grants: Capability[] }> {
+    const needs = (input.needs ?? []).map((value) => {
+      if (!isCapability(value)) {
+        throw new Error(`unknown capability: ${value} (one of ${CAPABILITIES.join(", ")})`);
+      }
+      return value;
+    });
+    const grants = (input.grants ?? []).map((value) => {
+      if (!isCapability(value)) {
+        throw new Error(`unknown capability: ${value} (one of ${CAPABILITIES.join(", ")})`);
+      }
+      return value;
+    });
+    if (needs.length === 0) return { needs, grants };
+
+    const project = this.project(input.projectId);
+    const profile = this.deps.agents.profileOrThrow(input.agentId);
+    const { pack: projectPack } = await readProjectConfig(project.path);
+    const checks = checkCapabilities(needs, {
+      ...(projectPack ? { project: projectPack } : {}),
+      ...(this.deps.agents.pack(profile.policy)
+        ? { agent: this.deps.agents.pack(profile.policy) }
+        : {}),
+      ...(this.deps.agents.pack("default") ? { default: this.deps.agents.pack("default") } : {}),
+    });
+    const missing = checks.filter((check) => !check.granted && !grants.includes(check.capability));
+    if (missing.length === 0) return { needs, grants };
+
+    // Which builtin could do it, so the refusal is a route and not a wall.
+    const alternatives = [...this.deps.agents.current().profiles.values()]
+      .filter((candidate) => {
+        if (!candidate.enabled) return false;
+        const pack = this.deps.agents.pack(candidate.policy);
+        return checkCapabilities(
+          missing.map((m) => m.capability),
+          { ...(pack ? { agent: pack } : {}) },
+        ).every((check) => check.granted);
+      })
+      .map((candidate) => ({ agentId: candidate.id, policy: candidate.policy }))
+      .slice(0, 3);
+
+    throw new Error(explainMismatch({ agentId: input.agentId, missing, alternatives }));
+  }
+
+  async launchTask(
     actor: Actor,
     input: {
       projectId: string;
@@ -225,11 +286,21 @@ export class Actions {
       level?: TaskLevel;
       verifyCmd?: string | null;
       chainId?: string;
+      /** What this task needs, checked before it starts (PE-12). */
+      needs?: string[];
+      /** What to grant it for this run only (PE-12). */
+      grants?: string[];
     },
-  ): { taskId: string; chainId: string; started: boolean; queued: boolean } {
+  ): Promise<{ taskId: string; chainId: string; started: boolean; queued: boolean }> {
     this.requireNotArchived(input.projectId);
     this.requireLaunchable(input.agentId);
-    const launch = this.deps.orchestrator.launchTask(input);
+    const capabilities = await this.requireCapabilities(input);
+    const { needs: _declared, grants: _asked, ...rest } = input;
+    const launch = this.deps.orchestrator.launchTask({
+      ...rest,
+      ...(capabilities.needs.length ? { needs: capabilities.needs } : {}),
+      ...(capabilities.grants.length ? { grants: capabilities.grants } : {}),
+    });
     this.deps.repos.events.append({
       type: "task.state",
       payload: { taskId: launch.taskIds[0], status: "queued", actor },

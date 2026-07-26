@@ -30,6 +30,23 @@ export type ResolvedVault = {
   refused: { entryId: string; reason: string }[];
 };
 
+/**
+ * The hosts this run has credentials for (VT-07). A project given a token for an API is a project
+ * meant to call that API; these are the hosts that justifies, and no others.
+ */
+export function vaultHosts(resolved: ResolvedVault): string[] {
+  const hosts = new Set<string>();
+  for (const entry of resolved.index) {
+    if (!entry.base_url) continue;
+    try {
+      hosts.add(new URL(entry.base_url).host);
+    } catch {
+      continue; // a base_url that is not a URL grants nothing
+    }
+  }
+  return [...hosts];
+}
+
 export class Vault {
   constructor(private readonly workspace: string) {}
 

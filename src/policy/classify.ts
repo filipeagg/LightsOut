@@ -133,7 +133,13 @@ export const DEFAULT_MATCHERS: Record<string, string[]> = {
     "^(npx|pnpx)\\b",
   ],
   credentials: [
-    "\\b(ANTHROPIC_API_KEY|OPENAI_API_KEY|GIT_TOKEN|GITHUB_TOKEN|AWS_SECRET|PASSWORD)\\b",
+    // A key named outright, or a secret variable *expanded* — `$PASSWORD`, `${DB_PASSWORD}` —
+    // which is a value on its way somewhere. A variable *name* mentioned as text is not:
+    // `os.environ.get('LO_VAULT_EFEMIS_PASSWORD')` is an agent checking its own wiring, and
+    // gating that stopped a real run dead (§7.1b). The script body check judges the code itself.
+    "\\b(ANTHROPIC_API_KEY|OPENAI_API_KEY|GIT_TOKEN|GITHUB_TOKEN|AWS_SECRET)\\b",
+    "[$%]\\{?[A-Za-z_][A-Za-z0-9_]*(PASSWORD|SECRET|TOKEN|API_KEY)",
+    "^(printenv|env)\\b[^|]*\\b(PASSWORD|SECRET|TOKEN|API_KEY)",
     // Every reading tool, not just the obvious three: `project_read` now allows the whole
     // family, so a secret file must be sensitive whichever tool opens it.
     "(^|\\s)(cat|less|more|head|tail|grep|rg|egrep|fgrep|awk|sed|nl|cut|sort|uniq|xxd|od|strings|jq|yq|diff|cmp|base64)\\b.*(\\.env|\\.npmrc|\\.netrc|id_rsa|id_ed25519|credentials|\\.pem|\\.pfx|\\.p12)\\b",
@@ -168,9 +174,14 @@ const SCRIPT_HEREDOC_RE = new RegExp(`^${SCRIPT_INTERPRETERS}\\b[^\\n]*<<-?\\s*[
  * fetches over the network is judged exactly as `curl` would be.
  */
 const SCRIPT_BODY_FAMILIES: [ActionClass, RegExp, string][] = [
+  // A secret *file* opened, or a secret *value* printed — not the word "credentials" appearing as
+  // a label, and not a variable name that happens to contain PASSWORD. `os.environ.get('LO_VAULT_
+  // EFEMIS_PASSWORD')` followed by "present"/"missing" is how an agent checks its own wiring
+  // before starting, and gating it stopped a run dead (§7.1b). Printing the value is the thing
+  // that matters, and that still matches.
   [
     "credentials",
-    /\.env\b|\.npmrc|\.netrc|id_rsa|id_ed25519|\.pem\b|\.pfx\b|\.p12\b|credentials|ANTHROPIC_API_KEY|OPENAI_API_KEY|GIT_TOKEN|GITHUB_TOKEN|AWS_SECRET|PASSWORD/i,
+    /\.env\b|\.npmrc|\.netrc|id_rsa|id_ed25519|\.pem\b|\.pfx\b|\.p12\b|['"][^'"]*credentials[^'"]*['"]\s*[,)]?\s*(?:,\s*)?['"]?r?b?['"]?\s*\)|open\s*\([^)]*credentials|print\s*\(\s*(?:os\.environ|os\.getenv)|console\.log\s*\(\s*process\.env\.[A-Za-z_]|(?:ANTHROPIC_API_KEY|OPENAI_API_KEY|GIT_TOKEN|GITHUB_TOKEN|AWS_SECRET)\b/i,
     "reads or carries credentials",
   ],
   // Dependencies before network: `pip install requests` is a dependency, and the package name
@@ -180,9 +191,12 @@ const SCRIPT_BODY_FAMILIES: [ActionClass, RegExp, string][] = [
     /\b(pip3?|uv|poetry|npm|pnpm|yarn|bun|apt|apt-get|cargo|go)\s+(install|add|sync|ci|get)\b/i,
     "installs dependencies",
   ],
+  // A network library *used*, not a module name mentioned. `import requests` and
+  // `requests.get(…)` reach the network; `find_spec('requests')` asks whether it is installed,
+  // which is what an agent does before deciding it cannot do the job (§7.1b).
   [
     "network",
-    /\b(requests|httpx|urllib|urllib2|urllib3|http\.client|socket|paramiko|smtplib|ftplib|websocket|axios|node-fetch|node:https?|got)\b|\bfetch\s*\(|https?:\/\//i,
+    /\b(import|from|require\s*\(|=\s*require)\s+['"]?(requests|httpx|urllib|urllib2|urllib3|http\.client|socket|paramiko|smtplib|ftplib|websocket|axios|node-fetch|node:https?|got)\b|\b(requests|httpx|urllib|axios|socket)\s*\.\s*[a-z_]+\s*\(|\bfetch\s*\(|https?:\/\//i,
     "reaches the network",
   ],
   [
@@ -400,6 +414,19 @@ export function argPaths(segment: string): string[] {
     .slice(1)
     .map((token) => token.replace(/^['"]|['"]$/g, ""))
     .filter((token) => token.length > 0 && !token.startsWith("-"));
+}
+
+/**
+ * An install that lands in the scratch directory and dies with the run (PE-08). `deps_install` is
+ * gated because a dependency changes the build environment for every later run (ST-03) — which is
+ * exactly what `pip install --target .lightsout/tmp/deps` does not do. It still needs the network,
+ * and that is a separate question the pack answers.
+ */
+export function installsIntoScratch(projectPath: string, segment: string): boolean {
+  const match = segment.match(/(?:--target|--prefix|--install-dir|-t)[=\s]+("[^"]+"|'[^']+'|\S+)/i);
+  const target = match?.[1]?.replace(/^['"]|['"]$/g, "");
+  if (!target) return false;
+  return Classifier.isInside(scratchRoot(projectPath), path.resolve(projectPath, target));
 }
 
 /** True when every path-like argument of the segment stays inside the scratch directory. */
@@ -701,6 +728,14 @@ export class Classifier {
           const patterns = this.table.get(cls) ?? [];
           for (const segment of segments) {
             const hit = patterns.find((re) => re.test(segment));
+            if (hit && cls === "deps_install" && installsIntoScratch(input.projectPath, segment)) {
+              // Into the scratch directory: it is swept when the run ends, so it changes nothing
+              // for the next one and the reason for the gate does not apply (PE-08, ST-03).
+              return {
+                class: "project_write",
+                reason: `install confined to ${SCRATCH_REL}, swept at the end of the run`,
+              };
+            }
             if (hit) {
               return {
                 class: cls,

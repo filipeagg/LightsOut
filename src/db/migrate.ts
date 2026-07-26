@@ -232,6 +232,16 @@ ALTER TABLE doubts ADD COLUMN action_class TEXT;
 ALTER TABLE doubts ADD COLUMN action_shape TEXT;
 `;
 
+/**
+ * Version 7 (PE-12): what a task said it needs, and what was granted for its run.
+ * Both are JSON arrays of capability names, kept on the task so a rerun keeps them and the panel
+ * can show why a run had powers its agent's pack does not.
+ */
+const TASK_CAPABILITIES_SQL = `
+ALTER TABLE tasks ADD COLUMN needs TEXT;
+ALTER TABLE tasks ADD COLUMN grants TEXT;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial schema", up: applyInitialSchema },
   {
@@ -249,6 +259,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 4, name: "project context brief", up: addProjectContext },
   { version: 5, name: "project read-only areas", up: PROJECT_AREAS_SQL },
   { version: 6, name: "learned allows", up: LEARNED_ALLOWS_SQL },
+  { version: 7, name: "task capabilities", up: TASK_CAPABILITIES_SQL },
 ];
 
 /** The marker migration 4 writes, and the panel looks for (PM-09). */

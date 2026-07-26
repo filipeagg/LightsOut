@@ -149,6 +149,26 @@ describe("stop the run that is running (OR-06, OR-09)", () => {
     expect(repos.tasks.getOrThrow(task.id).status).toBe("interrupted");
   });
 
+  it("pauses nothing when the run had already finished on its own", async () => {
+    // Found on the live system: a stop that arrives a second after the agent finished must not
+    // leave a chain that was completing looking paused.
+    const { project, actions } = await held();
+    const chain = repos.chains.create({ projectId: project.id, title: "already done" });
+    const task = repos.tasks.createMany([
+      { chainId: chain.id, projectId: project.id, title: "t", spec: "s", agentId: "builder" },
+    ])[0]!;
+    const run = repos.runs.start({ taskId: task.id, engine: "claude" });
+    repos.runs.finish(run.id, { status: "ok", summary: "done" });
+    repos.tasks.setStatus(task.id, "ok");
+
+    const result = await actions.stopRun("panel", { runId: run.id });
+
+    expect(result.stopped).toBe(false);
+    expect(result.reconciled).toBe(false);
+    expect(result.chainPaused).toBe(false);
+    expect(repos.chains.getOrThrow(chain.id).status).toBe("active");
+  });
+
   it("aborting a chain stops the running agent and drops the queue (OR-06)", async () => {
     const { project, orch, actions, live, aborted } = await held();
     const launch = orch.launchChain({

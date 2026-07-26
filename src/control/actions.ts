@@ -305,9 +305,11 @@ export class Actions {
     const result = await orchestrator.stopRun(runId, `stopped by ${actor}`);
 
     // The chain must not carry on to the next task after a stop: that is what abort is for, and
-    // silently continuing would make the stop look like it did nothing.
+    // silently continuing would make the stop look like it did nothing. But a stop that found
+    // nothing to stop must not pause anything either — a request that arrives just as the run
+    // finishes would otherwise leave a chain that completed looking paused.
     let chainPaused = false;
-    if (task) {
+    if (task && (result.stopped || result.reconciled)) {
       const chain = repos.chains.get(task.chain_id);
       if (chain && chain.status === "active") {
         repos.chains.setStatus(chain.id, "paused");

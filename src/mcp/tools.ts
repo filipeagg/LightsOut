@@ -543,6 +543,9 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
           description: base.manifest.description,
           tags: base.manifest.tags,
           updated: base.manifest.updated ?? null,
+          // The folder a linked base reads from, so an agent knows the documents are not the
+          // base's own to edit (KB-08).
+          source: base.source ?? null,
           documents: base.documents.map((d) => d.file),
           attached: attached.some((row) => row.base_id === base.manifest.id),
           writable: attached.some(
@@ -572,6 +575,175 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
     async () => ({ entries: await need(deps.vault, "vault").listViews() }),
   );
 
+  // --- The write surface (MC-07) -------------------------------------------
+  //
+  // Everything the panel can configure, Claude Desktop can configure too. These are the same
+  // three lines as the routes in `src/http/api-write.ts`, differing only in `actor` — the rules
+  // are in `actions.ts` and nowhere else (§12.0). The vault is the deliberate exception: there is
+  // no tool that writes a value, because a value sent through a tool call would travel through
+  // the conversation to get here (VT-02).
+
+  tool(
+    "write_agent",
+    "Create or edit an agent profile (AP-06). Editing a builtin writes the workspace copy that " +
+      "shadows it, which is what `source: 'workspace'` then means. Only the fields you pass " +
+      "change; the model must be one `list_agents` shows for that engine (AP-08).",
+    {
+      agentId: z.string().min(1),
+      name: z.string().min(1).optional(),
+      engine: z.enum(["claude", "codex"]).optional(),
+      model: z.string().min(1).optional(),
+      reasoning: z.enum(["minimal", "low", "medium", "high"]).optional(),
+      instructions: z.string().optional(),
+      policy: z.string().min(1).optional(),
+      tags: z.array(z.string().min(1)).optional(),
+      include: z.array(z.string().min(1)).optional(),
+      deliverable: z.string().min(1).optional(),
+      advisor: z.boolean().optional(),
+      enabled: z.boolean().optional(),
+    },
+    async ({ agentId, ...patch }) => ({
+      agent: await actions.writeAgent("mcp", agentId, stripUndefined(patch)),
+    }),
+  );
+
+  tool(
+    "set_agent_enabled",
+    "Enable or disable a profile without deleting it. A disabled profile cannot be launched and " +
+      "makes every template that names it unusable (AP-07).",
+    { agentId: z.string().min(1), enabled: z.boolean() },
+    async ({ agentId, enabled }) => ({
+      agent: await actions.setAgentEnabled("mcp", agentId, enabled),
+    }),
+  );
+
+  tool(
+    "delete_agent",
+    "Delete the workspace copy of a profile. A builtin of the same id reappears underneath, so " +
+      "this is 'revert my changes', not 'destroy the agent' (AP-06).",
+    { agentId: z.string().min(1) },
+    async ({ agentId }) => actions.deleteAgent("mcp", agentId),
+  );
+
+  tool(
+    "write_template",
+    "Create a template, clone a builtin, or replace its phase list (TP-04). `phases` is the " +
+      "whole list in order: to reorder, insert or remove, send the list you want. Every agent " +
+      "named must exist and be enabled (TP-03).",
+    {
+      templateId: z.string().min(1),
+      name: z.string().min(1).optional(),
+      description: z.string().optional(),
+      requiresWritableKnowledge: z.boolean().optional(),
+      phases: z
+        .array(
+          z.object({
+            id: z.string().min(1),
+            title: z.string().min(1),
+            agent: z.string().min(1),
+            instructions: z.string().min(1),
+            deliverable: z.string().min(1).optional(),
+            verify: z.string().min(1).optional(),
+            gate: z.enum(["auto", "human"]).optional(),
+            optional: z.boolean().optional(),
+            repeatable: z.boolean().optional(),
+          }),
+        )
+        .min(1)
+        .optional(),
+    },
+    async ({ templateId, requiresWritableKnowledge, ...rest }) => ({
+      template: await actions.writeTemplate("mcp", templateId, {
+        ...stripUndefined(rest),
+        ...(requiresWritableKnowledge === undefined
+          ? {}
+          : { requires_writable_knowledge: requiresWritableKnowledge }),
+      }),
+    }),
+  );
+
+  tool(
+    "delete_template",
+    "Delete a workspace template. A project already created from it keeps its own frozen phases " +
+      "and is unaffected (TP-04, TP-05).",
+    { templateId: z.string().min(1) },
+    async ({ templateId }) => actions.deleteTemplate("mcp", templateId),
+  );
+
+  tool(
+    "write_knowledge",
+    "Create a knowledge base or edit its manifest (KB-01). `source` points it at a folder " +
+      "already in the workspace, which then stays the source of truth for its documents; pass " +
+      "null to unlink and go back to the base's own folder (KB-08).",
+    {
+      baseId: z.string().min(1),
+      name: z.string().min(1).optional(),
+      kind: z
+        .enum(["technical", "functional", "organisational", "market", "other"])
+        .optional(),
+      description: z.string().optional(),
+      tags: z.array(z.string().min(1)).optional(),
+      owner: z.string().min(1).optional(),
+      source: z.string().min(1).nullable().optional(),
+    },
+    async ({ baseId, source, ...rest }) => ({
+      base: await actions.writeKnowledge("mcp", baseId, {
+        ...stripUndefined(rest),
+        ...(source === undefined ? {} : { source }),
+      }),
+    }),
+  );
+
+  tool(
+    "write_knowledge_doc",
+    "Write one document into a base, or into the folder it is linked to. Text only: .md, " +
+      ".markdown or .txt, because what a base is for is text that goes into a prompt (KB-08).",
+    { baseId: z.string().min(1), file: z.string().min(1), content: z.string() },
+    async ({ baseId, file, content }) =>
+      actions.writeKnowledgeDoc("mcp", baseId, file, content),
+  );
+
+  tool(
+    "delete_knowledge_doc",
+    "Delete one document from a base. Refused on a linked base: that folder belongs to " +
+      "something else, so the file goes from there (KB-08).",
+    { baseId: z.string().min(1), file: z.string().min(1) },
+    async ({ baseId, file }) => actions.deleteKnowledgeDoc("mcp", baseId, file),
+  );
+
+  tool(
+    "delete_knowledge",
+    "Delete a knowledge base. Refused while a project has it attached, because that project's " +
+      "prompts would start quietly missing context (KB-03). A linked folder is left where it is.",
+    { baseId: z.string().min(1) },
+    async ({ baseId }) => actions.deleteKnowledge("mcp", baseId),
+  );
+
+  tool(
+    "attach_knowledge",
+    "Attach a knowledge base to a project, or detach it (KB-03). `writable` is only for a " +
+      "knowledge-curation project, only one base at a time, and never a linked base (KB-05).",
+    {
+      projectId: z.string().min(1),
+      baseId: z.string().min(1),
+      detach: z.boolean().optional(),
+      writable: z.boolean().optional(),
+    },
+    async ({ projectId, baseId, detach, writable }) => {
+      const id = project(projectId).id;
+      return detach
+        ? actions.detachKnowledge("mcp", id, baseId)
+        : actions.attachKnowledge("mcp", id, baseId, writable ?? false);
+    },
+  );
+
   // Keep the doubt service reachable for future tools without an unused-import warning.
   void doubts;
+}
+
+/** A field the caller omitted must not overwrite what is stored with `undefined`. */
+function stripUndefined<T extends object>(value: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, v]) => v !== undefined),
+  ) as Partial<T>;
 }

@@ -88,6 +88,7 @@ Priority levels: MUST (pilot fails without it), SHOULD (build if cheap, else bac
 - MC-04 MUST. `write_doc` is restricted to files under the project's `doc/`. Everything else is read-only through MCP.
 - MC-05 SHOULD. `consult` (second opinion on demand) and `reload_agents`.
 - MC-06 MUST. Launches are fire-and-forget: the tool returns a run id immediately; progress is polled with `project_status`.
+- MC-07 MUST. Anything the panel can do, MCP can do: agents, templates, knowledge, projects and phases are all configurable from either surface (WP-02, SU-05). The one exception is writing a credential value, which stays on loopback — a value sent through a tool call would travel through the conversation to get here, and VT-02 says values reach the adapter's environment and nowhere else. An action reachable from one surface and not the other is a defect, not a preference.
 
 ## 9. DB — Persistence
 

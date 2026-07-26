@@ -173,6 +173,9 @@ export function projectStatusView(deps: ViewDeps, project: ProjectRow) {
         expiresAt: row.expires_at,
       })),
       pushPolicy: project.push_policy,
+      // OR-12: whether a permission gate off the hard floor parks this project or is decided
+      // without a person. It changes what "nothing is happening" means, so it is not hidden.
+      unattended: project.unattended === 1,
       verifyCmd: project.verify_cmd,
       remote: project.repo_remote,
       archived: project.archived === 1,

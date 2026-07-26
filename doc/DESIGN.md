@@ -708,8 +708,9 @@ neither is allowed; anything else escalates.
 |---|---|---|
 | `other` | yes | the classifier did not recognise it; this is where the noise lives |
 | `delete` | yes, only when every target resolves inside the project | `rm -rf build` is housekeeping; a deletion elsewhere is not the judge's to make |
-| `deps_install`, `network` | no | they change the build environment or leave the machine (ST-03) |
-| `credentials`, `publish_external`, `outside_workspace`, force push | no | the hard floor of PE-03, unchanged and unreachable from here |
+| `deps_install`, `network` | no by default; **yes in unattended mode** (OR-12, §7.7) | they change the build environment or leave the machine (ST-03), which is worth a person's attention when there is a person |
+| `credentials` **owned by this project's vault** | yes (PE-13, §7.1d) | the run was handed that key deliberately; gating each use contradicts VT-07 |
+| `credentials` otherwise, `publish_external`, `outside_workspace`, force push | no | the hard floor of PE-03, unchanged and unreachable from here |
 
 **Failure is a human, always.** A timeout, a crash, an unparseable answer, a `risk: high`, an
 engine that is not authenticated — every one of them opens the doubt exactly as before. The judge
@@ -881,6 +882,116 @@ all — not the judge, not a human.
 The lesson recorded in DECISIONS.md: a fix aimed at one *spelling* of an idea is half a fix. The
 question to ask of a matcher is what the command does with the value, not which characters it
 contains.
+
+### 7.1d Whose secret is it? (PE-13)
+
+The same false positive has now stopped a real run **four times**, in four spellings:
+
+| # | the command | what the fix was |
+|---|---|---|
+| 1 | `python3 -c "…os.environ.get('LO_VAULT_EFEMIS_PASSWORD')… print('present')"` | a variable *name* is not a value (§7.1b) |
+| 2 | `if [ -n "${LO_VAULT_EFEMIS_PASSWORD:-}" ]; then echo present; fi` | `stripPresenceTests()` (§7.1b) |
+| 3 | `grep -rqF "$LO_VAULT_EFEMIS_PASSWORD" .` | — none. This is the one that opened D-1 on `efemis-crop-map-prototype`. |
+| 4 | whatever the agent reaches for next | — |
+
+Number three survives every fix so far, and correctly so by the letter of the rule: the value *is*
+expanded into another command. It is a leak **check** — `-q`, so nothing is printed — but the
+classifier cannot see intent, and it never will. That is the point. **Enumerating spellings is a
+losing game, and DECISIONS.md already says so after round two.** The question was wrong.
+
+The right question is not *what does the command do with the value* but **whose value is it**:
+
+- a `LO_VAULT_*` variable for an entry **this run resolved** is a key the system handed over on
+  purpose. VT-07 goes further and grants the run the network for that entry's host. Handing an
+  agent a key, opening the network to its host, and then gating every use of it is the system
+  arguing with itself, and the run loses.
+- anything else is untouched: a secret **file** (`.env`, `id_rsa`, `.pem`), a variable that is not
+  this project's vault (`ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, a bare `$DB_PASSWORD`), `printenv` of
+  a secret, force push, publishing.
+
+So the classifier now records **why** a segment matched, not only that it did. `ClassifyResult`
+carries `evidence: { rule, kind: "vault_own" | "vault_foreign" | "secret_file" | "key_name" | … }`.
+When the whole of the evidence for `credentials` is `vault_own`, the verdict stays `require_human`
+— the hard floor is not moved — but the gate is marked **judge-eligible**, and §7.4 may rescue it.
+
+Three properties that keep this honest. The judge still fails toward the human, so a rescue is a
+shortening of the path to allow and never a lengthening of the path to deny. `credentials` is still
+in `NEVER_LEARNED` (PE-10), so a rescue is decided fresh every single time and no memory of it can
+be wrong later. And a value on its way to a host **outside** the entry's `scope` re-classifies as
+`vault_foreign` and is unreachable again — sending the EFEMIS password to a host that is not EFEMIS
+is exactly the thing this class exists to stop.
+
+### 7.1e A write the classifier cannot see is a write it must deny
+
+`contract-prober` — Codex — could not write a single file on `efemis-crop-map-prototype`. The audit
+line is one character short of empty:
+
+```
+asks permission (project_write):        → policy: deny (project_write)
+```
+
+No title, no command, and no path. Codex asks to write through **`apply_patch`**, whose ACP request
+carries no `locations` at all: the paths live inside the patch envelope in `rawInput`. The
+classifier read `toolCall.locations` and nothing else, so `outOfScopeWrite` saw a write into a
+confined pack that named no target — and refusing that is correct, because a pack that confines
+writes cannot approve one whose destination it cannot see. The rule was right; the input was blind.
+
+What makes it embarrassing rather than merely wrong: `firstPath()` **already** looked in `rawInput`,
+for the timeline (OB-06). The panel could name the file the gate claimed not to see. A narration
+that knows more than the classifier is the same defect seen from two sides, and this is the second
+time that pairing has cost a run — `rawInput` feeding the command classifier was the first (§OB-06).
+
+`pathCandidates()` is now the single answer to "what does this call touch", and it reads, in order:
+`locations`; the singular keys (`file_path`, `path`, `filePath`, `notebook_path`, `target`, `dest`);
+the plural ones (`changes`, `files`, `paths`, `edits`, as arrays of strings, arrays of objects with
+a `path`, or an object keyed by path); and finally the patch text itself —
+`*** Add File: probes/probe.py` and unified-diff `---`/`+++` headers. The write scopes are then
+enforced on everything it found, so a confined pack still confines: what changed is that it is now
+confining something it can see.
+
+### 7.7 Unattended mode (OR-12)
+
+LightsOut exists to run agents **unattended**. A permission gate that parks a session until a
+person looks is, in that light, not a safety feature but a failure of the product: the work stops,
+nothing says so, and the cost is paid in wall-clock time nobody is watching. Every incident in
+STATE.md is a variation of it.
+
+A project carries `unattended` (`projects.unattended`, default from `lightsout.yaml`), and a launch
+may set or clear it for one run. When it is on and a verdict comes back `require_human`:
+
+```
+require_human
+  │
+  ├─ on the hard floor of PE-03?  ── yes ──▶ doubt, as always. This is the whole limit.
+  │                                          (outside_workspace, publish_external, force push,
+  │                                           credentials that are not vault_own)
+  ├─ a hard_rule doubt (KB-11)?   ── yes ──▶ doubt. Only a person answers a binding rule.
+  │
+  └─ otherwise
+       ├─ judge (§7.4, full remit here: other, delete, deps_install, network, toolchain_install,
+       │         and vault_own credentials) ── allow ──▶ provisional decision + checkpoint, run continues
+       ├─ advisor (§8.2), for what the judge escalates  ── allow ──▶ provisional decision, run continues
+       └─ neither clears it ──▶ **refuse, with the reason injected into the run**
+```
+
+The last arrow is the one that matters and it is deliberate. **A denial is an answer** (§7.2): the
+agent is told what was refused and why, and adapts, narrows scope or routes around it — which is
+what it already does well, as the `codex` run that hit `deny (project_write)` on an absolute path
+and switched to relative paths without being asked demonstrates. What it must not do is sit there.
+An unattended run that could not do one thing and reported that in its deliverable is worth more
+than one that stopped and waited nine minutes for somebody to say yes to `grep`.
+
+What is recorded, so that "unattended" never means "unaccountable": every automatic resolution
+writes a `provisional` decision (PE-06) naming the decider (`judge` | `advisor`) and its reason, a
+`perm.verdict` event with `unattended: true`, an audit row, and a git checkpoint tag. The project
+view lists them under **Decided without you** so a person can read afterwards what they would have
+been asked, and revoke it. `MAX_AUTO_CONTINUE` per task still caps the advisor path, so an agent
+and an advisor cannot agree in a loop; exceeding it falls through to the refusal arm, not to a
+doubt.
+
+Not changed by this mode: a **functional** doubt, where the agent asks what to build rather than
+whether it may act, is still a doubt and still reaches the person. Unattended decides who answers a
+permission gate. It does not decide what the user wanted.
 
 ### 7.5 What a task needs, checked before it starts (PE-12)
 

@@ -46,6 +46,11 @@ export type HumanGate = (request: {
   options: PermissionOption[];
   /** The paths the request named, when it named any: the judge needs them (PE-11). */
   paths?: string[];
+  /**
+   * PE-13: a `credentials` gate whose whole evidence was this run's own vault entry. Still
+   * `require_human`, but the judge is allowed to look at it (§7.1d).
+   */
+  judgeEligible?: boolean;
 }) => Promise<{ optionId: string } | { reject: true; explanation: string }>;
 
 export type RunSessionDeps = {
@@ -68,6 +73,13 @@ export type RunSessionDeps = {
   /** The vault index for the prompt, and the variables the adapter process gets (VT-02). */
   vaultIndex?: string;
   vaultEnv?: Record<string, string>;
+  /**
+   * Hosts the resolved vault entries declare (PE-13, §7.1d). A vault value on its way to one of
+   * them is the run doing its job; on its way anywhere else it stays on the hard floor.
+   */
+  vaultHosts?: string[];
+  /** OR-12: this project's runs finish without a person (§7.7). */
+  unattended?: boolean;
   /** Workspace root, so shared material classifies as §7.1 says rather than as an escape. */
   workspacePath?: string;
   /** The one base this project may write into, if any (KB-05). */
@@ -146,6 +158,72 @@ function firstPath(update: ToolCallUpdate): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * Every path a tool call means to touch, however the adapter chose to say so (§7.1e).
+ *
+ * The bug this exists for: `contract-prober` on Codex could not write a single file. Codex asks
+ * to write through `apply_patch`, whose ACP request carries **no `locations`** and an empty
+ * title, so the classifier saw a `project_write` naming no path at all — and a pack that confines
+ * writes must refuse a write whose target it cannot see. Every write from that engine was denied,
+ * which reads as "the policy hates me" and is really "the policy is blind".
+ *
+ * `firstPath` already knew to look in `rawInput` for the narration (OB-06). The classifier did
+ * not, and a timeline that can name the file while the gate cannot is the same bug seen twice.
+ */
+export function pathCandidates(update: ToolCallUpdate): string[] {
+  const paths = (update.locations ?? [])
+    .map((l) => l.path)
+    .filter((p): p is string => typeof p === "string" && p.trim().length > 0);
+
+  const raw = (update as { rawInput?: unknown }).rawInput;
+  if (raw && typeof raw === "object") {
+    const record = raw as Record<string, unknown>;
+    for (const key of ["file_path", "path", "filePath", "notebook_path", "target", "dest"]) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim()) paths.push(value.trim());
+    }
+    // A list of edits: `changes: [{path: …}]`, `files: ["…"]`.
+    for (const key of ["changes", "files", "paths", "edits"]) {
+      const value = record[key];
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (typeof item === "string" && item.trim()) paths.push(item.trim());
+          else if (item && typeof item === "object") {
+            const nested = (item as Record<string, unknown>).path;
+            if (typeof nested === "string" && nested.trim()) paths.push(nested.trim());
+          }
+        }
+      } else if (value && typeof value === "object") {
+        // `changes: { "probes/x.py": {...} }` — the keys are the paths.
+        for (const key2 of Object.keys(value as Record<string, unknown>)) {
+          if (key2.trim()) paths.push(key2.trim());
+        }
+      }
+    }
+    // The patch envelope itself: `*** Add File: probes/probe.py`.
+    for (const key of ["input", "patch", "content", "diff"]) {
+      const value = record[key];
+      if (typeof value === "string") paths.push(...pathsInPatch(value));
+    }
+  }
+  return [...new Set(paths)];
+}
+
+/** Paths named by an apply_patch envelope or a unified diff header. */
+export function pathsInPatch(text: string): string[] {
+  const paths: string[] = [];
+  for (const match of text.matchAll(
+    /^\*\*\*\s+(?:Add|Update|Delete)\s+File:\s*(.+?)\s*$/gim,
+  )) {
+    if (match[1]) paths.push(match[1]);
+  }
+  for (const match of text.matchAll(/^(?:---|\+\+\+)\s+(?:[ab]\/)?(\S+)\s*$/gim)) {
+    const candidate = match[1];
+    if (candidate && candidate !== "/dev/null") paths.push(candidate);
+  }
+  return paths;
 }
 
 /**
@@ -392,9 +470,10 @@ export class RunSession {
     const toolCall = params.toolCall;
     const commands = commandCandidates(toolCall);
     const command = commands[0];
-    const paths = (toolCall.locations ?? [])
-      .map((l) => l.path)
-      .filter((p): p is string => typeof p === "string");
+    // Every way an adapter can name what it is about to touch (§7.1e). Reading only `locations`
+    // made every Codex `apply_patch` a write with no visible target, which a confined pack has
+    // no choice but to deny.
+    const paths = pathCandidates(toolCall);
 
     const decision = this.deps.policy.evaluate({
       projectPath: this.deps.project.path,
@@ -409,6 +488,10 @@ export class RunSession {
         : {}),
       // PE-09: the directories this project was allowed to read outside itself.
       ...(this.deps.readAreas?.length ? { readAreas: this.deps.readAreas } : {}),
+      // PE-13: which secrets are this run's own, so a command handling them is told apart from
+      // one handling somebody else's. The names only — a value never reaches the classifier.
+      ...(this.deps.vaultEnv ? { vaultVars: Object.keys(this.deps.vaultEnv) } : {}),
+      ...(this.deps.vaultHosts?.length ? { vaultHosts: this.deps.vaultHosts } : {}),
       ...(toolCall.kind ? { kind: toolCall.kind } : {}),
       ...(toolCall.title ? { title: toolCall.title } : {}),
       ...(paths.length ? { paths } : {}),
@@ -500,6 +583,7 @@ export class RunSession {
         reason: decision.reason,
         options: params.options,
         ...(paths.length ? { paths } : {}),
+        ...(decision.judgeEligible ? { judgeEligible: true } : {}),
       });
       if ("optionId" in answer) {
         return { outcome: { outcome: "selected", optionId: answer.optionId } };

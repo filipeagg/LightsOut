@@ -89,6 +89,31 @@ wrappers: xargs, time, nice, nohup, env, timeout and friends are peeled before m
 review: list_learned_allows shows them with a use count; forget_learned_allow drops one. A shape
 used often is one to write into a pack matcher instead.
 
+## unattended_execution (OR-12)
+
+default: on. Finishing without a person is what the system is for.
+changes: a require_human verdict off the hard floor is settled, not parked.
+order: judge (widened remit), then advisor, then refusal.
+refusal: the reason is injected into the run; the agent adapts.
+why: a denial is an answer. A parked run is not.
+recorded: provisional decision, perm.verdict event, git checkpoint. Listed and revocable.
+still_waits: the hard floor, and a hard_rule doubt (KB-11).
+hard_floor: outside_workspace, publish_external, force push, foreign credentials.
+still_a_doubt: a functional doubt. This mode answers gates, not questions.
+turn_it_off: set_project_unattended { projectId, unattended: false }.
+visible_as: `unattended` in project_status.
+
+## whose_secret_is_it (PE-13)
+
+rule: a LO_VAULT_* variable of an entry this run resolved is judge-eligible.
+why: the system handed the key over; VT-07 already opened its host.
+unchanged: a secret file — .env, id_rsa, .pem — stays a person's.
+unchanged: a key that is not this project's vault stays a person's.
+unchanged: a vault value sent to an undeclared host stays a person's.
+never_learned: `credentials` is never remembered, so each rescue is decided fresh.
+practical: stop writing commands that avoid naming your own vault variables.
+history: four runs were stopped by that false positive before this rule.
+
 ## changing_what_an_agent_may_do
 
 per_agent: write_agent with a different `policy`.

@@ -349,6 +349,10 @@ export class TaskRunner {
             ...(agentPack?.write_scopes?.length
               ? { writeScopes: agentPack.write_scopes }
               : {}),
+            // PE-13 and OR-12: whether the judge may look at this credentials gate, and whether
+            // an unresolved gate refuses instead of waiting (§7.1d, §7.7).
+            ...(request.judgeEligible ? { judgeEligible: true } : {}),
+            ...(project.unattended ? { unattended: true } : {}),
           })),
       ...(input.onStderr ? { onStderr: input.onStderr } : {}),
     });

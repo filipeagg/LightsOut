@@ -60,7 +60,27 @@ export type ClassifyInput = {
    * floor keeps at deny.
    */
   readAreas?: string[] | undefined;
+  /**
+   * Environment variable names of the vault entries **this run resolved** — `LO_VAULT_EFEMIS_
+   * PASSWORD` and friends (PE-13, §7.1d). A secret the system handed over on purpose is not the
+   * same thing as a secret found lying around, and four separate runs have now been stopped by
+   * treating them alike. Absent, the behaviour is exactly what it was: every credential match is
+   * on the hard floor with no way back.
+   */
+  vaultVars?: string[] | undefined;
+  /**
+   * Hosts those entries declare (`base_url`, `scope`). A vault value on its way to one of them is
+   * the run doing what it was launched to do; on its way anywhere else it is exfiltration, and
+   * stays unreachable.
+   */
+  vaultHosts?: string[] | undefined;
 };
+
+/**
+ * Why a segment counted as `credentials` (PE-13). Only `vault_own` is ever rescuable, and only by
+ * the judge, which still fails toward the human.
+ */
+export type CredentialEvidence = "vault_own" | "vault_foreign" | "secret_file" | "key_name";
 
 export type Classification = {
   class: ActionClass;
@@ -73,7 +93,62 @@ export type Classification = {
    * and DESIGN §7.1 says so.
    */
   scriptPaths?: string[];
+  /**
+   * Set only when `class` is `credentials` (PE-13, §7.1d). `vault_own` means the whole of the
+   * evidence was a vault variable this run was given: the verdict stays `require_human`, but the
+   * gate becomes judge-eligible instead of dying on the hard floor.
+   */
+  evidence?: CredentialEvidence;
 };
+
+/** A host mentioned in a command, lower-cased, without port or credentials. */
+function hostsIn(segment: string): string[] {
+  const hosts: string[] = [];
+  for (const match of segment.matchAll(/https?:\/\/([^/\s"'`)]+)/gi)) {
+    const authority = match[1]!;
+    const host = authority.split("@").pop()!.split(":")[0]!;
+    if (host) hosts.push(host.toLowerCase());
+  }
+  return hosts;
+}
+
+/**
+ * Whose secret is this (PE-13, §7.1d)? The question the first three fixes never asked.
+ *
+ * The test is subtractive and therefore does not care about spelling: blank out this run's own
+ * vault variables and ask the credential patterns again. If nothing matches without them, they
+ * were the entire case — `grep -rqF "$LO_VAULT_EFEMIS_PASSWORD" .` and every future spelling of
+ * the same idea. If something still matches, a real secret is in play and nothing changes.
+ *
+ * One exception, and it is the reason this is safe: a segment carrying a host that is not one the
+ * vault entry declares is `vault_foreign` — sending the EFEMIS password to somewhere that is not
+ * EFEMIS is precisely what the class exists to stop.
+ */
+export function credentialEvidence(
+  segment: string,
+  patterns: RegExp[],
+  vaultVars: string[] | undefined,
+  vaultHosts: string[] | undefined,
+): CredentialEvidence {
+  const own = (vaultVars ?? []).filter((v) => v.trim().length > 0);
+  if (own.length === 0) return "key_name";
+
+  const mentioned = own.filter((v) => segment.includes(v));
+  if (mentioned.length === 0) return "key_name";
+
+  const allowed = new Set((vaultHosts ?? []).map((h) => h.toLowerCase()));
+  const foreign = hostsIn(segment).filter((h) => !allowed.has(h));
+  if (foreign.length > 0) return "vault_foreign";
+
+  // Blank out the run's own variables — every spelling of them — and ask again.
+  let residue = segment;
+  for (const name of mentioned) {
+    residue = residue.split(name).join("LO_VAULT_REDACTED_FIELD");
+  }
+  residue = residue.replace(/LO_VAULT_REDACTED_FIELD/g, "X");
+  const stillMatches = patterns.some((re) => re.test(stripPresenceTests(residue)));
+  return stillMatches ? "secret_file" : "vault_own";
+}
 
 /** Built-in matcher table (DESIGN §7.2 ships defaults; packs extend it). */
 export const DEFAULT_MATCHERS: Record<string, string[]> = {
@@ -866,6 +941,28 @@ export class Classifier {
                 reason:
                   `install into the toolchain of ${input.projectId} ` +
                   `(${managerOf(segment) ?? "unknown manager"}), which outlives the run`,
+              };
+            }
+            if (hit && cls === "credentials") {
+              // Whose secret is it (PE-13, §7.1d)? The verdict does not change here — the hard
+              // floor still applies — but the evidence travels with it, so the gate can be put
+              // to the judge instead of dying where nothing can reach it.
+              const evidence = credentialEvidence(
+                subject,
+                patterns,
+                input.vaultVars,
+                input.vaultHosts,
+              );
+              return {
+                class: cls,
+                reason:
+                  `command matched ${cls}: ${hit.source} (${segment.slice(0, 120)})` +
+                  (evidence === "vault_own"
+                    ? "; the only secret here is this run's own vault entry (PE-13)"
+                    : evidence === "vault_foreign"
+                      ? "; a vault value on its way to a host the entry does not declare"
+                      : ""),
+                evidence,
               };
             }
             if (hit) {

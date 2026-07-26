@@ -1008,6 +1008,27 @@ export class Actions {
     return { projectId: updated.id, context: updated.context };
   }
 
+  /**
+   * Turn unattended execution on or off for a project (OR-12, §7.7).
+   *
+   * On — the default — a `require_human` verdict off the hard floor is settled by the judge or
+   * the advisor, or refused with its reason, and the run keeps going. Off, it opens a doubt and
+   * waits, which is the older behaviour and the right one when somebody is watching on purpose.
+   */
+  setProjectUnattended(
+    actor: Actor,
+    projectId: string,
+    unattended: boolean,
+  ): { projectId: string; unattended: boolean } {
+    const project = this.project(projectId);
+    const updated = this.deps.repos.projects.update(project.id, { unattended });
+    this.deps.repos.events.append({
+      type: "config.changed",
+      payload: { kind: "project", id: project.id, op: "unattended", value: unattended, actor },
+    });
+    return { projectId: updated.id, unattended: updated.unattended === 1 };
+  }
+
   // --- Knowledge attachment ------------------------------------------------
 
   attachKnowledge(

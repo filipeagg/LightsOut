@@ -38,6 +38,12 @@ export type Decision = {
   learnedShape?: string;
   /** Set when a per-project toolchain grant decided this (ST-07); the caller records the use. */
   toolchainManager?: string;
+  /**
+   * A `credentials` gate the judge may look at, because the whole of the evidence was this run's
+   * own vault entry (PE-13, §7.1d). The verdict is still `require_human`; this only says the
+   * hard floor is not the reason, so §7.4 is allowed to try.
+   */
+  judgeEligible?: boolean;
   latencyMs: number;
 };
 
@@ -269,12 +275,20 @@ export class PolicyEngine {
     if (!hit) reasonParts.push("no rule for this class, defaulting to require_human");
     if (floored) reasonParts.push(`hard floor applied (was ${rawVerdict})`);
 
+    // PE-13: the class is unchanged and so is the verdict. What changes is that this particular
+    // credential gate is no longer a dead end — the judge may look at it (§7.4).
+    const judgeEligible =
+      classification.class === "credentials" &&
+      classification.evidence === "vault_own" &&
+      verdict === "require_human";
+
     return {
       class: classification.class,
       verdict,
       ruleSource: hit?.source ?? "default",
       reason: reasonParts.join("; "),
       floored,
+      ...(judgeEligible ? { judgeEligible: true } : {}),
       latencyMs: performance.now() - startedAt,
     };
   }

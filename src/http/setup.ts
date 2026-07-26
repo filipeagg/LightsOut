@@ -20,7 +20,6 @@ import type { Config } from "../config.js";
 import type { Repos } from "../db/repos/index.js";
 import type { HealthProbe } from "../health.js";
 import { failure, invalid, notFound, success, type Envelope } from "../mcp/envelope.js";
-import { createProject } from "../projects/scaffold.js";
 import { LoginFlows } from "../setup/login-flows.js";
 import { buildZip, type ZipEntry } from "./zip.js";
 
@@ -244,34 +243,9 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     }),
   );
 
-  /**
-   * Create a project (§12.1b). Wizard step 4 needs it in phase 8; phase 10 moves it into
-   * `src/http/api-write.ts` with the rest of the write surface, behind the same action.
-   */
-  app.post("/api/projects", async (request, reply) =>
-    envelope(reply, async () => {
-      const body = z
-        .object({
-          name: z.string().min(1),
-          remote: z.string().optional(),
-          verify: z.string().optional(),
-          push: z.enum(["auto", "manual", "never"]).optional(),
-          defaultAgent: z.string().optional(),
-        })
-        .parse(request.body ?? {});
-      const result = await createProject(repos, config.workspace, {
-        name: body.name,
-        ...(body.remote ? { remote: body.remote } : {}),
-        ...(body.verify !== undefined ? { verify: body.verify } : {}),
-        ...(body.push ? { push: body.push } : {}),
-        ...(body.defaultAgent ? { defaultAgent: body.defaultAgent } : {}),
-      });
-      return {
-        project: { id: result.project.id, name: result.project.name, path: result.project.path },
-        created: result.created,
-      };
-    }),
-  );
+  // `POST /api/projects` used to live here for wizard step 4. It moved to
+  // `src/http/api-write.ts` in phase 10, with the rest of the write surface, behind the same
+  // action (§12.0). The wizard calls the same URL; only the file changed.
 
   /** Mark the wizard done so the panel stops opening on it (§14.3: repeatable from #/setup). */
   app.post("/api/setup/complete", async (_request, reply) =>

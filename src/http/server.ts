@@ -19,6 +19,7 @@ import type { LoginFlows } from "../setup/login-flows.js";
 import type { AgentsLoader } from "../agents/loader.js";
 import { registerSetupRoutes, SETUP_KEYS } from "./setup.js";
 import { registerApiRoutes } from "./api.js";
+import { registerWriteRoutes } from "./api-write.js";
 import { registerStreamRoute } from "./stream.js";
 
 export type ServerDeps = {
@@ -81,6 +82,8 @@ export async function createHttpServer(deps: ServerDeps): Promise<FastifyInstanc
     ...(deps.mcp?.knowledge ? { knowledge: deps.mcp.knowledge } : {}),
     ...(deps.mcp?.vault ? { vault: deps.mcp.vault } : {}),
   });
+  // The write surface of §12.1b, behind the same actions the MCP tools use (§12.0).
+  if (deps.mcp?.actions) registerWriteRoutes(app, { actions: deps.mcp.actions });
   registerStreamRoute(app, {
     config: deps.config,
     bus: deps.bus,

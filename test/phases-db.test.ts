@@ -110,6 +110,7 @@ describe("migration 2", () => {
       "2:phases, knowledge, vault audit",
       "3:hard rule doubts and knowledge enforcement",
       "4:project context brief",
+      "5:project read-only areas",
     ]);
     // Migration 4 gives the legacy project a brief it can be told apart from a real one (PM-09).
     expect(

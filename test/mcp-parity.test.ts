@@ -36,6 +36,9 @@ const READ_ONLY = new Set([
   // `read_project_doc`), but they are reads and the parity rule is about mutations.
   "listDocs",
   "readProjectDoc",
+  "listAreas",
+  // MC-08: pure translation between the container's paths and the user's.
+  "resolvePath",
   "agentSource",
   "phase",
   "knowledgeFolders",
@@ -73,6 +76,8 @@ const TOOL_FOR: Record<string, string> = {
   abortRun: "abort_run",
   stopRun: "stop_run",
   setProjectContext: "set_project_context",
+  addArea: "add_area",
+  removeArea: "remove_area",
   resumeChain: "resume_chain",
   writeDoc: "write_doc",
   writeAgent: "write_agent",

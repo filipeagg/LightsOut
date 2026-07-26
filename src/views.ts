@@ -12,6 +12,7 @@ import type { Config } from "./config.js";
 import type { Repos } from "./db/repos/index.js";
 import type { ChainRow, DoubtRow, ProjectRow, RunRow } from "./db/types.js";
 import type { EngineHealth } from "./health.js";
+import { hostPathFor } from "./projects/docs-index.js";
 
 export type ViewDeps = { config: Config; repos: Repos };
 
@@ -128,6 +129,20 @@ export function projectStatusView(deps: ViewDeps, project: ProjectRow) {
       // wrote it rather than a person, which the panel says out loud.
       context: project.context ?? "",
       contextProvisional: (project.context ?? "").startsWith("status: provisional"),
+      // Where this project is on the user's own machine (MC-08), and what it may read outside
+      // itself (PE-09). Both here because both are answers to "where is that, really".
+      hostPath: hostPathFor(deps.config.workspace, deps.config.workspaceHost, project.path),
+      areas: repos.areas.list(project.id).map((row) => ({
+        id: row.id,
+        path: row.path,
+        hostPath: hostPathFor(
+          deps.config.workspace,
+          deps.config.workspaceHost,
+          `${deps.config.workspace}/${row.path}`,
+        ),
+        note: row.note,
+        addedBy: row.added_by,
+      })),
       pushPolicy: project.push_policy,
       verifyCmd: project.verify_cmd,
       remote: project.repo_remote,

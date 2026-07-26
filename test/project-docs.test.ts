@@ -16,6 +16,8 @@ import {
   resolveDocPath,
 } from "../src/projects/docs-index.js";
 import { composePrompt } from "../src/acp/prompt.js";
+import { Actions } from "../src/control/actions.js";
+import { loadConfig } from "../src/config.js";
 
 let db: Db;
 let repos: Repos;
@@ -76,6 +78,47 @@ describe("the context brief (PM-09)", () => {
 
   // Migration 4's backfill over a real legacy database is covered in test/phases-db.test.ts,
   // which is where the migration fixtures live.
+});
+
+describe("resolve_path, both directions (MC-08)", () => {
+  function actions() {
+    return new Actions({
+      config: {
+        ...loadConfig({ LO_WORKSPACE: "/workspace", LO_DB: ":memory:" }),
+        workspaceHost: "C:/Users/me/LightsOut",
+      },
+      repos,
+      agents: {} as never,
+      orchestrator: {} as never,
+    });
+  }
+
+  it("translates a container path into the one on this machine", () => {
+    const answer = actions().resolvePath({ path: "/workspace/sources" });
+    expect(answer.container).toBe("/workspace/sources");
+    expect(answer.host).toBe("C:\\Users\\me\\LightsOut\\sources");
+    expect(answer.relative).toBe("sources");
+    expect(answer.inWorkspace).toBe(true);
+  });
+
+  it("translates a path from this machine back into the container", () => {
+    for (const input of [
+      "C:\\Users\\me\\LightsOut\\knowledge",
+      "C:/Users/me/LightsOut/knowledge",
+      "C:\\\\Users\\\\me\\\\LightsOut\\\\knowledge",
+    ]) {
+      const answer = actions().resolvePath({ path: input });
+      expect(answer.container).toBe("/workspace/knowledge");
+      expect(answer.relative).toBe("knowledge");
+    }
+  });
+
+  it("says when something is outside the workspace instead of pretending", () => {
+    const answer = actions().resolvePath({ path: "/etc/passwd" });
+    expect(answer.inWorkspace).toBe(false);
+    expect(answer.host).toBeNull();
+    expect(answer.relative).toBeNull();
+  });
 });
 
 describe("listing and reading the documents (PM-10)", () => {

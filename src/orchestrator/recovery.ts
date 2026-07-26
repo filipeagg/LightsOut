@@ -29,6 +29,21 @@ export function recoverInterrupted(repos: Repos, reason = "container restart"): 
       type: "task.state",
       payload: { taskId: task.id, status: "interrupted" },
     });
+    // The phase row is what the panel actually shows. Leaving it `running` while its task is
+    // interrupted made the project view state something untrue: a phase marked running with no
+    // run in flight and no way to tell that anything had gone wrong. It goes back to `pending`,
+    // which is where it really is — it has to run again — rather than adding an `interrupted`
+    // phase status for a distinction the `phase.state` event already records.
+    const phase = repos.phases.getByTask(task.id);
+    if (phase && phase.status === "running") {
+      repos.phases.setStatus(phase.id, "pending");
+      repos.events.append({
+        runId: run.id,
+        type: "phase.state",
+        payload: { phaseId: phase.id, ref: phase.phase_id, status: "pending", reason },
+      });
+    }
+
     const chain = repos.chains.get(task.chain_id);
     if (chain && chain.status === "active") {
       repos.chains.setStatus(chain.id, "paused");

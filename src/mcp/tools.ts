@@ -284,6 +284,19 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
   );
 
   tool(
+    "resume_chain",
+    "Put a paused or interrupted chain back to work, queueing the tasks that did not finish (OR-05).",
+    { projectId: z.string().optional(), chainId: z.string().optional() },
+    async ({ projectId, chainId }) => {
+      if (!projectId && !chainId) throw invalid("give projectId or chainId");
+      return actions.resumeChain("mcp", {
+        ...(projectId ? { projectId } : {}),
+        ...(chainId ? { chainId } : {}),
+      });
+    },
+  );
+
+  tool(
     "list_doubts",
     "Open doubts with their options, so they can be answered as buttons (DO-05, MC-03).",
     { projectId: z.string().optional(), status: z.enum(["open", "answered", "closed"]).optional() },

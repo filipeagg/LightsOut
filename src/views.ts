@@ -87,6 +87,27 @@ export function chainView(deps: ViewDeps, chain: ChainRow) {
   };
 }
 
+/**
+ * The most recent run of a project that is no longer going, with the reason it stopped. Kept
+ * small: the panel needs enough to say what happened and a run id to pull the timeline from.
+ */
+function lastFinishedRun(deps: ViewDeps, projectId: string) {
+  const run = deps.repos.runs.history({ projectId, limit: 1 })[0];
+  if (!run) return null;
+  const task = deps.repos.tasks.get(run.task_id);
+  return {
+    id: run.id,
+    task: task?.title ?? "",
+    taskStatus: task?.status ?? null,
+    engine: run.engine,
+    status: run.status,
+    exitReason: run.exit_reason,
+    error: run.error,
+    summary: run.summary,
+    finishedAt: run.ended_at,
+  };
+}
+
 /** Everything about one project in a single read (MC-06, WP-04). */
 export function projectStatusView(deps: ViewDeps, project: ProjectRow) {
   const { repos } = deps;
@@ -110,6 +131,11 @@ export function projectStatusView(deps: ViewDeps, project: ProjectRow) {
     },
     chain: chain ? chainView(deps, chain) : null,
     run: run ? runView(deps, run, project) : null,
+    // Why the last run ended, whenever there is no live one. Without this a chain that stopped
+    // shows "No run in flight" and nothing else: the reason existed only inside an event payload
+    // that the panel had no way to reach, so a container restart and a failed verify gate looked
+    // exactly the same to the user.
+    lastRun: run ? null : lastFinishedRun(deps, project.id),
     doubts: open.map((d) => doubtView(deps, d)),
     state: {
       phase: chain

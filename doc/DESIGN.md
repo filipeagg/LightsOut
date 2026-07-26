@@ -805,10 +805,30 @@ All three came from matching words rather than what the code does, and all three
 | `python3 -c "…find_spec('requests')…"` | `network` | `script_exec` | `requests` as a *module name*. Asking whether a library is installed is not using it. |
 | `pip install --target .lightsout/tmp/deps openpyxl` | `deps_install` | `project_write` | An install into the scratch directory is swept when the run ends (PE-08), so the reason the gate exists — a dependency changes the build for every later run (ST-03) — does not apply. |
 
-The rules now: a credential match needs a secret *file* or a value *on its way out* (`$PASSWORD`
-expanded, `print(os.environ…)`, `printenv SECRET`, a named API key); a network match needs an
-`import`, a `require`, a call on the library, a `fetch(` or a URL; and a dependency install that
-names a `--target` inside `.lightsout/tmp/` is a write, not an install.
+The rules now: a credential match needs a secret *file* or a value *on its way out*
+(`print(os.environ…)`, `printenv SECRET`, a named API key); a network match needs an `import`, a
+`require`, a call on the library, a `fetch(` or a URL; and a dependency install that names a
+`--target` inside `.lightsout/tmp/` is a write, not an install.
+
+**The same false positive, a second time, in shell.** The Python fix above did not cover the
+spelling the agent actually reached for next:
+
+```
+pwd && rg --files | sort && if [ -n "${LO_VAULT_EFEMIS_PASSWORD:-}" ]; then echo 'present'; else echo 'missing'; fi
+```
+
+Two blind spots, both now closed. **A variable expanded inside a presence test is not a value going
+anywhere**: `stripPresenceTests()` removes `[ … ]`, `[[ … ]]`, `test -n …` and `${X:+literal}`
+before the credential patterns are applied, so the shell comparing a value and throwing it away is
+not a read — while `[ -n "$T" ] && curl -H "Authorization: Bearer $T"` still is, because the use
+survives the strip. And **shell keywords are not commands**: `if`, `then`, `else`, `fi`, `do`,
+`done`, `while`, `for`, `case` are stripped like the process wrappers, and `[`/`test` joined the
+read-only table. The whole pipeline above now classifies `project_read` and never reaches a gate at
+all — not the judge, not a human.
+
+The lesson recorded in DECISIONS.md: a fix aimed at one *spelling* of an idea is half a fix. The
+question to ask of a matcher is what the command does with the value, not which characters it
+contains.
 
 ### 7.5 What a task needs, checked before it starts (PE-12)
 

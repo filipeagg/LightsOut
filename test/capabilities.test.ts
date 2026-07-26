@@ -27,12 +27,36 @@ describe("the three commands that stopped a real run", () => {
     );
   });
 
+  it("testing a vault variable in the shell is not reading a secret either", () => {
+    // The same idea as the Python check above, in the spelling the agent actually used. This one
+    // reached a human *after* the first fix, because the first fix only covered Python.
+    expect(
+      classify(
+        `pwd && rg --files | sort && if [ -n "\${LO_VAULT_EFEMIS_PASSWORD:-}" ]; then echo 'vault.password=present'; else echo 'vault.password=missing'; fi`,
+      ),
+    ).not.toBe("credentials");
+    // Better than "not credentials": the whole pipeline is a read, so it is allowed outright.
+    expect(
+      classify(
+        `pwd && rg --files | sort && if [ -n "\${LO_VAULT_EFEMIS_PASSWORD:-}" ]; then echo 'present'; else echo 'missing'; fi`,
+      ),
+    ).toBe("project_read");
+    expect(classify(`[ -z "$LO_VAULT_EFEMIS_USUARIO" ] && echo missing`)).toBe("project_read");
+    expect(classify(`test -n "$API_TOKEN" && echo present`)).not.toBe("credentials");
+    expect(classify(`echo "\${DB_PASSWORD:+configured}"`)).not.toBe("credentials");
+  });
+
   it("still catches a secret on its way out", () => {
     expect(classify("cat .env")).toBe("credentials");
     expect(classify("cat ~/.ssh/id_rsa")).toBe("credentials");
     expect(classify('curl -H "Authorization: Bearer $API_TOKEN" https://x')).toBe("credentials");
     expect(classify("echo $DB_PASSWORD")).toBe("credentials");
     expect(classify("printenv AWS_SECRET")).toBe("credentials");
+    // Tested *and* then used: the use is what matters.
+    expect(
+      classify(`[ -n "$API_TOKEN" ] && curl -H "Authorization: Bearer $API_TOKEN" https://x`),
+    ).toBe("credentials");
+    expect(classify(`echo "\${DB_PASSWORD:-}" > leak.txt`)).toBe("credentials");
   });
 
   it("asking whether a module is installed is not reaching the network", () => {

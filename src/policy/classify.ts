@@ -83,6 +83,8 @@ export const DEFAULT_MATCHERS: Record<string, string[]> = {
     "^(comm|join|paste|tr|rev|seq|fold|expand|unexpand|tac|shuf|split -n|csplit)\\b",
     "^(ps|pgrep|env|printenv|locale|nproc|free|uptime)\\b",
     "^(cd|pushd|popd|true|false|sleep)\\b",
+    // A test evaluates and prints nothing: `[ -n "$X" ]`, `test -f a.txt`.
+    "^(\\[\\[?|test)\\s",
     "^(echo|printf)\\b",
     "^git\\s+(ls-files|count-objects|rev-list|blame|describe|shortlog|remote|cat-file|for-each-ref|config\\s+--get)\\b",
     "^(npm|pnpm|yarn|bun)\\s+(ls|list|view|outdated|why)\\b",
@@ -260,6 +262,28 @@ export function disqualifiesReadOnly(segment: string): boolean {
 }
 
 /**
+ * Remove the places where a variable is *tested* rather than used, before asking whether a command
+ * touches a secret (§7.1b).
+ *
+ * `if [ -n "${LO_VAULT_EFEMIS_PASSWORD:-}" ]; then echo present; else echo missing; fi` expands the
+ * variable and cannot leak it: the shell compares it and throws it away. An agent checking its own
+ * wiring writes exactly this, and gating it stopped a run — twice, because the first fix only
+ * covered the Python spelling of the same idea. What still counts as a credential read is a value
+ * that goes anywhere else: `echo $TOKEN`, a header, a file, another command.
+ */
+export function stripPresenceTests(segment: string): string {
+  return (
+    segment
+      // [ -n "$X" ] and [[ -z $X ]], with or without the :- default
+      .replace(/\[\[?[^\]]*\]\]?/g, " ")
+      // test -n "$X" / test -z $X
+      .replace(/\btest\s+-[nz]\s+("[^"]*"|'[^']*'|\S+)/gi, " ")
+      // ${X:+literal} expands to the literal, never to the value
+      .replace(/\$\{[A-Za-z_][A-Za-z0-9_]*:\+[^}]*\}/g, " ")
+  );
+}
+
+/**
  * Split a command line into the commands it actually runs, on `&&`, `||`, `|`, `;`, `&` and
  * newlines outside quotes (DESIGN §7.1). Matchers are anchored at the start of a segment, so
  * without this every chained command would be judged by its first word alone and
@@ -309,6 +333,13 @@ export function splitSegments(command: string): string[] {
  * them as read-only — `xargs rm` is then classified by `rm`, as it should be.
  */
 const WRAPPERS = /^(xargs|time|nice|nohup|command|stdbuf|timeout|env|ionice|setsid)\b/i;
+/**
+ * Shell keywords that introduce a command rather than being one. Without stripping them,
+ * `if [ -n "$X" ]; then echo present; fi` is three unmatched words and a whole read-only pipeline
+ * lands on a human — the second spelling of the same false positive (§7.1b).
+ */
+const SHELL_KEYWORDS = /^(if|then|elif|else|fi|do|done|while|until|for|case|esac|in)\s+/i;
+const SHELL_KEYWORD_ONLY = /^(fi|done|esac|then|else|do)$/i;
 /** Their own options, which must go with them: `xargs -0 -n1`, `timeout 30s`, `nice -n 10`. */
 const WRAPPER_ARG = /^(-{1,2}[A-Za-z0-9-]+(=\S+)?|\d+[smhd]?|[A-Za-z_][A-Za-z0-9_]*=\S*)$/;
 
@@ -323,6 +354,11 @@ function normalizeSegment(segment: string): string {
   out = out.replace(/^[({\s]+/, "").replace(/[)}\s;]+$/, "");
   out = out.replace(/^!\s*/, "");
   out = out.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)\s+)+/, "");
+  // `if [ … ]`, `then echo …`, `for f in …`: the keyword is not the command being run.
+  for (let guard = 0; guard < 3 && SHELL_KEYWORDS.test(out); guard += 1) {
+    out = out.replace(SHELL_KEYWORDS, "").trim();
+  }
+  if (SHELL_KEYWORD_ONLY.test(out)) return "";
 
   // Peel wrappers one at a time: `time xargs -0 wc -l` is a read of files, twice removed.
   for (let guard = 0; guard < 4 && WRAPPERS.test(out); guard += 1) {
@@ -727,7 +763,10 @@ export class Classifier {
           if (cls === "project_read") continue; // handled below: it needs unanimity
           const patterns = this.table.get(cls) ?? [];
           for (const segment of segments) {
-            const hit = patterns.find((re) => re.test(segment));
+            // Credentials are judged on what the command does with the value, so the places where
+            // a variable is only tested for presence are removed first (§7.1b).
+            const subject = cls === "credentials" ? stripPresenceTests(segment) : segment;
+            const hit = patterns.find((re) => re.test(subject));
             if (hit && cls === "deps_install" && installsIntoScratch(input.projectPath, segment)) {
               // Into the scratch directory: it is swept when the run ends, so it changes nothing
               // for the next one and the reason for the gate does not apply (PE-08, ST-03).

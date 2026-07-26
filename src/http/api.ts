@@ -24,6 +24,7 @@ import { agentSource } from "../agents/writer.js";
 import { ENGINE_MODELS } from "../agents/models.js";
 import { listWorkspaceFolders } from "../knowledge/writer.js";
 import { hostPathFor, listProjectDocs, readProjectDoc } from "../projects/docs-index.js";
+import { narrate } from "../narrate.js";
 
 export type ApiDeps = {
   config: Config;
@@ -263,6 +264,22 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
           writable: k.writable === 1,
         })),
       };
+    }),
+  );
+
+  /**
+   * The same events as `/events`, told as a person reads them (OB-05). One implementation, in
+   * `src/narrate.ts`, so the panel and MCP never describe the same run differently.
+   */
+  app.get("/api/runs/:id/narrative", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = z.object({ id: z.string().min(1) }).parse(request.params);
+      const { limit } = z
+        .object({ limit: z.coerce.number().int().min(1).max(200).default(60) })
+        .parse(request.query ?? {});
+      const run = repos.runs.get(id);
+      if (!run) throw notFound(`run not found: ${id}`);
+      return { runId: id, lines: narrate(repos.events.listByRun(id), limit) };
     }),
   );
 

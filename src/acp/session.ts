@@ -91,6 +91,8 @@ export type RunOutcome = {
 };
 
 const MESSAGE_FLUSH_MS = 2000;
+/** Below this a chunk is a fragment, not a sentence; it waits for the next one (OB-06). */
+const MESSAGE_MIN_CHARS = 40;
 const CANCEL_GRACE_MS = 10_000;
 
 /**
@@ -130,7 +132,17 @@ function chooseOption(
 function firstPath(update: ToolCallUpdate): string | undefined {
   const locations = update.locations ?? [];
   const first = locations[0];
-  return first?.path;
+  if (first?.path) return first.path;
+  // Same reason as the command above: a read whose location the adapter did not fill in still
+  // names its file in the tool's own parameters, and "reads a file" helps nobody (OB-06).
+  const raw = (update as { rawInput?: unknown }).rawInput;
+  if (raw && typeof raw === "object") {
+    for (const key of ["file_path", "path", "filePath", "notebook_path"]) {
+      const value = (raw as Record<string, unknown>)[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -141,6 +153,17 @@ function firstPath(update: ToolCallUpdate): string | undefined {
 function commandCandidates(update: ToolCallUpdate): string[] {
   if (update.kind !== "execute") return [];
   const candidates: string[] = [];
+  // The tool's own parameters, when the adapter passes them through: this is where Claude Code
+  // puts the actual command, while `title` is often just "Terminal". Read first, because it is
+  // the literal thing that will run — and because a timeline saying "Terminal" twenty times, and
+  // a classifier judging by a friendly title, are the same bug seen from two sides.
+  const raw = (update as { rawInput?: unknown }).rawInput;
+  if (raw && typeof raw === "object") {
+    for (const key of ["command", "cmd", "script"]) {
+      const value = (raw as Record<string, unknown>)[key];
+      if (typeof value === "string" && value.trim()) candidates.push(value.trim());
+    }
+  }
   if (typeof update.title === "string" && update.title.trim()) {
     candidates.push(update.title.trim());
   }
@@ -160,6 +183,10 @@ export class RunSession {
   private finalMessage = "";
   private pendingMessage = "";
   private lastFlush = 0;
+  private pendingThought = "";
+  private lastThoughtFlush = 0;
+  /** Tool calls already written to the timeline, by id (OB-06). */
+  private readonly emittedCalls = new Set<string>();
 
   private hardTimer: NodeJS.Timeout | undefined;
   private inactivityTimer: NodeJS.Timeout | undefined;
@@ -232,12 +259,60 @@ export class RunSession {
     await this.adapter?.stop(CANCEL_GRACE_MS);
   }
 
+  /**
+   * One line per tool call, emitted when it is worth reading (OB-06).
+   *
+   * Claude Code announces a call twice: first a stub — `{title:"Terminal", rawInput:{}}` — and
+   * then an update carrying the real title and `rawInput.command`. Emitting on the first gives a
+   * timeline of twenty "Terminal"s, which is what the user was looking at. So the stub is held,
+   * the update fills it in, and each call produces exactly one event: the informative one when
+   * there is one, the stub when the call ends without ever saying more.
+   */
+  private recordToolCall(update: ToolCallUpdate & { sessionUpdate?: string }): void {
+    const id = update.toolCallId ?? `anon-${this.emittedCalls.size}`;
+    if (this.emittedCalls.has(id)) return;
+
+    const path = firstPath(update);
+    const detail = commandCandidates(update).find(
+      (candidate) => candidate.trim() && candidate.trim() !== "Terminal",
+    );
+    const informative = Boolean(path || detail);
+    const finished = update.status === "completed" || update.status === "failed";
+    if (!informative && !finished) return; // the stub: wait for the update that says something
+
+    this.emittedCalls.add(id);
+    // Keep the set from growing without bound on a long turn; ids are only needed while the call
+    // is in flight, and a few hundred is far more than any turn has open at once.
+    if (this.emittedCalls.size > 500) this.emittedCalls.clear();
+    this.event("tool.call", {
+      kind: update.kind ?? "other",
+      title: update.title ?? "",
+      ...(path ? { path } : {}),
+      ...(detail && detail !== update.title ? { detail: detail.slice(0, 300) } : {}),
+    });
+  }
+
+  /** Same throttle as a message, on the thinking stream: the last line, at most every 2 s. */
+  private flushThought(force = false): void {
+    if (!this.pendingThought.trim()) return;
+    const now = Date.now();
+    if (!force && now - this.lastThoughtFlush < MESSAGE_FLUSH_MS) return;
+    const excerpt = this.pendingThought.replace(/\s+/g, " ").trim();
+    this.event("agent.thought", { textExcerpt: excerpt.slice(0, 300) });
+    this.pendingThought = "";
+    this.lastThoughtFlush = now;
+  }
+
   private flushMessage(force = false): void {
     if (!this.pendingMessage.trim()) return;
     const now = Date.now();
     if (!force && now - this.lastFlush < MESSAGE_FLUSH_MS) return;
-    const lines = this.pendingMessage.trimEnd().split("\n");
-    this.event("agent.message", { textExcerpt: lines[lines.length - 1]?.slice(0, 500) ?? "" });
+    // A first chunk is often one word ("I"), and a timeline line reading `says: I` is noise.
+    if (!force && this.pendingMessage.trim().length < MESSAGE_MIN_CHARS) return;
+    // The whole chunk on one line, not its last line: mid-stream, the last line is usually a
+    // fragment ("| (+2 more)") and a timeline of fragments is worse than no timeline (OB-06).
+    const excerpt = this.pendingMessage.replace(/\s+/g, " ").trim();
+    this.event("agent.message", { textExcerpt: excerpt.slice(0, 500) });
     this.pendingMessage = "";
     this.lastFlush = now;
   }
@@ -245,6 +320,19 @@ export class RunSession {
   /** Map one ACP notification to events rows (SR-02, DESIGN §6.3). */
   private handleUpdate(notification: SessionNotification): void {
     const update = notification.update;
+    // Adapters disagree about where they put a command and a path, and the only way to find out
+    // is to look. `LO_DEBUG_ACP=1` records the raw tool notifications, truncated, so a timeline
+    // that says "Terminal" can be diagnosed instead of guessed at. Off by default: it is noisy.
+    if (
+      process.env.LO_DEBUG_ACP === "1" &&
+      (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update")
+    ) {
+      this.deps.repos.events.append({
+        runId: this.deps.run.id,
+        type: "system",
+        payload: { reason: "acp.raw", update: JSON.stringify(update).slice(0, 900) },
+      });
+    }
     switch (update.sessionUpdate) {
       case "agent_message_chunk": {
         const content = update.content;
@@ -255,17 +343,24 @@ export class RunSession {
         }
         break;
       }
-      case "tool_call": {
-        const path = firstPath(update);
-        this.event("tool.call", {
-          kind: update.kind ?? "other",
-          title: update.title ?? "",
-          ...(path ? { path } : {}),
-        });
+      case "agent_thought_chunk": {
+        // What the agent is working out, not what it did (OB-05). Throttled like a message and
+        // kept short: it is the line that answers "what is it doing right now".
+        const content = (update as { content?: { type?: string; text?: string } }).content;
+        if (content?.type === "text" && content.text?.trim()) {
+          this.pendingThought += content.text;
+          this.flushThought();
+        }
         break;
       }
+      case "tool_call":
       case "tool_call_update": {
-        if (update.status === "completed" && (update.kind === "edit" || update.kind === "delete")) {
+        this.recordToolCall(update);
+        if (
+          update.sessionUpdate === "tool_call_update" &&
+          update.status === "completed" &&
+          (update.kind === "edit" || update.kind === "delete")
+        ) {
           const path = firstPath(update);
           this.event("file.edit", {
             path: path ?? "",

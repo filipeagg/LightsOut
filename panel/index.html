@@ -248,6 +248,23 @@ let sourcePick = null;
 let stream = null;
 let runListener = null;
 let timeline = [];
+/** The same run, told in plain language by the server (OB-05), and which view is showing. */
+let narrative = [];
+let rawTimeline = false;
+let lastNarrated = 0;
+
+async function refreshNarrative(runId) {
+  lastNarrated = Date.now();
+  try {
+    const answer = await api(`/api/runs/${encodeURIComponent(runId)}/narrative?limit=200`);
+    narrative = answer.lines;
+    const node = $("timeline");
+    if (node && !rawTimeline) {
+      node.innerHTML = timelineRows();
+      node.scrollTop = node.scrollHeight;
+    }
+  } catch { /* the run may have just ended; the next event will try again */ }
+}
 
 async function api(path) {
   const response = await fetch(path, { headers: { accept: "application/json" } });
@@ -1039,21 +1056,47 @@ function stoppedCard(s) {
  * already stored and served; there was simply no way to look at them.
  */
 function timelineSection(s) {
-  if (s.run) {
-    return `<h2>Timeline</h2><div class="card pad"><div class="timeline" id="timeline">${timelineRows()}</div></div>`;
-  }
-  if (!s.lastRun) return "";
-  return `<h2>Timeline <span class="tiny muted">last run</span></h2>
+  if (!s.run && !s.lastRun) return "";
+  const toggle = `<button class="btn sm" onclick="toggleRawTimeline()">${
+    rawTimeline ? "Plain language" : "Raw events"
+  }</button>`;
+  return `<div class="row" style="justify-content:space-between;align-items:baseline">
+      <h2>Timeline ${s.run ? "" : `<span class="tiny muted">last run</span>`}</h2>${toggle}
+    </div>
     <div class="card pad"><div class="timeline" id="timeline">${timelineRows()}</div></div>`;
 }
 
+/**
+ * The timeline in plain language (OB-05). The lines come from the server so the panel and MCP
+ * describe a run the same way; `raw` swaps back to the event rows, which is what you want when
+ * something is wrong with the narration itself rather than with the run.
+ */
 function timelineRows() {
-  if (timeline.length === 0) return `<div class="muted">Waiting for the first event…</div>`;
-  return timeline.slice(-200).map((e) => `<div>
-    <span class="t">${esc(clock(e.ts))}</span>
-    <span class="k">${esc(e.type)}</span>
-    <span class="v">${esc(JSON.stringify(e.payload).slice(0, 160))}</span>
+  if (rawTimeline) {
+    if (timeline.length === 0) return `<div class="muted">Waiting for the first event…</div>`;
+    return timeline.slice(-200).map((e) => `<div>
+      <span class="t">${esc(clock(e.ts))}</span>
+      <span class="k">${esc(e.type)}</span>
+      <span class="v">${esc(JSON.stringify(e.payload).slice(0, 160))}</span>
+    </div>`).join("");
+  }
+  if (narrative.length === 0) {
+    return timeline.length === 0
+      ? `<div class="muted">Waiting for the first event…</div>`
+      : `<div class="muted">Nothing worth narrating yet.</div>`;
+  }
+  const tone = { work: "", decision: "amber", result: "green", problem: "red" };
+  return narrative.slice(-200).map((line) => `<div title="${esc(line.type)}">
+    <span class="t">${esc(clock(line.at))}</span>
+    <span class="k ${esc(tone[line.tone] || "")}">${esc(line.tone)}</span>
+    <span class="v">${esc(line.text)}</span>
   </div>`).join("");
+}
+
+function toggleRawTimeline() {
+  rawTimeline = !rawTimeline;
+  const node = $("timeline");
+  if (node) node.innerHTML = timelineRows();
 }
 
 function viewHistory() {
@@ -2091,14 +2134,19 @@ async function watchRun(runId) {
     runListener = null;
   }
   timeline = [];
+  narrative = [];
   if (!runId) return;
   try {
     const seen = await api(`/api/runs/${encodeURIComponent(runId)}/events?limit=200`);
     timeline = seen.events;
   } catch { /* the run may have just ended; the stream will fill in */ }
+  await refreshNarrative(runId);
   const name = `run:${runId}`;
   const fn = (message) => {
     timeline.push(JSON.parse(message.data));
+    // The narration is the server's, so it is re-read rather than reimplemented here — at most
+    // once a second, because a busy run emits several events per second.
+    if (Date.now() - lastNarrated > 1000) void refreshNarrative(runId);
     const node = $("timeline");
     if (node) {
       node.innerHTML = timelineRows();

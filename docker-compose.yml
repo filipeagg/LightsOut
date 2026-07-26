@@ -23,6 +23,9 @@ services:
       # The same folder as the user sees it, so a document can be reported at a path they can
       # open in their own editor (PM-10). Empty when the workspace is a managed volume.
       - LO_WORKSPACE_HOST=${LIGHTSOUT_WORKSPACE:-}
+      # Diagnostic only (OB-06): records the raw ACP tool notifications so a timeline that says
+      # nothing useful can be diagnosed. Noisy; leave empty unless you are looking at something.
+      - LO_DEBUG_ACP=${LO_DEBUG_ACP:-}
     env_file: .env
 
   # Egress allowlist proxy (RT-05). Enable with: docker compose --profile secure up -d

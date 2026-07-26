@@ -462,8 +462,7 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       const steps = status.chain?.tasks ?? [];
       const done = steps.filter((s) => s.status === "ok").length;
       const current = steps.find((s) => s.status === "running");
-      const events = status.run ? repos.events.listByRun(status.run.id).slice(-1) : [];
-      const last = events[0];
+      const recent = status.recent ?? [];
       const lines = [
         `LIGHTSOUT :: ${row.id}    ${new Date().toISOString().slice(0, 16)}Z`,
         `chain      ${status.chain ? `${done}/${steps.length}  ${status.chain.title}  ${status.chain.status}` : "none"}`,
@@ -475,7 +474,14 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
               : "none"
         }`,
         ...(current ? [`phase      ${current.title}`] : []),
-        ...(last ? [`event      ${last.type}  ${String(last.payload).slice(0, 80)}`] : []),
+        ...(recent.length
+          ? [
+              "",
+              "last steps",
+              ...recent.map((line) => `  ${line.at.slice(11, 16)}  ${line.text}`),
+              "",
+            ]
+          : []),
         `doubts     ${
           status.doubts.length
             ? status.doubts.map((d) => `${d.ref} (${d.kind}, ${d.ageMin}m)`).join(", ")

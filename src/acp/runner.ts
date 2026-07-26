@@ -185,7 +185,11 @@ export class TaskRunner {
         agent: this.agents.pack(profile.policy),
         default: this.agents.pack("default"),
       },
-      { scriptScanBytes: this.config.scriptScanBytes },
+      {
+        scriptScanBytes: this.config.scriptScanBytes,
+        // PE-10: what a person already allowed at a gate, so the same shape does not ask again.
+        learnedAllow: (shape) => this.repos.learned.shapes().has(shape),
+      },
     );
 
 

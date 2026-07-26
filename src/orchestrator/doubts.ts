@@ -18,6 +18,7 @@ import type { PermissionOption } from "@agentclientprotocol/sdk";
 import { consultAdvisor, otherEngine, type AdvisorResult } from "../acp/advisor.js";
 import { ProjectDocs } from "../projects/docs.js";
 import { ProjectGit } from "../projects/git.js";
+import { commandShape } from "../policy/classify.js";
 
 /** Irreversible or sensitive classes never auto-continue: they skip the advisor (DO-03). */
 const IRREVERSIBLE: ReadonlySet<ActionClass> = new Set<ActionClass>([
@@ -82,6 +83,8 @@ export type RaiseDoubtInput = {
   derivedRecommendation?: boolean;
   /** Action class for permission doubts; decides whether the advisor is consulted. */
   actionClass?: string;
+  /** The command's shape, so an allow can be remembered (PE-10). */
+  actionShape?: string;
   /** Engine that raised it, so the advisor is the other one. */
   engine: Engine;
 };
@@ -284,6 +287,9 @@ export class DoubtService {
       blocks: input.blocks,
       options: input.options,
       recommendation: input.recommendation ?? null,
+      // PE-10: what the answer will be teaching, when it is an allow.
+      actionClass: input.actionClass ?? null,
+      actionShape: input.actionShape ?? null,
     });
     if (advisor) {
       this.repos.doubts.setSecondOpinion(
@@ -416,6 +422,9 @@ export class DoubtService {
       kind: "permission",
       engine: input.engine,
       actionClass: input.actionClass,
+      // The title of a permission request is the command itself (§7.1), which is what makes an
+      // allow teachable (PE-10).
+      actionShape: commandShape(input.title),
       context: `The agent asked to do something the policy sends to a human: ${input.title}\n\nPolicy said: ${input.reason}`,
       blocks: `Task "${input.task.title}" cannot continue past this action.`,
       options: doubtOptions,
@@ -514,6 +523,29 @@ export class DoubtService {
     });
     this.bus.emit("doubt", { doubtId: doubt.id });
     this.bus.emit("overview");
+
+    // PE-10: a human allowing an unmatched command is teaching, not just answering. The shape is
+    // remembered so the same kind of command never stops a chain again; anything the classifier
+    // did understand is the packs' business and is not learned here.
+    if (
+      doubt.kind === "permission" &&
+      input.choice === "A" &&
+      doubt.action_class === "other" &&
+      doubt.action_shape
+    ) {
+      const learned = this.repos.learned.add({
+        shape: doubt.action_shape,
+        sample: doubt.context.slice(0, 300),
+        actionClass: doubt.action_class,
+        learnedFrom: doubt.ref,
+        addedBy: "human",
+      });
+      this.repos.events.append({
+        runId: doubt.run_id,
+        type: "config.changed",
+        payload: { kind: "learned_allow", id: learned.shape, op: "add", actor: "human" },
+      });
+    }
 
     // A permission doubt has a run holding the ACP response: release it now.
     const release = this.pending.get(doubt.id);

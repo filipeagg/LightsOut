@@ -331,10 +331,16 @@ export class RunSession {
       verdict: decision.verdict,
       latencyMs: decision.latencyMs,
     });
+    // PE-10: a remembered allow is used, and its counter says so — an unused rule is easy to spot
+    // and revoke, and a much-used one is a matcher somebody should write.
+    if (decision.learnedShape) {
+      this.deps.repos.learned.recordUse(decision.learnedShape);
+    }
     this.event("perm.verdict", {
       class: decision.class,
       verdict: decision.verdict,
       ruleSource: decision.ruleSource,
+      ...(decision.learnedShape ? { learned: decision.learnedShape } : {}),
     });
 
     const respond = (want: "allow" | "reject"): RequestPermissionResponse => {

@@ -79,6 +79,9 @@ export const DEFAULT_MATCHERS: Record<string, string[]> = {
     "^(ls|pwd|find|stat|du|df|tree|file|wc|head|tail|cat|less|more|nl|sort|uniq|cut|column)\\b",
     "^(grep|rg|ag|egrep|fgrep|diff|cmp|jq|yq|awk|sed|md5sum|sha1sum|sha256sum)\\b",
     "^(basename|dirname|realpath|readlink|which|type|whoami|date|uname|hostname|id)\\b",
+    // The rest of a pipeline: text tools that read their input and write to stdout.
+    "^(comm|join|paste|tr|rev|seq|fold|expand|unexpand|tac|shuf|split -n|csplit)\\b",
+    "^(ps|pgrep|env|printenv|locale|nproc|free|uptime)\\b",
     "^(cd|pushd|popd|true|false|sleep)\\b",
     "^(echo|printf)\\b",
     "^git\\s+(ls-files|count-objects|rev-list|blame|describe|shortlog|remote|cat-file|for-each-ref|config\\s+--get)\\b",
@@ -286,16 +289,44 @@ export function splitSegments(command: string): string[] {
 }
 
 /**
+ * Programs that run another program. Left in place they make every pipeline unmatched: the real
+ * case was `find … | xargs wc -l`, denied as `other` because nothing knew what `xargs` was, which
+ * stopped a chain for eleven minutes over counting lines. Stripping them is *safer* than listing
+ * them as read-only — `xargs rm` is then classified by `rm`, as it should be.
+ */
+const WRAPPERS = /^(xargs|time|nice|nohup|command|stdbuf|timeout|env|ionice|setsid)\b/i;
+/** Their own options, which must go with them: `xargs -0 -n1`, `timeout 30s`, `nice -n 10`. */
+const WRAPPER_ARG = /^(-{1,2}[A-Za-z0-9-]+(=\S+)?|\d+[smhd]?|[A-Za-z_][A-Za-z0-9_]*=\S*)$/;
+
+/**
  * Strip what sits between the separator and the command itself — subshell and group brackets,
- * negation, and leading environment assignments — so `(cd x && FOO=1 npm test)` is matched as
- * `npm test`. `sudo` and friends are deliberately left in place: they are not noise.
+ * negation, leading environment assignments and process wrappers — so `(cd x && FOO=1 npm test)`
+ * is matched as `npm test` and `xargs -0 wc -l` as `wc -l`. `sudo` is deliberately left in place:
+ * it is not noise.
  */
 function normalizeSegment(segment: string): string {
   let out = segment.trim();
   out = out.replace(/^[({\s]+/, "").replace(/[)}\s;]+$/, "");
   out = out.replace(/^!\s*/, "");
   out = out.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)\s+)+/, "");
+
+  // Peel wrappers one at a time: `time xargs -0 wc -l` is a read of files, twice removed.
+  for (let guard = 0; guard < 4 && WRAPPERS.test(out); guard += 1) {
+    const parts = out.split(/\s+/).slice(1);
+    while (parts.length > 0 && WRAPPER_ARG.test(parts[0]!)) parts.shift();
+    const inner = parts.join(" ").trim();
+    if (!inner) break; // a bare `env` or `xargs` with nothing after it: leave it be
+    out = inner;
+  }
   return out.trim();
+}
+
+/**
+ * A segment that only sets a shell variable (`R=/some/path`). It runs nothing and changes nothing
+ * outside the shell, but as an unmatched word it used to drag a whole pipeline into `other`.
+ */
+export function isAssignmentOnly(segment: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)$/.test(segment.trim());
 }
 
 /**
@@ -379,6 +410,31 @@ export function confinedToScratch(projectPath: string, segment: string): boolean
   return args.every((arg) => Classifier.isInside(root, path.resolve(projectPath, arg)));
 }
 
+/**
+ * The *shape* of a command: what it does, with the particulars removed (PE-10). Paths, quoted
+ * strings and numbers become placeholders; the programs, their flags and the pipeline survive.
+ *
+ *   `find /a/b -maxdepth 1 -name '*.py' | xargs wc -l`
+ *   → `find <path> -maxdepth <n> -name <str> | xargs wc -l`
+ *
+ * This is what a human's "yes, allow that" is remembered as, so the same kind of command does not
+ * ask again while a different one still does.
+ */
+export function commandShape(command: string): string {
+  const segments = splitSegments(command)
+    .filter((segment) => !isAssignmentOnly(segment))
+    .map((segment) =>
+      segment
+        .replace(/"[^"]*"|'[^']*'/g, "<str>")
+        .replace(/(^|\s)([~.]{0,2}\/|\$[A-Za-z_])\S*/g, "$1<path>")
+        .replace(/(^|\s)\d+(\.\d+)?([smhdkKMG]B?)?(?=\s|$)/g, "$1<n>")
+        .replace(/\s+/g, " ")
+        .trim(),
+    )
+    .filter((segment) => segment.length > 0);
+  return segments.join(" | ");
+}
+
 export class Classifier {
   private readonly table: Map<ActionClass, RegExp[]>;
   private readonly scanBytes: number;
@@ -407,7 +463,9 @@ export class Classifier {
     return (
       chain.length > 0 &&
       !chain.some(disqualifiesReadOnly) &&
-      chain.every((segment) => readOnly.some((re) => re.test(segment)))
+      chain.every(
+        (segment) => isAssignmentOnly(segment) || readOnly.some((re) => re.test(segment)),
+      )
     );
   }
 

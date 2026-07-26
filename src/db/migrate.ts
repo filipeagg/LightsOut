@@ -208,6 +208,30 @@ CREATE TABLE project_areas (
 CREATE INDEX ix_project_areas ON project_areas(project_id);
 `;
 
+/**
+ * Version 6 (PE-10): what a human has already allowed, remembered by the *shape* of the command.
+ *
+ * A permission gate for an unmatched command (`other`) that a person answers with "allow" is a
+ * lesson, not an event: the same shape asking again eleven minutes later is the system wasting
+ * their time. `doubts` gains the class and the shape so the answer knows what it is teaching.
+ */
+const LEARNED_ALLOWS_SQL = `
+CREATE TABLE learned_allows (
+  id           TEXT PRIMARY KEY,
+  shape        TEXT NOT NULL UNIQUE,
+  sample       TEXT NOT NULL,
+  action_class TEXT NOT NULL,
+  learned_from TEXT,
+  added_by     TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  uses         INTEGER NOT NULL DEFAULT 0,
+  last_used_at TEXT
+);
+
+ALTER TABLE doubts ADD COLUMN action_class TEXT;
+ALTER TABLE doubts ADD COLUMN action_shape TEXT;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial schema", up: applyInitialSchema },
   {
@@ -224,6 +248,7 @@ export const MIGRATIONS: Migration[] = [
   },
   { version: 4, name: "project context brief", up: addProjectContext },
   { version: 5, name: "project read-only areas", up: PROJECT_AREAS_SQL },
+  { version: 6, name: "learned allows", up: LEARNED_ALLOWS_SQL },
 ];
 
 /** The marker migration 4 writes, and the panel looks for (PM-09). */

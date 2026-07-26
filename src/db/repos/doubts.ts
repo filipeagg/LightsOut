@@ -16,6 +16,9 @@ export type OpenDoubt = {
   blocks: string;
   options: DoubtOption[];
   recommendation?: string | null;
+  /** For a permission doubt: the class the policy assigned, and the command's shape (PE-10). */
+  actionClass?: string | null;
+  actionShape?: string | null;
 };
 
 export type SecondOpinion = {
@@ -37,8 +40,8 @@ export class DoubtsRepo {
         .prepare(
           `INSERT INTO doubts
              (id, ref, project_id, task_id, run_id, kind, status, context, blocks,
-              options, recommendation, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)`,
+              options, recommendation, created_at, action_class, action_shape)
+           VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -52,6 +55,8 @@ export class DoubtsRepo {
           JSON.stringify(input.options),
           input.recommendation ?? null,
           nowIso(),
+          input.actionClass ?? null,
+          input.actionShape ?? null,
         );
       return id;
     });

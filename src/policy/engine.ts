@@ -7,7 +7,13 @@
  * audit row so the latency measured includes only the decision (PE-04).
  */
 import path from "node:path";
-import { Classifier, pathsInCommand, scratchRoot, type ClassifyInput } from "./classify.js";
+import {
+  Classifier,
+  commandShape,
+  pathsInCommand,
+  scratchRoot,
+  type ClassifyInput,
+} from "./classify.js";
 import {
   NEVER_ALLOW,
   NEVER_BELOW_HUMAN,
@@ -26,6 +32,8 @@ export type Decision = {
   reason: string;
   /** True when the hard floor overrode what the packs said (PE-03). */
   floored: boolean;
+  /** Set when a remembered human allow decided this (PE-10); the caller records the use. */
+  learnedShape?: string;
   latencyMs: number;
 };
 
@@ -44,10 +52,17 @@ const FALLBACK_VERDICT: Verdict = "require_human";
 export class PolicyEngine {
   private readonly classifier: Classifier;
 
+  /**
+   * Command shapes a human has already allowed at a gate (PE-10). Consulted only for `other`:
+   * a class the classifier understood is decided by the packs, as before.
+   */
+  private readonly learned: ((shape: string) => boolean) | undefined;
+
   constructor(
     private readonly layers: PolicyLayers,
-    options: { scriptScanBytes?: number } = {},
+    options: { scriptScanBytes?: number; learnedAllow?: (shape: string) => boolean } = {},
   ) {
+    this.learned = options.learnedAllow;
     this.classifier = new Classifier(
       {
         ...(layers.default?.matchers ?? {}),
@@ -161,6 +176,25 @@ export class PolicyEngine {
         floored: true,
         latencyMs: performance.now() - startedAt,
       };
+    }
+
+    // PE-10: an unmatched command whose shape a person has already allowed does not ask again.
+    // Only `other` — a class the classifier did understand is the packs' business, and the hard
+    // floor is never reached from here because `other` is not on it.
+    if (classification.class === "other" && this.learned) {
+      const command = [input.command, ...(input.commands ?? [])].find((c) => c?.trim());
+      const shape = command ? commandShape(command) : "";
+      if (shape && this.learned(shape)) {
+        return {
+          class: "other",
+          verdict: "allow",
+          ruleSource: "default",
+          reason: `${classification.reason}; allowed by a human before, remembered as: ${shape}`,
+          floored: false,
+          learnedShape: shape,
+          latencyMs: performance.now() - startedAt,
+        };
+      }
     }
 
     const rawVerdict = hit?.verdict ?? FALLBACK_VERDICT;

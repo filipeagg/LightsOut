@@ -463,6 +463,48 @@ export class Actions {
     }
   }
 
+  // --- Learned allows (PE-10, DESIGN §7.4) -----------------------------------
+
+  /** What a human has already allowed at a gate, most used first. */
+  listLearnedAllows(): {
+    allows: {
+      id: string;
+      shape: string;
+      sample: string;
+      actionClass: string;
+      learnedFrom: string | null;
+      addedBy: string;
+      uses: number;
+      lastUsedAt: string | null;
+      createdAt: string;
+    }[];
+  } {
+    return {
+      allows: this.deps.repos.learned.list().map((row) => ({
+        id: row.id,
+        shape: row.shape,
+        sample: row.sample,
+        actionClass: row.action_class,
+        learnedFrom: row.learned_from,
+        addedBy: row.added_by,
+        uses: row.uses,
+        lastUsedAt: row.last_used_at,
+        createdAt: row.created_at,
+      })),
+    };
+  }
+
+  /** Forget one: the next command of that shape asks again (PE-10). */
+  forgetLearnedAllow(actor: Actor, shapeOrId: string): { forgotten: string } {
+    const row = this.deps.repos.learned.remove(shapeOrId);
+    if (!row) throw new Error(`no learned allow matches: ${shapeOrId}`);
+    this.deps.repos.events.append({
+      type: "config.changed",
+      payload: { kind: "learned_allow", id: row.shape, op: "remove", actor },
+    });
+    return { forgotten: row.shape };
+  }
+
   // --- Read-only workspace areas (PE-09, DESIGN §9.5) ------------------------
 
   /** What this project may read outside itself, with both paths for each area. */

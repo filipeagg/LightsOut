@@ -8,7 +8,11 @@ import { migrate } from "../src/db/migrate.js";
 import { createRepos, type Repos } from "../src/db/repos/index.js";
 import { loadConfig } from "../src/config.js";
 import { createBus } from "../src/bus.js";
-import { DoubtService, isReversible } from "../src/orchestrator/doubts.js";
+import {
+  DoubtService,
+  derivedPermissionRecommendation,
+  isReversible,
+} from "../src/orchestrator/doubts.js";
 import { otherEngine, parseAdvisorAnswer } from "../src/acp/advisor.js";
 import type { AdvisorResult } from "../src/acp/advisor.js";
 
@@ -398,6 +402,80 @@ describe("permission gate", () => {
     const result = await gate;
     expect(result).toMatchObject({ reject: true });
     if ("reject" in result) expect(result.explanation).toContain("refused");
+  });
+
+  it("lets the advisor settle a reversible gate instead of waking a human (§8.2)", async () => {
+    const { project, task, run } = seed();
+    // `other` is where an unclassified but harmless command lands; nobody recommended allowing
+    // it, so the derived recommendation is what the advisor is asked about.
+    const svc = service(agreeing(0.9));
+
+    const result = await svc.gatePermission({
+      project,
+      task,
+      runId: run.id,
+      engine: "claude",
+      actionClass: "other",
+      title: "somebinary --inspect",
+      reason: "no rule for this class, defaulting to require_human",
+      options,
+      waitMs: 300,
+      pollMs: 50,
+    });
+
+    expect(result).toEqual({ optionId: "allow-1" });
+    expect(repos.doubts.listOpen(project.id)).toHaveLength(0);
+    expect(repos.decisions.latest(project.id)).toMatchObject({ kind: "provisional" });
+  });
+
+  it("holds a derived allow to a stricter bar than a functional doubt", async () => {
+    const { project, task, run } = seed();
+    // 0.7 clears the default functional threshold but not DERIVED_ALLOW_CONFIDENCE.
+    const svc = service(agreeing(0.7), { LO_ADVISOR_CONFIDENCE: "0.6" });
+
+    const result = await svc.gatePermission({
+      project,
+      task,
+      runId: run.id,
+      engine: "claude",
+      actionClass: "other",
+      title: "somebinary --inspect",
+      reason: "r",
+      options,
+      waitMs: 300,
+      pollMs: 50,
+    });
+
+    expect(result).toMatchObject({ reject: true });
+    expect(repos.doubts.listOpen(project.id)).toHaveLength(1);
+  });
+
+  it("never derives an allow for dependencies, network or irreversible actions", async () => {
+    expect(derivedPermissionRecommendation("other")).toBe("A");
+    expect(derivedPermissionRecommendation("project_write")).toBe("A");
+    expect(derivedPermissionRecommendation("deps_install")).toBeNull();
+    expect(derivedPermissionRecommendation("network")).toBeNull();
+    for (const cls of ["delete", "git_push", "credentials", "publish_external"]) {
+      expect(derivedPermissionRecommendation(cls)).toBeNull();
+    }
+
+    // And the gate really does ask a human for one of them, even with a confident advisor.
+    const { project, task, run } = seed();
+    const svc = service(agreeing(0.99));
+    const result = await svc.gatePermission({
+      project,
+      task,
+      runId: run.id,
+      engine: "claude",
+      actionClass: "deps_install",
+      title: "npm install left-pad",
+      reason: "dependencies change the build",
+      options,
+      waitMs: 300,
+      pollMs: 50,
+    });
+    expect(result).toMatchObject({ reject: true });
+    expect(repos.doubts.listOpen(project.id)).toHaveLength(1);
   });
 
   it("gives up after the slow clock and leaves the doubt open (§8.4)", async () => {

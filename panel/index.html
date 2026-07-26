@@ -231,13 +231,16 @@ const ICON = {
 /** Everything the views read. Replaced wholesale, never patched in place. */
 const store = {
   overview: null, project: null, history: null, agents: null, health: null,
-  templates: null, knowledge: null, vault: null, phases: null, models: null, error: "",
+  templates: null, knowledge: null, vault: null, phases: null, models: null, folders: null,
+  error: "",
 };
 /** Which row has its editor open. Panel-local: the server has no opinion about it. */
 let editing = null;
 let route = { name: "/", id: null, tab: null };
 /** Whether the project list includes archived projects (PM-08). Panel-local, like `editing`. */
 let showArchived = false;
+/** Whether the phase editor shows the JSON view instead of the form (TP-04). */
+let editingJson = false;
 let stream = null;
 let runListener = null;
 let timeline = [];
@@ -279,6 +282,8 @@ async function act(method, path, payload) {
     store.error = err.message;
   }
   editing = null;
+  draft = null;
+  editingJson = false;
   await load();
 }
 
@@ -976,7 +981,7 @@ function viewTemplates() {
           ${tpl.requiresWritableKnowledge ? `<span class="pill amber">needs a writable base</span>` : ""}
           <div class="tiny muted">${esc(tpl.description || "")}</div></div>
         <div class="row" style="gap:6px">
-          <button class="btn sm" onclick="editing='${esc(tpl.id)}';paint()">Edit phases</button>
+          <button class="btn sm" onclick="editPhases('${esc(tpl.id)}')">Edit phases</button>
           ${tpl.source === "workspace"
             ? `<button class="btn sm danger" onclick="deleteTemplate('${esc(tpl.id)}')">Delete</button>`
             : ""}
@@ -998,22 +1003,151 @@ function viewTemplates() {
 }
 
 /**
- * The phase editor is one textarea of JSON rather than a drag-and-drop list. Reordering,
- * inserting and removing are the same edit to the same array, and the array is what the file
- * holds; a bespoke widget here would be a second representation to keep in step.
+ * The phase editor (TP-04): one row per phase, with the agent and the gate as selects and the
+ * flags as checkboxes. Add, remove and reorder act on `draft`, a panel-local copy of the array,
+ * and nothing reaches the server until Save — so a half-finished reordering is not a half-written
+ * template. The JSON view is still there behind a toggle for pasting a whole list in at once, but
+ * it is a view of the same draft, not a second source.
+ *
+ * (This replaced the JSON-only textarea it used to be; see DECISIONS.md.)
  */
+let draft = null;
+
+function startDraft(tpl) {
+  draft = tpl.phases.map(cleanPhase);
+}
+
+/** Open the editor on a template, discarding any draft left from another one. */
+function editPhases(id) {
+  draft = null;
+  editingJson = false;
+  editing = id;
+  paint();
+}
+
 function templateEditor(tpl) {
+  if (draft === null) startDraft(tpl);
+  const agents = store.agents
+    ? store.agents.agents.filter((a) => a.valid && a.enabled !== false).map((a) => a.id)
+    : [];
   return `<div style="margin-top:12px">
-    <label class="tiny">Phases (JSON: id, title, agent, instructions, gate, optional, repeatable, deliverable, verify)<br>
-      <textarea id="tpl-phases" rows="16" style="width:100%;font-family:var(--mono)">${esc(
-        JSON.stringify(tpl.phases.map(cleanPhase), null, 2),
-      )}</textarea></label>
+    <div class="between" style="margin-bottom:8px">
+      <span class="micro">Phases · ${draft.length}</span>
+      <div class="row" style="gap:6px">
+        <button class="btn sm" onclick="addDraftPhase()">+ Add a phase</button>
+        <button class="btn sm" onclick="toggleJson()">
+          ${editingJson ? "Back to the form" : "Edit as JSON"}</button>
+      </div>
+    </div>
+    ${editingJson
+      ? `<label class="tiny">The same list, for pasting one in whole<br>
+          <textarea id="tpl-phases" rows="16" style="width:100%;font-family:var(--mono)">${esc(
+            JSON.stringify(draft, null, 2),
+          )}</textarea></label>
+         <p class="tiny muted">Saving from here parses this text; switching back re-reads it into
+           the form, so whichever one you edited last is the one that counts.</p>`
+      : draft.map((p, i) => phaseRow(p, i, agents)).join("")}
     <div class="row" style="gap:8px;margin-top:12px">
       <button class="btn primary" onclick="saveTemplate('${esc(tpl.id)}')">
         ${tpl.source === "builtin" ? "Save as a workspace copy" : "Save"}</button>
-      <button class="btn" onclick="editing=null;paint()">Cancel</button>
+      <button class="btn" onclick="cancelTemplate()">Cancel</button>
     </div>
   </div>`;
+}
+
+/** One phase. Every field writes straight into the draft, so a repaint never loses a keystroke. */
+function phaseRow(p, i, agents) {
+  const set = (key) => `onchange="setDraft(${i},'${key}',this.value)"`;
+  const flag = (key) => `onchange="setDraft(${i},'${key}',this.checked)"`;
+  const known = agents.includes(p.agent) ? agents : [p.agent, ...agents];
+  return `<div class="card pad-sm" style="margin-bottom:8px;background:var(--surface-2)">
+    <div class="between">
+      <span class="micro">${i + 1}</span>
+      <div class="row" style="gap:4px">
+        <button class="btn sm" ${i === 0 ? "disabled" : ""} onclick="moveDraft(${i},-1)" title="Move up">↑</button>
+        <button class="btn sm" ${i === draft.length - 1 ? "disabled" : ""} onclick="moveDraft(${i},1)" title="Move down">↓</button>
+        <button class="btn sm danger" onclick="removeDraft(${i})">Remove</button>
+      </div>
+    </div>
+    <div class="row wrap" style="gap:12px;margin-top:8px">
+      <label class="tiny">Id<br><input value="${esc(p.id)}" ${set("id")} placeholder="shape-the-prompt"></label>
+      <label class="tiny" style="flex:1;min-width:220px">Title<br>
+        <input value="${esc(p.title)}" ${set("title")} placeholder="Turn the idea into a workable prompt"></label>
+      <label class="tiny">Agent<br><select ${set("agent")}>${known
+        .map((a) => `<option ${a === p.agent ? "selected" : ""}>${esc(a)}</option>`)
+        .join("")}${agents.length === 0 ? `<option selected>${esc(p.agent)}</option>` : ""}</select></label>
+      <label class="tiny">Gate<br><select ${set("gate")}>
+        <option value="auto" ${(p.gate || "auto") === "auto" ? "selected" : ""}>auto</option>
+        <option value="human" ${p.gate === "human" ? "selected" : ""}>human gate</option>
+      </select></label>
+    </div>
+    <div class="row wrap" style="gap:12px;margin-top:8px">
+      <label class="tiny" style="flex:1;min-width:200px">Deliverable<br>
+        <input value="${esc(p.deliverable || "")}" ${set("deliverable")} placeholder="doc/PROMPT.md"></label>
+      <label class="tiny" style="flex:1;min-width:200px">Verify command<br>
+        <input value="${esc(p.verify || "")}" ${set("verify")} placeholder="npm test"></label>
+      <label class="tiny" style="align-self:end">
+        <input type="checkbox" ${p.optional ? "checked" : ""} ${flag("optional")}> optional</label>
+      <label class="tiny" style="align-self:end">
+        <input type="checkbox" ${p.repeatable ? "checked" : ""} ${flag("repeatable")}> repeatable</label>
+    </div>
+    <label class="tiny" style="display:block;margin-top:8px">Instructions<br>
+      <textarea rows="4" ${set("instructions")}>${esc(p.instructions || "")}</textarea></label>
+  </div>`;
+}
+
+/* The draft mutators. `paint()` is only called where the DOM has to change shape. */
+function setDraft(i, key, value) {
+  draft[i][key] = value;
+}
+function addDraftPhase() {
+  if (editingJson) readJsonDraft();
+  draft.push({ id: "", title: "", agent: draftDefaultAgent(), instructions: "" });
+  paint();
+}
+function removeDraft(i) {
+  if (editingJson) readJsonDraft();
+  draft.splice(i, 1);
+  paint();
+}
+function moveDraft(i, by) {
+  const to = i + by;
+  if (to < 0 || to >= draft.length) return;
+  [draft[i], draft[to]] = [draft[to], draft[i]];
+  paint();
+}
+function draftDefaultAgent() {
+  const list = store.agents ? store.agents.agents.filter((a) => a.valid && a.enabled !== false) : [];
+  return list.length ? list[0].id : "builder";
+}
+function cancelTemplate() {
+  draft = null;
+  editingJson = false;
+  editing = null;
+  paint();
+}
+
+/** Leaving the JSON view reads it back first, so switching is not a way to lose an edit. */
+function toggleJson() {
+  if (editingJson && !readJsonDraft()) return;
+  editingJson = !editingJson;
+  paint();
+}
+
+/** Pull the JSON view back into the draft, so the two never disagree about what is being saved. */
+function readJsonDraft() {
+  const node = $("tpl-phases");
+  if (!node) return true;
+  try {
+    const parsed = JSON.parse(node.value);
+    if (!Array.isArray(parsed)) throw new Error("the phase list must be an array");
+    draft = parsed;
+    return true;
+  } catch (err) {
+    store.error = `the phase list is not valid JSON: ${err.message}`;
+    paint();
+    return false;
+  }
 }
 
 function cleanPhase(p) {
@@ -1027,13 +1161,15 @@ function cleanPhase(p) {
 }
 
 async function saveTemplate(id) {
-  let phases;
-  try {
-    phases = JSON.parse($("tpl-phases").value);
-  } catch (err) {
-    store.error = `the phase list is not valid JSON: ${err.message}`;
+  if (editingJson && !readJsonDraft()) return;
+  const phases = draft.map(cleanPhase);
+  const missing = phases.findIndex((p) => !p.id || !p.title || !p.agent || !p.instructions);
+  if (missing !== -1) {
+    store.error = `phase ${missing + 1} needs an id, a title, an agent and instructions`;
     return paint();
   }
+  draft = null;
+  editingJson = false;
   await act("PUT", `/api/templates/${encodeURIComponent(id)}`, { phases });
 }
 
@@ -1054,65 +1190,151 @@ function viewKnowledge() {
     <div class="row" style="margin-bottom:16px">
       <button class="btn primary" onclick="editing='new-base';paint()">New base</button>
     </div>
-    ${editing === "new-base"
-      ? `<div class="card pad" style="margin-bottom:16px">
-          <div class="row wrap" style="gap:16px">
-            <label class="tiny">Id<br><input id="kb-id" placeholder="erpagro-core"></label>
-            <label class="tiny">Name<br><input id="kb-name" placeholder="ERPagro core"></label>
-            <label class="tiny">Kind<br><select id="kb-kind">
-              <option>technical</option><option>functional</option>
-              <option>organisational</option><option>market</option><option>other</option>
-            </select></label>
-            <label class="tiny">Tags<br><input id="kb-tags" placeholder="erp, legacy"></label>
-          </div>
-          <label class="tiny">Description<br><input id="kb-description" style="width:100%"></label>
-          <div class="row" style="gap:8px;margin-top:12px">
-            <button class="btn primary" onclick="createBase()">Create</button>
-            <button class="btn" onclick="editing=null;paint()">Cancel</button>
-          </div>
-        </div>`
-      : ""}
+    ${editing === "new-base" ? baseForm(null) : ""}
     ${k.bases
       .map(
         (b) => `<div class="card pad" style="margin-bottom:16px">
       <div class="row" style="justify-content:space-between">
         <div><b>${esc(b.name)}</b> <code class="tiny">${esc(b.id)}</code>
           <span class="pill">${esc(b.kind)}</span>
+          ${b.source ? `<span class="pill blue">linked</span>` : ""}
           <div class="tiny muted">${esc(b.description || "")}</div>
           <div class="tiny muted">${b.documents.length} document(s)${
-            b.updated ? ` · updated ${esc(b.updated)}` : ""}</div></div>
+            b.updated ? ` · updated ${esc(b.updated)}` : ""}${
+            b.source ? ` · read from <code>${esc(b.source)}</code>` : ""}</div></div>
         <div class="row" style="gap:6px">
-          <button class="btn sm" onclick="editing='doc:${esc(b.id)}';paint()">Add a document</button>
+          <button class="btn sm" onclick="editing='base:${esc(b.id)}';paint()">Edit</button>
+          ${b.source
+            ? ""
+            : `<button class="btn sm" onclick="editing='doc:${esc(b.id)}';paint()">Add a document</button>`}
           <button class="btn sm danger" onclick="deleteBase('${esc(b.id)}')">Delete</button>
         </div>
       </div>
-      <div class="tiny" style="margin-top:8px">${b.documents
-        .map((d) => `<code>${esc(d.file || d)}</code>`)
-        .join(" ")}</div>
-      ${editing === `doc:${b.id}`
-        ? `<div style="margin-top:12px">
-            <label class="tiny">File name<br><input id="kb-doc-file" placeholder="data-model.md"></label>
-            <label class="tiny">Content<br><textarea id="kb-doc-body" rows="10" style="width:100%"></textarea></label>
-            <div class="row" style="gap:8px;margin-top:12px">
-              <button class="btn primary" onclick="saveDoc('${esc(b.id)}')">Save the document</button>
-              <button class="btn" onclick="editing=null;paint()">Cancel</button>
-            </div></div>`
-        : ""}
+      ${documentList(b)}
+      ${editing === `base:${b.id}` ? baseForm(b) : ""}
+      ${editing === `doc:${b.id}` ? docForm(b) : ""}
     </div>`,
       )
       .join("")}`;
 }
 
-async function createBase() {
-  const id = field("kb-id");
-  if (!id) { store.error = "an id is required"; return paint(); }
-  await act("POST", "/api/knowledge", {
-    id,
-    name: field("kb-name") || id,
+/**
+ * The documents of a base. A linked base lists them without a delete button: the folder is the
+ * source of truth and it belongs to whoever put it there (KB-08).
+ */
+function documentList(b) {
+  if (b.documents.length === 0) {
+    return `<div class="tiny muted" style="margin-top:8px">No documents yet.</div>`;
+  }
+  return `<div class="row wrap tiny" style="margin-top:8px;gap:6px">${b.documents
+    .map((d) => {
+      const file = d.file || d;
+      const size = d.bytes ? ` <span class="muted">${Math.max(1, Math.round(d.bytes / 1024))} kB</span>` : "";
+      return `<span class="pill code">${esc(file)}${size}${
+        b.source
+          ? ""
+          : ` <a href="#" onclick="deleteDoc('${esc(b.id)}','${esc(file)}');return false" title="Delete ${esc(file)}" style="color:var(--red-fg)">×</a>`
+      }</span>`;
+    })
+    .join("")}</div>`;
+}
+
+/**
+ * Create or edit a base (KB-08). The same form both ways: the id is fixed once it exists, and
+ * "read documents from" is the switch between a base that holds its own documents and one that
+ * points at a folder already in the workspace.
+ */
+function baseForm(b) {
+  const isNew = b === null;
+  const base = b ?? { id: "", name: "", kind: "technical", description: "", tags: [], source: null };
+  const kinds = ["technical", "functional", "organisational", "market", "other"];
+  const folders = store.folders ? store.folders.folders : [];
+  const known = base.source && !folders.includes(base.source) ? [base.source] : [];
+  return `<div class="card pad" style="margin-top:12px;margin-bottom:16px">
+    <div class="row wrap" style="gap:16px">
+      ${isNew
+        ? `<label class="tiny">Id<br><input id="kb-id" placeholder="erpagro-core"></label>`
+        : `<label class="tiny">Id<br><input value="${esc(base.id)}" readonly></label>`}
+      <label class="tiny">Name<br><input id="kb-name" value="${esc(base.name)}" placeholder="ERPagro core"></label>
+      <label class="tiny">Kind<br><select id="kb-kind">${kinds
+        .map((k) => `<option ${k === base.kind ? "selected" : ""}>${k}</option>`)
+        .join("")}</select></label>
+      <label class="tiny">Tags<br><input id="kb-tags" value="${esc((base.tags || []).join(", "))}" placeholder="erp, legacy"></label>
+    </div>
+    <label class="tiny">Description<br><input id="kb-description" value="${esc(base.description || "")}" style="width:100%"></label>
+    <label class="tiny" style="display:block;margin-top:12px">Read documents from<br>
+      <select id="kb-source">
+        <option value="">this base's own folder (knowledge/${esc(base.id || "<id>")})</option>
+        ${[...known, ...folders]
+          .map((f) => `<option value="${esc(f)}" ${f === base.source ? "selected" : ""}>${esc(f)}</option>`)
+          .join("")}
+      </select></label>
+    <p class="tiny muted" style="margin-top:6px">A folder here stays the source of truth: drop a
+      <code>.md</code> or <code>.txt</code> in it and the next session sees it. Only folders inside
+      the workspace are offered, because that is all the container can see. A linked base cannot be
+      the writable one (KB-05).</p>
+    <div class="row" style="gap:8px;margin-top:12px">
+      <button class="btn primary" onclick="saveBase(${isNew ? "null" : `'${esc(base.id)}'`})">
+        ${isNew ? "Create" : "Save"}</button>
+      <button class="btn" onclick="editing=null;paint()">Cancel</button>
+    </div>
+  </div>`;
+}
+
+/** Add a document: type it, or pick a text file from the computer and it is read in place. */
+function docForm(b) {
+  return `<div style="margin-top:12px">
+    <div class="row wrap" style="gap:16px">
+      <label class="tiny">File name<br><input id="kb-doc-file" placeholder="data-model.md"></label>
+      <label class="tiny">…or upload a file<br>
+        <input id="kb-doc-upload" type="file" accept=".md,.markdown,.txt,text/plain,text/markdown"
+               onchange="loadUpload('${esc(b.id)}')"></label>
+    </div>
+    <label class="tiny">Content<br><textarea id="kb-doc-body" rows="10" style="width:100%"></textarea></label>
+    <p class="tiny muted">Text only — <code>.md</code>, <code>.markdown</code>, <code>.txt</code>.
+      A document that cannot be injected is a document the agent is told exists and cannot read.</p>
+    <div class="row" style="gap:8px;margin-top:12px">
+      <button class="btn primary" onclick="saveDoc('${esc(b.id)}')">Save the document</button>
+      <button class="btn" onclick="editing=null;paint()">Cancel</button>
+    </div></div>`;
+}
+
+/**
+ * Read a picked file into the form rather than posting multipart: a knowledge document is text,
+ * the write route already takes text, and this way what is uploaded is visible before it is saved.
+ */
+async function loadUpload() {
+  const input = $("kb-doc-upload");
+  const file = input && input.files ? input.files[0] : null;
+  if (!file) return;
+  if (!/\.(md|markdown|txt)$/i.test(file.name)) {
+    store.error = `${file.name} is not a text document (.md, .markdown, .txt)`;
+    return paint();
+  }
+  try {
+    $("kb-doc-body").value = await file.text();
+    if (!field("kb-doc-file")) $("kb-doc-file").value = file.name;
+    store.error = "";
+  } catch (err) {
+    store.error = `could not read ${file.name}: ${err.message}`;
+    paint();
+  }
+}
+
+async function saveBase(id) {
+  const patch = {
+    name: field("kb-name"),
     kind: field("kb-kind"),
     description: field("kb-description"),
     tags: csv("kb-tags"),
-  });
+    source: field("kb-source") || null,
+  };
+  if (id === null) {
+    const newId = field("kb-id");
+    if (!newId) { store.error = "an id is required"; return paint(); }
+    return act("POST", "/api/knowledge", { id: newId, ...patch, name: patch.name || newId });
+  }
+  await act("PUT", `/api/knowledge/${encodeURIComponent(id)}`, patch);
 }
 
 async function saveDoc(baseId) {
@@ -1122,6 +1344,11 @@ async function saveDoc(baseId) {
     file,
     content: $("kb-doc-body").value,
   });
+}
+
+async function deleteDoc(baseId, file) {
+  if (!confirmed(`the document ${file} from ${baseId}`)) return;
+  await act("DELETE", `/api/knowledge/${encodeURIComponent(baseId)}/doc`, { file });
 }
 
 async function deleteBase(id) {
@@ -1319,8 +1546,12 @@ async function load() {
       if (!store.models) store.models = await api("/api/agents/models");
     } else if (route.name === "/templates") {
       store.templates = await api("/api/templates");
+      // The phase editor picks the agent from a select, so it needs the profiles (TP-04).
+      store.agents = await api("/api/agents").catch(() => null);
     } else if (route.name === "/knowledge") {
       store.knowledge = await api("/api/knowledge");
+      // The folders a base can be linked to (KB-08); the picker needs them before it renders.
+      store.folders = await api("/api/knowledge/folders").catch(() => ({ folders: [] }));
     } else if (route.name === "/vault") {
       store.vault = await api("/api/vault");
     } else if (route.name === "/health") {

@@ -10,7 +10,9 @@ import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { load as loadYaml } from "js-yaml";
 import {
+  isDocumentFile,
   knowledgeManifestSchema,
+  resolveSource,
   type KnowledgeManifest,
   type RejectedBase,
 } from "./schema.js";
@@ -24,7 +26,15 @@ export type KnowledgeDocument = {
 
 export type KnowledgeBase = {
   manifest: KnowledgeManifest;
+  /** Where the manifest and `index.md` live: always `knowledge/<id>/`. */
   dir: string;
+  /**
+   * Where the documents live. The same as `dir` for a normal base, and the linked folder for one
+   * with `source` set (KB-08). Everything that reads or writes a document uses this.
+   */
+  docsDir: string;
+  /** Set when the documents come from elsewhere, so the panel and the agent can say so. */
+  source: string | undefined;
   /** Present when the base has one; always injected in full when it does (§17.2). */
   index: string | undefined;
   documents: KnowledgeDocument[];
@@ -75,8 +85,10 @@ export class KnowledgeLoader {
    */
   async readDocument(baseId: string, file: string): Promise<string> {
     const base = this.getOrThrow(baseId);
-    const target = path.resolve(base.dir, file);
-    if (target !== base.dir && !target.startsWith(base.dir + path.sep)) {
+    // `index.md` and the manifest live in the base directory even when the documents do not.
+    const root = file === INDEX_FILE || file === MANIFEST_FILE ? base.dir : base.docsDir;
+    const target = path.resolve(root, file);
+    if (target !== root && !target.startsWith(root + path.sep)) {
       throw new Error(`path escapes the knowledge base: ${file}`);
     }
     return readFile(target, "utf8");
@@ -112,12 +124,25 @@ export class KnowledgeLoader {
           );
         }
 
+        // A linked base reads its documents from a folder elsewhere in the workspace (KB-08).
+        // A source that cannot be resolved rejects the base rather than silently emptying it.
+        let docsDir = dir;
+        if (manifest.source !== undefined) {
+          const resolved = resolveSource(this.workspace, manifest.source);
+          if ("error" in resolved) throw new Error(resolved.error);
+          const info = await stat(resolved.dir).catch(() => undefined);
+          if (!info?.isDirectory()) {
+            throw new Error(`source folder does not exist in the workspace: ${manifest.source}`);
+          }
+          docsDir = resolved.dir;
+        }
+
         const documents: KnowledgeDocument[] = [];
-        for (const file of await readdir(dir, { withFileTypes: true })) {
+        for (const file of await readdir(docsDir, { withFileTypes: true })) {
           if (!file.isFile()) continue;
-          if (path.extname(file.name).toLowerCase() !== ".md") continue;
-          if (file.name === INDEX_FILE) continue;
-          const info = await stat(path.join(dir, file.name));
+          if (!isDocumentFile(file.name)) continue;
+          if (docsDir === dir && file.name === INDEX_FILE) continue;
+          const info = await stat(path.join(docsDir, file.name));
           documents.push({
             file: file.name,
             bytes: info.size,
@@ -133,7 +158,14 @@ export class KnowledgeLoader {
           index = undefined;
         }
 
-        bases.set(manifest.id, { manifest, dir, index, documents });
+        bases.set(manifest.id, {
+          manifest,
+          dir,
+          docsDir,
+          source: manifest.source,
+          index,
+          documents,
+        });
       } catch (err) {
         rejected.push({
           dir: entry.name,

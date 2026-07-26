@@ -1237,6 +1237,29 @@ updated: 2026-07-25
 injected in full, whatever the budget, because it is what lets an agent ask for the right
 document.
 
+A document is a text file: `.md`, `.markdown` or `.txt`. Nothing else is accepted, by the
+uploader or by the loader, because what a base is *for* is text that goes into a prompt — a PDF
+sitting in the directory would be a document the agent is told exists and cannot read.
+
+#### Linked bases (KB-08)
+
+A base may name a folder instead of holding the documents itself:
+
+```yaml
+id: erpagro-docs
+name: ERPagro documentation
+kind: technical
+source: docs/erpagro          # relative to the workspace root; the folder stays the source of truth
+```
+
+With `source` set, `knowledge.yaml` and `index.md` still live in `knowledge/<id>/`, but the
+documents are read from `<workspace>/<source>/` on every load, so a file dropped in there with
+the file explorer is visible to the next session without touching the panel. The path is resolved
+against the workspace root and refused if it escapes it, points at `knowledge/` itself or is
+absolute: the container only sees the workspace (RT-02), and a manifest arrives from a browser.
+A linked base is never writable — `writableKnowledge` refuses it (KB-05), because the curation
+project would be editing a folder that something else owns.
+
 ### 17.2 Injection (KB-04, KB-06)
 
 `inject.ts` builds block 3 of the prompt (§6.2):

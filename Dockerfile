@@ -30,8 +30,12 @@ CMD ["npm", "test"]
 # Runtime stage. Named so the release workflow can target it explicitly (SU-01).
 FROM node:22-slim AS runtime
 
+# python3-pip is not a convenience: without it an agent that needs a library reaches for
+# `ensurepip`, which writes into the interpreter's own directory — outside the workspace, and so
+# denied by the hard floor of PE-03, which no grant can lift. The image must ship the toolchain,
+# because an agent can never install it (ST-03b, DESIGN §3.2).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git openssh-client ca-certificates tini python3 make g++ \
+      git openssh-client ca-certificates tini python3 python3-pip python3-venv make g++ \
     && rm -rf /var/lib/apt/lists/*
 
 # Engine CLIs and ACP adapters, pinned (see doc/DECISIONS.md).

@@ -41,7 +41,19 @@ agents/, templates/, vault.yaml: always credentials, whatever the pack says.
 | test | qa-engineer | execution and loopback network; writes confined to the test directories |
 | probe | contract-prober | network and execution; writes confined to probes/ and doc/; only test credentials resolve |
 | curate | codebase-analyst | the only pack whose knowledge_write is allow, narrowed to the project's writable base |
+| integrate | integrator | network + writes anywhere in the project + execution + the vault: the combination probe and default each half-had |
 | advisor | second opinions | everything read-only; the terminal denied |
+
+## a_missing_tool_is_not_a_permission_problem
+
+symptom: the agent tries ensurepip, `python -m venv /usr/...` or apt-get, and is denied.
+cause: those write into the interpreter or the system, outside the workspace — the hard floor of PE-03.
+cause.consequence: no grant, no judge and no learned allow can lift it. Correctly denied, unfixable from here.
+shipped: git, python3 with pip, node, and the two engine CLIs (ST-03b).
+libraries: pip install --target .lightsout/tmp/deps <package>
+libraries.class: project_write, not deps_install — it is swept when the run ends, so no gate.
+libraries.import: .lightsout/tmp/deps is already on the run's PYTHONPATH.
+missing_from_the_image: a change to the image, not a policy question. Raise a doubt naming the tool.
 
 ## the_order_a_gate_is_answered_in
 

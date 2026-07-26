@@ -1911,8 +1911,8 @@ rather than a confusing 401.
 
 ## 19. The builtin agent library (BA-01..06, phase 9)
 
-Eleven profiles in `builtin/agents/`, with the policy packs they need in `builtin/policies/`. Ten do
-work; the eleventh, `permission-judge` (claude / haiku / low, `advisor` pack), is internal and is
+Twelve profiles in `builtin/agents/`, with the policy packs they need in `builtin/policies/`. Eleven
+do work; the twelfth, `permission-judge` (claude / haiku / low, `advisor` pack), is internal and is
 never launched as a phase — it answers the gate question of §6.5b.
 Defaults below; every one is overridable per installation, per project and per launch (BA-03).
 
@@ -1922,6 +1922,7 @@ Defaults below; every one is overridable per installation, per project and per l
 | `contract-prober` | codex / medium | `probe` (network + execute, no source writes outside `probes/`) | `doc/CONTRACTS.md` | Finds out how an API actually behaves by calling it with Python and test credentials, before anything is built on top of it. |
 | `planner` | claude / high | `read-only` | `doc/PLAN.md` | Writes the plan: contracts, specifications, edge cases, order of work. Ambiguity is the defect it exists to remove. |
 | `builder` | claude / medium | `default` | code + tests | Senior developer. Executes one piece of an unambiguous plan and nothing beyond it. |
+| `integrator` | claude / medium | `integrate` (network + writes anywhere in the project + the vault) | the working integration | Calls a real system and writes the code that calls it. Exists because no pack combined the three things an integration needs: `probe` had the network but wrote only in `probes/`, `default` wrote in the repo but had no network. |
 | `coordinator` | claude / medium | `read-only` | — | Owns the project across phases, answers other agents' doubts, asks the user for what is missing. Normally embodied by Claude Desktop rather than launched as a run; the profile exists so it can be run headless. |
 | `software-auditor` | codex / high | `read-only` | `doc/AUDIT.md` | Audits code, test coverage and engineering practice at the end of a development phase. Runs late and rarely, on purpose. |
 | `qa-engineer` | claude / medium | `test` (execute + network to localhost, writes confined to the test directories) | `doc/QA-REPORT.md` | Writes and runs regression and integration tests, including a scripted walk through the web interface, and reports what passed and what did not. |

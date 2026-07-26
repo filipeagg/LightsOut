@@ -20,6 +20,9 @@ services:
       - LO_DB=/data/lightsout.db
       - LO_WORKSPACE=/workspace
       - LO_WORKSPACE_MODE=${LO_WORKSPACE_MODE:-host}
+      # The same folder as the user sees it, so a document can be reported at a path they can
+      # open in their own editor (PM-10). Empty when the workspace is a managed volume.
+      - LO_WORKSPACE_HOST=${LIGHTSOUT_WORKSPACE:-}
     env_file: .env
 
   # Egress allowlist proxy (RT-05). Enable with: docker compose --profile secure up -d

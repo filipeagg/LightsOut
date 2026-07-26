@@ -124,6 +124,10 @@ export function projectStatusView(deps: ViewDeps, project: ProjectRow) {
       id: project.id,
       name: project.name,
       path: project.path,
+      // The brief every project carries (PM-09). `contextProvisional` is true when migration 4
+      // wrote it rather than a person, which the panel says out loud.
+      context: project.context ?? "",
+      contextProvisional: (project.context ?? "").startsWith("status: provisional"),
       pushPolicy: project.push_policy,
       verifyCmd: project.verify_cmd,
       remote: project.repo_remote,

@@ -232,6 +232,8 @@ const ICON = {
 const store = {
   overview: null, project: null, history: null, agents: null, health: null,
   templates: null, knowledge: null, vault: null, phases: null, models: null, folders: null,
+  // The document list and the one open in the viewer (PM-10).
+  docs: null, doc: null,
   error: "", notice: "",
 };
 /** Which row has its editor open. Panel-local: the server has no opinion about it. */
@@ -630,6 +632,12 @@ function newProjectForm() {
             t.id === window.__pickedTemplate ? "selected" : ""}>${esc(t.name)}</option>`).join("")}
         </select></label>
       <label class="tiny">Verify command<br><input id="pr-verify" placeholder="npm test"></label>
+      <label class="tiny" style="flex:1 1 100%">
+        Context — required, whatever the template (PM-09)<br>
+        <textarea id="pr-context" rows="6" style="width:100%"
+          placeholder="Goal:&#10;Actors / users:&#10;Systems involved:&#10;Constraints:&#10;Done when:&#10;Out of scope:"></textarea>
+        <span class="tiny muted">What this project is for. It goes into every run's prompt, so the
+          agents stop inferring their purpose from a phase title.</span></label>
       <label class="tiny">Knowledge (base ids, comma separated)<br>
         <input id="pr-knowledge" placeholder="${esc(bases.map((b) => b.id).slice(0, 2).join(", "))}"></label>
       ${chosen && chosen.requiresWritableKnowledge
@@ -647,7 +655,12 @@ function newProjectForm() {
 async function createProjectFromPanel() {
   const name = field("pr-name");
   if (!name) { store.error = "a name is required"; return paint(); }
-  const payload = { name };
+  const context = field("pr-context");
+  if (!context) {
+    store.error = "a context brief is required (PM-09): what is this project for?";
+    return paint();
+  }
+  const payload = { name, context };
   if (field("pr-template")) payload.template = field("pr-template");
   if (field("pr-verify")) payload.verify = field("pr-verify");
   if (csv("pr-knowledge").length) payload.knowledge = csv("pr-knowledge");
@@ -695,11 +708,11 @@ function projectTabs(id, tab) {
   const item = (href, key, label) =>
     `<a href="${href}" class="${tab === key ? "on" : ""}">${label}</a>`;
   const base = `#/p/${encodeURIComponent(id)}`;
-  return `<div class="tabs">${item(base, null, "Current")}${item(`${base}/history`, "history", "History")}${item(
-    `${base}/knowledge`,
-    "knowledge",
-    "Knowledge",
-  )}</div>`;
+  return `<div class="tabs">${item(base, null, "Current")}${item(`${base}/docs`, "docs", "Docs")}${item(
+    `${base}/history`,
+    "history",
+    "History",
+  )}${item(`${base}/knowledge`, "knowledge", "Knowledge")}</div>`;
 }
 
 /**
@@ -794,6 +807,108 @@ function viewProjectKnowledge() {
         .join("")}</tbody></table></div>`;
 }
 
+/**
+ * The project's context brief (PM-09). Shown here rather than hidden in a settings page because it
+ * is what every agent on this project is told, and a wrong brief is a wrong project.
+ */
+function contextCard(p) {
+  const open = editing === "context";
+  if (open) {
+    return `<div class="card pad" style="margin-bottom:24px">
+      <div class="tiny muted" style="margin-bottom:8px">What this project is for. Goes into every
+        run's prompt.</div>
+      <textarea id="ctx-text" rows="10" style="width:100%">${esc(p.context || "")}</textarea>
+      <div class="row" style="gap:8px;margin-top:12px">
+        <button class="btn primary" onclick="saveContext('${esc(p.id)}')">Save</button>
+        <button class="btn" onclick="editing=null;paint()">Cancel</button>
+      </div></div>`;
+  }
+  return `<div class="card pad" style="margin-bottom:24px">
+    <div class="row" style="justify-content:space-between;align-items:flex-start;gap:16px">
+      <div><b>Context</b>
+        ${p.contextProvisional
+          ? `<span class="pill amber"><span class="sdot"></span>provisional</span>
+             <span class="tiny muted">written by the migration, not by a person — worth replacing</span>`
+          : ""}</div>
+      <button class="btn sm" onclick="editing='context';paint()">Edit</button>
+    </div>
+    <pre class="tiny mono" style="white-space:pre-wrap;margin:8px 0 0">${esc(p.context || "(empty)")}</pre>
+  </div>`;
+}
+
+async function saveContext(projectId) {
+  const context = $("ctx-text") ? $("ctx-text").value.trim() : "";
+  if (!context) { store.error = "the context brief cannot be empty (PM-09)"; return paint(); }
+  editing = null;
+  await act("POST", `/api/projects/${encodeURIComponent(projectId)}/context`, { context });
+}
+
+/**
+ * The document viewer (PM-10). Every .md the project holds, deliverables included, shown raw:
+ * these documents are key-value by design (BA-07) and rendering them as prose would hide their
+ * shape. The list carries the format verdict, so drift is visible where the files are.
+ */
+function viewProjectDocs() {
+  const s = store.project;
+  const data = store.docs;
+  if (!s) return `<div class="empty">Loading…</div>`;
+  const id = s.project.id;
+  const header = `<h1>${esc(s.project.name)}</h1>
+    <p class="sub mono">${esc((data && data.hostRoot) || s.project.path)}</p>
+    ${projectTabs(id, "docs")}`;
+  if (!data) return `${header}<div class="card"><div class="empty">Reading the project…</div></div>`;
+  if (data.docs.length === 0) {
+    return `${header}<div class="card"><div class="empty">
+      No Markdown in this project yet. Deliverables appear here as the phases produce them.
+    </div></div>`;
+  }
+  const opened = store.doc;
+  const rows = data.docs
+    .map((d) => {
+      const verdict = d.lint.exempt
+        ? `<span class="pill">prose, exempt</span>`
+        : d.lint.ok
+          ? `<span class="pill green"><span class="sdot"></span>machine-first</span>`
+          : `<span class="pill amber" title="${esc(d.lint.reasons.join(" · "))}"><span class="sdot"></span>needs compacting</span>`;
+      return `<tr class="${opened && opened.path === d.path ? "on" : ""}"
+        onclick="openDoc('${esc(id)}','${esc(d.path)}')" style="cursor:pointer">
+        <td class="mono">${esc(d.path)}${d.managed ? ` <span class="pill">managed</span>` : ""}</td>
+        <td class="tiny num">${(d.bytes / 1024).toFixed(1)} kB</td>
+        <td class="tiny muted">${esc(sinceIso(d.modified))}</td>
+        <td>${verdict}</td></tr>`;
+    })
+    .join("");
+  const viewer = opened
+    ? `<div class="card pad" style="margin-top:16px">
+        <div class="row" style="justify-content:space-between;align-items:flex-start;gap:16px">
+          <div><b class="mono">${esc(opened.path)}</b>
+            <div class="tiny muted mono">${esc(opened.hostPath || opened.absolutePath || "")}</div></div>
+          <button class="btn sm" onclick="store.doc=null;paint()">Close</button>
+        </div>
+        ${opened.truncated ? `<p class="tiny amber">Shown truncated: the file is larger than 400 kB.</p>` : ""}
+        <pre class="tiny mono" style="white-space:pre-wrap;max-height:60vh;overflow:auto;margin:12px 0 0">${esc(opened.content)}</pre>
+      </div>`
+    : `<p class="tiny muted" style="margin-top:12px">Pick a file to read it.</p>`;
+  return `${header}
+    <p class="sub">Every Markdown file in the project. Shown as written: these documents are
+      key-value by design (BA-07), and the verdict says which ones have drifted.</p>
+    <div class="card"><table>
+      <thead><tr><th>File</th><th>Size</th><th>Modified</th><th>Format</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    ${viewer}`;
+}
+
+async function openDoc(projectId, relative) {
+  try {
+    store.doc = await api(
+      `/api/projects/${encodeURIComponent(projectId)}/doc?path=${encodeURIComponent(relative)}`,
+    );
+  } catch (err) {
+    store.error = String(err && err.message ? err.message : err);
+  }
+  paint();
+}
+
 function viewProject() {
   const s = store.project;
   if (!s) return `<div class="empty">Loading…</div>`;
@@ -801,6 +916,7 @@ function viewProject() {
   return `<h1>${esc(p.name)}</h1>
     <p class="sub mono">${esc(p.path)}</p>
     ${projectTabs(p.id, null)}
+    ${contextCard(p)}
     <div class="row wrap" style="margin-bottom:24px">
       ${statusPill(s.chain ? s.chain.status : "idle")}
       <span class="pill">push: ${esc(p.pushPolicy)}</span>
@@ -1794,7 +1910,9 @@ const RENDER = {
       ? viewHistory()
       : route.tab === "knowledge"
         ? viewProjectKnowledge()
-        : viewProject(),
+        : route.tab === "docs"
+          ? viewProjectDocs()
+          : viewProject(),
   "/agents": viewAgents,
   "/templates": viewTemplates,
   "/knowledge": viewKnowledge,
@@ -1844,6 +1962,9 @@ async function load() {
         store.history = await api(`/api/projects/${id}/history?limit=50`);
       }
       if (route.tab === "knowledge") store.knowledge = await api("/api/knowledge");
+      // The document list (PM-10). Re-read on every load so a deliverable written by the run
+      // in flight shows up without a manual reload.
+      if (route.tab === "docs") store.docs = await api(`/api/projects/${id}/docs`);
       // Live run if there is one, otherwise the last one that ended: its events were already
       // stored and served, and until now nothing in the panel could reach them.
       watchRun(

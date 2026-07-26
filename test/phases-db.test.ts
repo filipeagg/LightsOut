@@ -109,7 +109,14 @@ describe("migration 2", () => {
     expect(result.applied).toEqual([
       "2:phases, knowledge, vault audit",
       "3:hard rule doubts and knowledge enforcement",
+      "4:project context brief",
     ]);
+    // Migration 4 gives the legacy project a brief it can be told apart from a real one (PM-09).
+    expect(
+      (legacy.prepare("SELECT context FROM projects WHERE id = 'old'").get() as {
+        context: string;
+      }).context,
+    ).toContain("status: provisional");
 
     const after = createRepos(legacy);
     expect(after.doubts.get(doubt.id)?.ref).toBe(doubt.ref);

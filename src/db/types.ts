@@ -63,6 +63,8 @@ export type ProjectRow = {
   id: string;
   name: string;
   path: string;
+  /** The context brief (PM-09). Never null; `status: provisional` when migration 4 wrote it. */
+  context: string;
   repo_remote: string | null;
   push_policy: PushPolicy;
   policy_pack: string;

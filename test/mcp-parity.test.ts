@@ -32,6 +32,10 @@ function toolNames(): string[] {
  */
 const READ_ONLY = new Set([
   "readDoc",
+  // PM-10: reading the project's Markdown. Both have tools anyway (`list_docs`,
+  // `read_project_doc`), but they are reads and the parity rule is about mutations.
+  "listDocs",
+  "readProjectDoc",
   "agentSource",
   "phase",
   "knowledgeFolders",
@@ -68,6 +72,7 @@ const TOOL_FOR: Record<string, string> = {
   answerDoubt: "answer_doubt",
   abortRun: "abort_run",
   stopRun: "stop_run",
+  setProjectContext: "set_project_context",
   resumeChain: "resume_chain",
   writeDoc: "write_doc",
   writeAgent: "write_agent",

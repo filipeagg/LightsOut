@@ -81,6 +81,12 @@ export type ComposeInput = {
   verifyCmd?: string | null;
   /** Number of trailing DECISIONS.md entries to include (DESIGN §6.2, N=10). */
   decisionsLimit?: number;
+  /**
+   * The project's context brief (PM-09): what the project is for, fixed across every run. It is
+   * not the task and not the request of this launch — those are separate blocks — and it is what
+   * stops an agent inferring its purpose from a phase title.
+   */
+  projectContext?: string | undefined;
   /** The curated knowledge block built by src/knowledge/inject.ts (KB-04). */
   knowledgeBase?: string | undefined;
   /** The vault index: labels, URLs and variable names, never a value (VT-02). */
@@ -158,6 +164,11 @@ export function composePrompt(input: ComposeInput, docs: DocContext): string {
   blocks.push(PROTOCOL_BLOCK);
 
   const contextParts: string[] = [];
+  if (input.projectContext?.trim()) {
+    contextParts.push(
+      `## What this project is for (fixed context, PM-09)\n\n${input.projectContext.trim()}`,
+    );
+  }
   if (docs.state) {
     const section = managedSection(docs.state);
     if (section) contextParts.push(`## Project state\n\n${section}`);

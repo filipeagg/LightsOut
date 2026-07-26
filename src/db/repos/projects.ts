@@ -7,6 +7,8 @@ export type CreateProject = {
   id: string;
   name: string;
   path: string;
+  /** The context brief every project must carry (PM-09); non-empty, checked by the caller. */
+  context?: string;
   repoRemote?: string | null;
   pushPolicy?: PushPolicy;
   policyPack?: string;
@@ -15,7 +17,10 @@ export type CreateProject = {
 };
 
 export type UpdateProject = Partial<
-  Pick<CreateProject, "name" | "repoRemote" | "pushPolicy" | "policyPack" | "verifyCmd">
+  Pick<
+    CreateProject,
+    "name" | "context" | "repoRemote" | "pushPolicy" | "policyPack" | "verifyCmd"
+  >
 > & { archived?: boolean };
 
 export class ProjectsRepo {
@@ -25,14 +30,15 @@ export class ProjectsRepo {
     this.db
       .prepare(
         `INSERT INTO projects
-           (id, name, path, repo_remote, push_policy, policy_pack, verify_cmd,
+           (id, name, path, context, repo_remote, push_policy, policy_pack, verify_cmd,
             template_id, archived, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
       )
       .run(
         input.id,
         input.name,
         input.path,
+        input.context ?? "",
         input.repoRemote ?? null,
         input.pushPolicy ?? "manual",
         input.policyPack ?? "default",
@@ -65,6 +71,7 @@ export class ProjectsRepo {
   update(id: string, patch: UpdateProject): ProjectRow {
     const columns: Record<keyof UpdateProject, string> = {
       name: "name",
+      context: "context",
       repoRemote: "repo_remote",
       pushPolicy: "push_policy",
       policyPack: "policy_pack",

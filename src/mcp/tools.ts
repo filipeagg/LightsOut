@@ -114,6 +114,15 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       "With a template it also materialises the phases and attaches the knowledge bases (TP-05, KB-03).",
     {
       name: z.string().min(1),
+      /** PM-09: required whatever the template. */
+      context: z
+        .string()
+        .min(1)
+        .describe(
+          "What this project is for, in a few lines: goal, actors, systems involved, " +
+            "constraints, definition of done, what is out of scope. Required (PM-09); it is " +
+            "injected into every run's prompt.",
+        ),
       remote: z.string().optional(),
       verify: z.string().optional(),
       push: z.enum(["auto", "manual", "never"]).optional(),
@@ -125,6 +134,7 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
     async (args) => {
       const result = await actions.createProject("mcp", {
         name: args.name,
+        context: args.context,
         ...(args.remote !== undefined ? { remote: args.remote } : {}),
         ...(args.verify !== undefined ? { verify: args.verify } : {}),
         ...(args.push !== undefined ? { push: args.push } : {}),
@@ -401,6 +411,37 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
         throw notFound(err instanceof Error ? err.message : String(err));
       }
     },
+  );
+
+  tool(
+    "list_docs",
+    "Every Markdown file the project holds — deliverables included, not only the managed four — " +
+      "with size, modification time, the machine-first verdict (BA-08) and where each file is on " +
+      "this machine (PM-10).",
+    { projectId: z.string().min(1) },
+    async ({ projectId }) => actions.listDocs(projectId),
+  );
+
+  tool(
+    "read_project_doc",
+    "Read any Markdown file of the project by its relative path (PM-10). Confined to the project " +
+      "directory; reports the container path and the local path on this machine.",
+    { projectId: z.string().min(1), path: z.string().min(1) },
+    async ({ projectId, path: relative }) => {
+      try {
+        return await actions.readProjectDoc(projectId, relative);
+      } catch (err) {
+        throw notFound(err instanceof Error ? err.message : String(err));
+      }
+    },
+  );
+
+  tool(
+    "set_project_context",
+    "Rewrite the project's context brief (PM-09): what the project is for. It is injected into " +
+      "every run's prompt, so this is how an agent's shared understanding is corrected.",
+    { projectId: z.string().min(1), context: z.string().min(1) },
+    async ({ projectId, context }) => actions.setProjectContext("mcp", projectId, context),
   );
 
   tool(

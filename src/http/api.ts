@@ -23,6 +23,7 @@ import type { Vault } from "../vault/vault.js";
 import { agentSource } from "../agents/writer.js";
 import { ENGINE_MODELS } from "../agents/models.js";
 import { listWorkspaceFolders } from "../knowledge/writer.js";
+import { hostPathFor, listProjectDocs, readProjectDoc } from "../projects/docs-index.js";
 
 export type ApiDeps = {
   config: Config;
@@ -262,6 +263,51 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
           writable: k.writable === 1,
         })),
       };
+    }),
+  );
+
+  // --- The project's documents (PM-10, DESIGN §9.4) --------------------------
+
+  app.get("/api/projects/:id/docs", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = z.object({ id: z.string().min(1) }).parse(request.params);
+      const row = project(id);
+      const docs = await listProjectDocs(row.path);
+      return {
+        projectId: row.id,
+        root: row.path,
+        hostRoot: hostPathFor(config.workspace, config.workspaceHost, row.path),
+        docs: docs.map((entry) => ({
+          ...entry,
+          hostPath: hostPathFor(
+            config.workspace,
+            config.workspaceHost,
+            `${row.path}/${entry.path}`,
+          ),
+        })),
+      };
+    }),
+  );
+
+  app.get("/api/projects/:id/doc", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = z.object({ id: z.string().min(1) }).parse(request.params);
+      const { path: relative } = z.object({ path: z.string().min(1) }).parse(request.query);
+      const row = project(id);
+      try {
+        const doc = await readProjectDoc(row.path, relative);
+        return {
+          projectId: row.id,
+          ...doc,
+          hostPath: hostPathFor(
+            config.workspace,
+            config.workspaceHost,
+            `${row.path}/${doc.path}`,
+          ),
+        };
+      } catch (err) {
+        throw notFound(err instanceof Error ? err.message : String(err));
+      }
     }),
   );
 

@@ -55,6 +55,12 @@ async function main(): Promise<void> {
 
   const { project, created } = await createProject(repos, config.workspace, {
     name: arg("project"),
+    // PM-09: the CLI is a development entry point, so it fills the brief with what it knows and
+    // says where it came from rather than refusing. A real project gets one from a person.
+    context: arg(
+      "context",
+      `status: provisional\nname: ${arg("project")}\nnote: created by run-chain.js (PM-09)`,
+    ),
     verify: arg("verify", ""),
     push: arg("push", "manual") as PushPolicy,
     ...(process.argv.includes("--remote") ? { remote: arg("remote") } : {}),

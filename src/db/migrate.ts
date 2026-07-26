@@ -160,6 +160,36 @@ CREATE INDEX ix_doubts_open ON doubts(status) WHERE status = 'open';
 ALTER TABLE project_knowledge ADD COLUMN enforcement TEXT NOT NULL DEFAULT 'advisory';
 `;
 
+/**
+ * Version 4 (PM-09): `projects.context`, the brief every project must carry.
+ *
+ * Existing rows are backfilled with a factual placeholder marked `status: provisional`: the
+ * project's name, its template, and a line saying the brief is pending. It does not block those
+ * projects and it does not pretend to be a brief — the panel shows it as provisional until someone
+ * writes one. A plain default of '' would have been indistinguishable from a brief someone had
+ * chosen to leave empty.
+ */
+function addProjectContext(db: Db): void {
+  db.exec(`ALTER TABLE projects ADD COLUMN context TEXT NOT NULL DEFAULT ''`);
+  const rows = db.prepare("SELECT id, name, template_id FROM projects").all() as {
+    id: string;
+    name: string;
+    template_id: string | null;
+  }[];
+  const update = db.prepare("UPDATE projects SET context = ? WHERE id = ?");
+  for (const row of rows) {
+    update.run(
+      [
+        "status: provisional",
+        `name: ${row.name}`,
+        `template: ${row.template_id ?? "none"}`,
+        "note: brief pending; written by migration 4, not by a person (PM-09)",
+      ].join("\n"),
+      row.id,
+    );
+  }
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial schema", up: applyInitialSchema },
   {
@@ -174,7 +204,11 @@ export const MIGRATIONS: Migration[] = [
     up: HARD_RULES_SQL,
     foreignKeys: "off",
   },
+  { version: 4, name: "project context brief", up: addProjectContext },
 ];
+
+/** The marker migration 4 writes, and the panel looks for (PM-09). */
+export const PROVISIONAL_CONTEXT = "status: provisional";
 
 function currentVersion(db: Db): number {
   const hasTable = db

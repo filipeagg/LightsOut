@@ -18,6 +18,12 @@ import type { PhaseService } from "../orchestrator/phases.js";
 
 export type CreateProjectInput = {
   name: string;
+  /**
+   * The context brief, required whatever the template (PM-09): what this project is for. Refused
+   * when empty, because a project whose agents have to infer their purpose is the failure this
+   * exists to prevent. Nothing else about its shape is enforced.
+   */
+  context: string;
   /** Explicit slug; derived from the name when omitted. */
   id?: string;
   remote?: string;
@@ -94,6 +100,15 @@ export async function createProject(
   const id = slugify(input.id ?? input.name);
   const projectPath = path.join(workspace, "projects", id);
 
+  // PM-09: no project starts without a brief, whatever the template. Checked first, so a refusal
+  // leaves no directory and no row behind.
+  if (!input.context?.trim()) {
+    throw new Error(
+      "a project needs a context brief (PM-09): what it is for, in a few lines — " +
+        "goal, actors, systems involved, constraints, definition of done, what is out of scope",
+    );
+  }
+
   // Everything a template or a knowledge attachment can get wrong is checked before a single
   // directory is created, so a rejected request leaves nothing behind (TP-03, KB-05).
   const template = input.template ? deps.templates?.getOrThrow(input.template) : undefined;
@@ -165,6 +180,7 @@ export async function createProject(
       id,
       name: input.name,
       path: projectPath,
+      context: input.context.trim(),
       repoRemote: input.remote ?? null,
       pushPolicy: input.push ?? "manual",
       verifyCmd: config.verify || null,

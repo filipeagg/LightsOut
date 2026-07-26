@@ -410,6 +410,7 @@ export class RunSession {
         taskTitle: task.title,
         taskSpec: task.spec,
         verifyCmd: task.verify_cmd ?? project.verify_cmd,
+        projectContext: project.context,
         decisionContext: this.deps.decisionContext,
         formatFeedback: this.deps.formatFeedback,
         knowledgeBase: this.deps.knowledgeBlock,

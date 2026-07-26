@@ -14,6 +14,12 @@ const schema = z.object({
   workspace: z.string().min(1).default("/workspace"),
   /** `host` = bind-mounted user folder (RT-02 default), `volume` = managed volume (headless). */
   workspaceMode: z.enum(["host", "volume"]).default("host"),
+  /**
+   * The same workspace as the user sees it on their own machine, when it is a bind mount
+   * (PM-10). Reported next to the container path so a person can open a file in their editor;
+   * empty means "unknown", which is answered as null rather than guessed.
+   */
+  workspaceHost: z.string().default(""),
   /** Loader poll interval: bind mounts do not deliver reliable inotify events (AP-03). */
   watchPollMs: intFromEnv(2000, 250),
   maxParallel: intFromEnv(3),
@@ -45,6 +51,7 @@ function raw(env: NodeJS.ProcessEnv) {
     dbPath: env.LO_DB,
     workspace: env.LO_WORKSPACE,
     workspaceMode: env.LO_WORKSPACE_MODE,
+    workspaceHost: env.LO_WORKSPACE_HOST,
     watchPollMs: env.LO_WATCH_POLL_MS,
     maxParallel: env.LO_MAX_PARALLEL,
     timeoutQuickMin: env.LO_TIMEOUT_QUICK_MIN,

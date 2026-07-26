@@ -249,6 +249,8 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
       const input = body(
         z.object({
           name: z.string().min(1),
+          // PM-09: no project without a brief, whatever the template.
+          context: z.string().min(1),
           remote: z.string().optional(),
           verify: z.string().optional(),
           push: z.enum(["auto", "manual", "never"]).optional(),
@@ -378,6 +380,16 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
         request.body,
       );
       return actions.writeDoc("panel", id, input.doc, input.content);
+    }),
+  );
+
+  // The context brief (PM-09): the one field a project cannot be without, and the one most
+  // likely to need correcting once the work has started.
+  app.post("/api/projects/:id/context", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = idParam.parse(request.params);
+      const input = body(z.object({ context: z.string().min(1) }), request.body);
+      return actions.setProjectContext("panel", id, input.context);
     }),
   );
 

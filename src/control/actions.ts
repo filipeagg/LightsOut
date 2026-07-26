@@ -30,6 +30,13 @@ import type { PhaseService, LaunchPhaseResult } from "../orchestrator/phases.js"
 import { createProject, type CreateProjectInput } from "../projects/scaffold.js";
 import type { ProjectPhaseRow, ProjectRow, TaskLevel } from "../db/types.js";
 import { activeRunFor } from "../views.js";
+import {
+  hostPathFor,
+  listProjectDocs,
+  readProjectDoc as readDocFile,
+  type DocContent,
+  type DocEntry,
+} from "../projects/docs-index.js";
 
 export type Actor = "mcp" | "panel" | "system";
 
@@ -396,6 +403,79 @@ export class Actions {
     } catch {
       throw new Error(`${doc}.md does not exist in ${project.id}`);
     }
+  }
+
+  // --- Reading the project's documents (PM-10, DESIGN §9.4) ------------------
+
+  /** Every Markdown file the project holds, with its size and its format verdict. */
+  async listDocs(projectId: string): Promise<{
+    projectId: string;
+    root: string;
+    hostRoot: string | null;
+    docs: (DocEntry & { hostPath: string | null })[];
+  }> {
+    const project = this.project(projectId);
+    const { config } = this.deps;
+    const docs = await listProjectDocs(project.path);
+    return {
+      projectId: project.id,
+      root: project.path,
+      hostRoot: hostPathFor(config.workspace, config.workspaceHost, project.path),
+      docs: docs.map((entry) => ({
+        ...entry,
+        hostPath: hostPathFor(
+          config.workspace,
+          config.workspaceHost,
+          path.join(project.path, entry.path),
+        ),
+      })),
+    };
+  }
+
+  /**
+   * The content of one of them. Both paths are reported: the container one, and the same file on
+   * the user's own machine, because a person may want to open it in their editor.
+   */
+  async readProjectDoc(
+    projectId: string,
+    relative: string,
+  ): Promise<DocContent & { projectId: string; absolutePath: string; hostPath: string | null }> {
+    const project = this.project(projectId);
+    const { config } = this.deps;
+    try {
+      const doc = await readDocFile(project.path, relative);
+      const absolutePath = path.join(project.path, doc.path);
+      return {
+        ...doc,
+        projectId: project.id,
+        absolutePath,
+        hostPath: hostPathFor(config.workspace, config.workspaceHost, absolutePath),
+      };
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new Error(`cannot read ${relative} in ${project.id}: ${detail}`);
+    }
+  }
+
+  /**
+   * Rewrite the project's context brief (PM-09). The one field a project cannot be without, and
+   * the one most likely to need correcting once the work has started.
+   */
+  setProjectContext(
+    actor: Actor,
+    projectId: string,
+    context: string,
+  ): { projectId: string; context: string } {
+    const project = this.project(projectId);
+    if (!context.trim()) {
+      throw new Error("the context brief cannot be empty (PM-09)");
+    }
+    const updated = this.deps.repos.projects.update(project.id, { context: context.trim() });
+    this.deps.repos.events.append({
+      type: "config.changed",
+      payload: { kind: "project", id: project.id, op: "context", actor },
+    });
+    return { projectId: updated.id, context: updated.context };
   }
 
   // --- Knowledge attachment ------------------------------------------------

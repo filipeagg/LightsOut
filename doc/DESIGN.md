@@ -797,15 +797,43 @@ policy:                                 # optional override pack (PE-05)
 remote: git@gitlab.example.com:group/consultant-portal.git
 ```
 
+### 9.1b The project context brief (PM-09)
+
+Every project carries a `context` column: a short prompt, asked for at creation **whatever the
+template**, saying what the project is for. Without it the first agent starts from a phase title and
+whatever it can infer — which is how a phase ends up interrogating the empty set, and the whole
+reason `launch_phase` grew an `input` parameter (§15). The brief is the shared, durable answer;
+`input` stays what someone is asking for *on this run*.
+
+- **Required and non-empty at creation.** `createProject` refuses an empty brief. Nothing else about
+  its shape is enforced — the user asked for a low bar — but the panel's form names what is worth
+  stating: goal, actors, systems involved, constraints, definition of done, what is out of scope.
+- **Injected into every prompt**, as block 4b of §6.2, under a heading that says it is fixed
+  context for the project rather than the task.
+- **Editable from both surfaces** (`set_project_context`, `POST /api/projects/:id/context`), because
+  a brief written before the work started is the one thing most likely to need a correction.
+- **Migration 4 backfills existing projects** with a factual placeholder marked
+  `status: provisional` — the project's name, its template and a line saying the brief is pending.
+  It does not block them from running and it does not pretend to be a brief; the panel shows an
+  amber "provisional context" badge until someone writes one.
+
 ### 9.2 Managed doc sections (PM-02)
 
-`STATE.md` mixes free text with a machine-owned block, regenerated at every task close from the DB:
+`STATE.md` mixes free text with a machine-owned block, regenerated at every task close from the DB.
+Machine-first since BA-07 (§20):
 
 ```
 <!-- lightsout:begin -->
-Phase: chain "Offline sync" 4/6 · last: Tests green (task 4)
-Last decision: incremental sync (D-7, human, 2026-07-24)
-Next: task 5 — sync status screen
+state.updated: 2026-07-26T09:12:03Z
+chain.title: Offline sync
+chain.status: active
+chain.progress: 4/6
+task.last_ok: Tests green
+task.next: sync status screen
+decision.last: incremental sync
+decision.kind: human
+decision.at: 2026-07-24
+doubts.open: none
 <!-- lightsout:end -->
 ```
 
@@ -819,6 +847,28 @@ Everything outside the markers is never touched. `PLAN.md` uses one checkbox lin
 - Task ok: consolidated commit `feat: <task title> [lo:<taskId>]` (wips remain in history; squashing is v2).
 - Provisional decision: annotated tag `lightsout/cp/<taskId>-<n>` at the pre-decision commit (the v2 rewind target).
 - Push: orchestrator-only (`git_push` is `deny` for agents), `push_policy=auto` requires verify green in the same task cycle; `--force` is not implemented at all. Credentials: mounted ssh key or `GIT_TOKEN` via credential helper; never persisted (NF-02).
+
+### 9.4 Reading the project's documents (PM-10)
+
+The deliverables are the product of a run, and until now the only way to read one was the
+filesystem: `read_doc` knew four managed names and nothing else, so `ANALYSIS.md`, `AUDIT.md` and
+`OPEN-QUESTIONS.md` were invisible to both surfaces.
+
+`listDocs(projectId)` walks the project for `*.md`, skipping `sources/`, `.git`, `node_modules` and
+`.lightsout`, bounded at 6 levels and 300 files, and returns for each one: the project-relative path,
+`bytes`, `modified`, whether it is one of the managed docs, and the BA-08 verdict (`ok`, `exempt`,
+`reasons`) so drift is visible in the list rather than only in an event.
+
+`readProjectDoc(projectId, relPath)` returns the content of one of them. Confinement is the whole
+security model here and it is checked, not assumed: the path is resolved against the project
+directory and refused if it escapes, if it is absolute, if it is not `.md`, or if it lands in one of
+the excluded directories. Content is returned whole up to 400 KB, then truncated with
+`truncated: true` — a viewer that silently shows half a document would be worse than one that says so.
+
+Both answers carry two paths: `path` (inside the container, `/workspace/…`) and `hostPath` (the same
+file on the user's own machine, from `LO_WORKSPACE_HOST`), because MCP's caller is a person who may
+want to open the file in their editor and the container path is useless to them. When the host
+workspace is not configured, `hostPath` is null rather than a guess.
 
 ## 10. MCP server (MC-01..06)
 

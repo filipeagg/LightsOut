@@ -22,6 +22,7 @@ import type { Vault } from "../vault/vault.js";
 import type { ProjectRow } from "../db/types.js";
 import type { Actions } from "../control/actions.js";
 import { askEngine } from "../acp/advisor.js";
+import { guide, TOPIC_ORDER } from "./guide.js";
 import { conflict, failure, invalid, notFound, success, toolResult } from "./envelope.js";
 // One read model for both surfaces: the panel renders these exact shapes (DESIGN §12.0).
 import { activeRunFor, doubtView, projectListItem, projectStatusView } from "../views.js";
@@ -101,6 +102,21 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       version: deps.version,
     };
   });
+
+  tool(
+    "guide",
+    "How this system works, so you can use it without reading its repository (MC-09). Call with " +
+      "no topic for the list; with one for that section whole. Start at 'overview'. Sections: " +
+      `${TOPIC_ORDER.join(", ")}.`,
+    { topic: z.string().optional() },
+    async ({ topic }) => {
+      try {
+        return guide(topic) as unknown as Record<string, unknown>;
+      } catch (err) {
+        throw invalid(err instanceof Error ? err.message : String(err));
+      }
+    },
+  );
 
   tool(
     "list_projects",
@@ -227,7 +243,8 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
 
   tool(
     "launch_chain",
-    "Queue a chain of tasks and start it if the project is free. Returns immediately (MC-06).",
+    "Queue a chain of tasks and start it if the project is free. Returns immediately (MC-06). " +
+      "Every task states its spec AND what it must give back (`expects`) — OR-10.",
     {
       projectId: z.string().min(1),
       title: z.string().min(1),
@@ -236,6 +253,10 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
           z.object({
             title: z.string().min(1),
             spec: z.string().min(1),
+            expects: z
+              .string()
+              .min(1)
+              .describe("What comes back: the artefact, its shape, and how you decide it was met."),
             agentId: z.string().min(1),
             level: levelSchema.optional(),
             verify: z.string().optional(),
@@ -252,6 +273,7 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
         tasks: args.tasks.map((t) => ({
           title: t.title,
           spec: t.spec,
+          expects: t.expects,
           agentId: t.agentId,
           ...(t.level ? { level: t.level } : {}),
           ...(t.verify !== undefined ? { verifyCmd: t.verify } : {}),
@@ -263,11 +285,19 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
 
   tool(
     "launch_task",
-    "Queue one task, appending to a chain when given. Returns immediately (MC-06).",
+    "Queue one task, appending to a chain when given. Returns immediately (MC-06). State the " +
+      "request in `spec` and what must come back in `expects` — both required (OR-10).",
     {
       projectId: z.string().min(1),
       title: z.string().min(1),
-      spec: z.string().min(1),
+      spec: z.string().min(1).describe("What you are asking for, this time, in your words."),
+      expects: z
+        .string()
+        .min(1)
+        .describe(
+          "What comes back: the artefact, its shape, and the criterion that decides it was met. " +
+            "Not the same as a phase's deliverable, which is a path checked on disk.",
+        ),
       agentId: z.string().min(1),
       level: levelSchema.optional(),
       verify: z.string().optional(),
@@ -278,6 +308,7 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
         projectId: args.projectId,
         title: args.title,
         spec: args.spec,
+        expects: args.expects,
         agentId: args.agentId,
         ...(args.level ? { level: args.level } : {}),
         ...(args.verify !== undefined ? { verifyCmd: args.verify } : {}),
@@ -415,6 +446,57 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       } catch (err) {
         throw notFound(err instanceof Error ? err.message : String(err));
       }
+    },
+  );
+
+  tool(
+    "status_card",
+    "The state of a project as one compact block, for showing a person without sending them to " +
+      "the panel (MC-10). A snapshot: this client does not render live views pushed from a " +
+      "server, so ask again to refresh.",
+    { projectId: z.string().min(1) },
+    async ({ projectId }) => {
+      const row = project(projectId);
+      const status = projectStatusView(deps, row);
+      const docs = await actions.listDocs(row.id).catch(() => ({ docs: [] as never[] }));
+      const steps = status.chain?.tasks ?? [];
+      const done = steps.filter((s) => s.status === "ok").length;
+      const current = steps.find((s) => s.status === "running");
+      const events = status.run ? repos.events.listByRun(status.run.id).slice(-1) : [];
+      const last = events[0];
+      const lines = [
+        `LIGHTSOUT :: ${row.id}    ${new Date().toISOString().slice(0, 16)}Z`,
+        `chain      ${status.chain ? `${done}/${steps.length}  ${status.chain.title}  ${status.chain.status}` : "none"}`,
+        `run        ${
+          status.run
+            ? `${status.run.status}  ${status.run.engine}  ${status.run.taskTitle}`
+            : status.lastRun
+              ? `none — last ${status.lastRun.status}${status.lastRun.exitReason ? ` (${status.lastRun.exitReason.slice(0, 60)})` : ""}`
+              : "none"
+        }`,
+        ...(current ? [`phase      ${current.title}`] : []),
+        ...(last ? [`event      ${last.type}  ${String(last.payload).slice(0, 80)}`] : []),
+        `doubts     ${
+          status.doubts.length
+            ? status.doubts.map((d) => `${d.ref} (${d.kind}, ${d.ageMin}m)`).join(", ")
+            : "none"
+        }`,
+        `next       ${status.state.next ?? "nothing queued"}`,
+        `docs       ${
+          docs.docs.length
+            ? docs.docs
+                .slice(0, 4)
+                .map((d) => `${d.path} ${(d.bytes / 1024).toFixed(1)}kB ${d.lint.ok ? "ok" : "drift"}`)
+                .join(" · ")
+            : "none"
+        }`,
+        `path       ${status.project.hostPath ?? row.path}`,
+        ...(status.project.contextProvisional
+          ? ["warning    the context brief is provisional; write a real one (PM-09)"]
+          : []),
+        `live view  http://127.0.0.1:8484/#/p/${row.id}`,
+      ];
+      return { card: lines.join("\n"), snapshotAt: new Date().toISOString() };
     },
   );
 
@@ -595,17 +677,22 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
 
   tool(
     "launch_phase",
-    "Run a phase: creates its task and queues it on the project's chain (TP-07). " +
-      "`input` is what you are asking for this time: the raw request for a shaping phase, the " +
-      "question for an answering one, the integration to probe. Without it the agent has only " +
-      "the template's instructions and will ask what it is meant to be working on.",
+    "Run a phase: creates its task and queues it on the project's chain (TP-07). Both fields are " +
+      "required (OR-10): `input` is what you are asking for this time — the raw request for a " +
+      "shaping phase, the question for an answering one, the subsystem to analyse — and `expects` " +
+      "is what must come back. The template's instructions were frozen months ago and do not know " +
+      "which run this is.",
     {
       projectId: z.string().min(1),
       phase: z.string().min(1),
-      input: z.string().optional(),
+      input: z.string().min(1).describe("The request for this run of the phase."),
+      expects: z
+        .string()
+        .min(1)
+        .describe("What comes back, and how you decide it was met."),
     },
-    async ({ projectId, phase, input }) =>
-      actions.launchPhase("mcp", project(projectId).id, phase, input),
+    async ({ projectId, phase, input, expects }) =>
+      actions.launchPhase("mcp", project(projectId).id, phase, { request: input, expects }),
   );
 
   tool(

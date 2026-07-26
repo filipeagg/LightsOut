@@ -12,14 +12,35 @@ import { registerTools, type McpDeps } from "./tools.js";
 
 export const MCP_PATH = "/mcp";
 
+/**
+ * What the client is told before it has called anything (MC-09, DESIGN §10.0). Short on purpose:
+ * it is in context for every conversation, and the detail is one `guide` call away.
+ */
+export const SERVER_INSTRUCTIONS = `LightsOut runs coding agents unattended, in a container, over a
+folder on this machine. You drive it; you do not do the work yourself.
+
+Four nouns: a PROJECT is a folder with its own git, docs and context brief. A PHASE is one durable
+step of its plan. A CHAIN is the queue of tasks, one at a time per project. An AGENT is a profile
+(engine, model, policy, instructions), not a process.
+
+Rules that are expensive to get wrong:
+- Every launch states the request for this run AND what is expected back (\`expects\`). Both are
+  required, including intermediate phases and relaunches; a launch without them is refused.
+- Launches return immediately. Poll project_status, or status_card for a compact view.
+- A doubt is a decision the agent cannot make alone — not an error. list_doubts, answer_doubt.
+- A policy denial is an answer, mediated by the engine. If an agent needs to read something outside
+  its project, declare a read-only area (add_area) rather than weakening anything.
+- The workspace is the user's own folder: call resolve_path before telling anyone where a file is.
+- Documents the system reads back are machine-first: key: value, no prose.
+
+Call guide{} for the list of sections and guide{topic:"overview"} to learn the system. The live
+view for a person is the panel at http://127.0.0.1:8484.`;
+
 export function createMcpServer(deps: McpDeps): McpServer {
   const server = new McpServer(
     { name: "lightsout", version: deps.version },
     {
-      instructions:
-        "LightsOut orchestrates coding agents. Launch work with launch_task or launch_chain, " +
-        "then poll project_status. Doubts are decisions the agents need from a human: list them " +
-        "with list_doubts and settle them with answer_doubt. Everything else is read-only.",
+      instructions: SERVER_INSTRUCTIONS,
     },
   );
   registerTools(server, deps);

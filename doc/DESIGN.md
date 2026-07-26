@@ -923,6 +923,65 @@ recorded like one.
 
 ## 10. MCP server (MC-01..06)
 
+### 10.0 A server that teaches its own use (MC-09)
+
+The client of this MCP server is a model with no memory of this repository. Until now it could
+*call* forty-five tools and had no way to learn what a phase is, why a template is not an agent, or
+that a knowledge base is attached rather than pasted. The documentation lived in `doc/` — where the
+client cannot see it — so the system was usable only by someone who had already read it.
+
+Two layers, both over MCP and nothing else:
+
+1. **Server instructions** (`src/mcp/server.ts`), short and always in the client's context: what
+   LightsOut is, the four nouns (project, phase, chain, agent), the handful of rules that are
+   expensive to get wrong (every launch states its request and its expected return; a doubt is a
+   decision, not an error; the workspace is the user's own folder), and one line saying that
+   `guide` has the details.
+2. **`guide { topic? }`** — with no topic it lists them; with one it returns that section whole.
+   The text lives in `builtin/guide/*.md`, shipped in the image and machine-first like everything
+   else the system writes (BA-07): `key: value`, tables, worked examples, no prose. Sections:
+   `overview`, `launching`, `agents`, `templates`, `phases`, `knowledge`, `areas`, `vault`,
+   `doubts`, `policies`, `documents`, `troubleshooting`.
+
+`health` stays what it is: state. A client that asks health "how do I write a template" gets a
+database check, which is the right answer to a different question.
+
+### 10.0b Every launch states its request and its expected return (OR-10)
+
+`launch_task`, `launch_chain` and `launch_phase` all require two fields beyond the target:
+
+- **the request** — what is being asked *this time*, in the caller's words. For a phase this is the
+  `input` that was optional and is now not: a phase whose instructions are frozen still needs to
+  know which subsystem, which question, which integration.
+- **`expects`** — what comes back, in the caller's words: the artefact, its shape, and how anyone
+  will know it was met. It is not the same as the phase's `deliverable`, which is a path the system
+  checks on disk; `expects` is the *content* contract, and it is the thing a person actually has an
+  opinion about.
+
+Both are appended to the task spec under their own headings, so they are durable (the task row),
+visible (the panel, `project_status`) and unavoidable (the prompt). A launch missing either is
+refused with a message naming what to add. The project brief (PM-09) is the standing context and is
+injected separately: brief = what this project is, request + expects = what this run is.
+
+### 10.0c `status_card` (MC-10)
+
+Claude Desktop does not render a live view pushed from an MCP server — UI resources are negotiated
+and then ignored, which is a reported defect of the client, not of this design. So the honest
+answer to "can I watch the project without opening the panel" is: a snapshot, on demand, compact
+enough to read at a glance:
+
+```
+LIGHTSOUT :: consultant-portal            2026-07-26T14:02Z
+phase      3/6  implement            running   12m
+run        01KYF…  builder/claude    tool.call Edit src/api/sync.ts
+doubts     D-7 open (permission, 4m)
+next       write the sync tests
+docs       doc/PLAN.md 4.1kB ok · doc/ANALYSIS.md 19kB ok
+paths      C:\Users\…\LightsOut\projects\consultant-portal
+```
+
+The live view is the panel at `127.0.0.1:8484`, and the card says so in one line.
+
 ### 10.1 Transport
 
 Primary: streamable HTTP at `POST /mcp` on the same Fastify server (protected only by localhost binding, WP-09). For Claude Desktop stdio configs, `dist/mcp/stdio-bridge.js` is a stateless bridge: reads JSON-RPC from stdin, forwards to `http://127.0.0.1:8484/mcp`, streams responses back. Desktop config:

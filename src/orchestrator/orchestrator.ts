@@ -19,6 +19,7 @@ import { ensureScratch, sweep } from "../projects/hygiene.js";
 import { readProjectConfig } from "../projects/config.js";
 import { runVerify } from "./verify.js";
 import { RunLocks } from "./locks.js";
+import { composeSpec, requireExpects, requireRequest } from "./spec.js";
 import type { RunTaskInput, RunTaskResult } from "../acp/runner.js";
 import { DoubtService } from "./doubts.js";
 import type { KnowledgeLoader } from "../knowledge/loader.js";
@@ -31,6 +32,8 @@ export type LaunchTaskInput = {
   projectId: string;
   title: string;
   spec: string;
+  /** What comes back, in the caller's words. Required on every launch (OR-10). */
+  expects: string;
   agentId: string;
   level?: TaskLevel;
   verifyCmd?: string | null;
@@ -118,7 +121,11 @@ export class Orchestrator {
         chainId: chain.id,
         projectId: project.id,
         title: task.title,
-        spec: task.spec,
+        // OR-10: what is asked, then what is expected back. Refused when either is missing.
+        spec: composeSpec({
+          spec: requireRequest(task.spec, `task "${task.title}"`),
+          expects: requireExpects(task.expects, `task "${task.title}"`),
+        }),
         agentId: task.agentId,
         ...(task.level ? { level: task.level } : {}),
         ...(task.verifyCmd !== undefined ? { verifyCmd: task.verifyCmd } : {}),
@@ -150,7 +157,10 @@ export class Orchestrator {
       chainId: chain.id,
       projectId: project.id,
       title: input.title,
-      spec: input.spec,
+      spec: composeSpec({
+        spec: requireRequest(input.spec, `task "${input.title}"`),
+        expects: requireExpects(input.expects, `task "${input.title}"`),
+      }),
       agentId: input.agentId,
       ...(input.level ? { level: input.level } : {}),
       ...(input.verifyCmd !== undefined ? { verifyCmd: input.verifyCmd } : {}),

@@ -92,6 +92,12 @@ function renderConfig(input: CreateProjectInput, id: string): string {
     .join("\n");
 }
 
+/**
+ * The directories every project starts with (PM-11, §9.6). `doc/` comes from the scaffold; these
+ * are the ones an agent has to be able to find without asking.
+ */
+export const PROJECT_DIRS = ["src", "probes"] as const;
+
 export async function createProject(
   repos: Repos,
   workspace: string,
@@ -152,6 +158,16 @@ export async function createProject(
     });
   } else {
     await mkdir(path.join(projectPath, "doc"), { recursive: true });
+  }
+
+  // PM-11: the layout is the system's, not each run's guess. Created empty with a .gitkeep so a
+  // directory that is right there is easier to use than a directory that has to be invented —
+  // which is how a 1912-line page ended up in doc/ (§9.6). `output/` and `sources/` are made on
+  // demand by whoever needs them; these three are the ones every project has an opinion about.
+  for (const dir of PROJECT_DIRS) {
+    await mkdir(path.join(projectPath, dir), { recursive: true });
+    const keep = path.join(projectPath, dir, ".gitkeep");
+    if (!(await exists(keep))) await writeFile(keep, "", "utf8");
   }
 
   // The scaffold ships a placeholder config; overwrite it with the real values.

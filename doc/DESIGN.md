@@ -1473,6 +1473,51 @@ does not know about is an area it will not use. Every declaration and removal is
 `config.changed {kind:'area'}` event with the actor: a widened boundary is a decision, and it is
 recorded like one.
 
+### 9.6 A project has a layout, and the protocol says so (PM-11, MC-11)
+
+**The failure.** A run asked for an HTML prototype finished `ok`, committed 2261 lines, and the
+user pressed Preview and got nothing. The page was real and good — 1912 lines — and it was at
+`doc/efemis_prototipo.html`. `detectPreview()` looks where code goes; the agent had put it where
+documents go; nobody had ever said which was which.
+
+Three complaints arrived together — *"why can't I preview, it is an HTML"*, *"shouldn't generated
+code be in something like src/"*, *"why not a master prompt that explains the basics"* — and they
+are one defect. The third is the fix for the first two.
+
+**The layout, scaffolded and stated:**
+
+| directory | what belongs there |
+|---|---|
+| `src/` | the code that is the deliverable. A single page is `src/index.html`. |
+| `doc/` | documents the system reads back (BA-07), never code |
+| `probes/` | throwaway scripts proving something about an external system |
+| `sources/` | material imported from elsewhere, e.g. an unpacked archive |
+| `output/` | generated artefacts that are not code — a spreadsheet, a report |
+| `.lightsout/tmp/` | scratch, emptied at the end of every run (PE-08) |
+
+`src/index.html` is not a preference: it is what makes Preview work with nobody typing a filename
+(PV-07). A brief that names a different layout wins — an imported codebase has its own, and
+`legacy-intake` puts it in `sources/` on purpose. What is not acceptable is each run guessing.
+
+**The protocol block is where this is said (MC-11).** It already existed at v4, prepended to every
+prompt, and covered permissions, the scratch directory, `pip install --target` and the machine-first
+format. It said nothing about where files go, nothing about credentials, and nothing about
+`preview_start`. So the block gained three sections and became **v5**:
+
+- **where things go** — the table above, in six lines.
+- **credentials** — read from the environment at the point of use; never print one, never write one
+  to a file, never search the tree for one. This is worth stating because every credential gate this
+  system has opened by mistake came from an agent *inventing* its own handling: a `grep -rqF
+  "$LO_VAULT_…"` leak check (§7.1d), a `[ -n "$X" ]` wiring probe (§7.1b), a `console.log` of an
+  environment variable. Told what safe looks like, an agent does not reach for the shapes the
+  policy exists to stop.
+- **showing your work** — `preview_start` publishes a URL and outlives the run; a server started in
+  the terminal never returns and is denied for that reason (PV-02). Saying it here means the agent
+  learns it before the refusal rather than from it.
+
+The general rule this settles: a behaviour every agent must have belongs in the protocol block,
+where it is stated once and versioned, not in thirteen profiles where it drifts.
+
 ## 10. MCP server (MC-01..06)
 
 ### 10.0 A server that teaches its own use (MC-09)

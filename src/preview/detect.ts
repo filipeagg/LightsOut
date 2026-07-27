@@ -14,7 +14,7 @@
  * it. A single page at the root is the prototype case — and it is last, because a repository with
  * both `index.html` and a build is almost never asking for the raw file.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 /** Where `lo-serve` lives in the image: no dependencies, permissive CORS, honest 404s (§21.4). */
@@ -78,20 +78,57 @@ export function detectPreview(projectPath: string): PreviewPlan | DetectFailure 
     }
   }
 
-  if (existsSync(path.join(projectPath, "index.html"))) {
+  // PM-11: `src/` is where the code goes, so `src/index.html` is the prototype case. Checked
+  // before the root, because a project with both has its source in one and something incidental
+  // in the other.
+  for (const dir of ["src", "."]) {
+    if (existsSync(path.join(projectPath, dir, "index.html"))) {
+      return {
+        kind: "static",
+        command: `${LO_SERVE} --root ${dir}`,
+        reason:
+          dir === "src"
+            ? "src/index.html is the project's page, so src/ is served as a static site"
+            : "index.html sits at the root of the project, so the project is served as a static site",
+      };
+    }
+  }
+
+  // Last resort, and the reason it exists: a page called something else. An agent that wrote
+  // `efemis_prototipo.html` produced a working prototype nobody could open, and refusing to serve
+  // it over a naming convention helps no one — as long as there is exactly one candidate and no
+  // guessing involved. Said out loud, so the next page gets called index.html.
+  for (const dir of ["src", ".", ...BUILD_DIRS, "doc"]) {
+    const pages = htmlPagesIn(path.join(projectPath, dir));
+    if (pages.length !== 1) continue;
     return {
       kind: "static",
-      command: `${LO_SERVE} --root .`,
-      reason: "index.html sits at the root of the project, so the project is served as a static site",
+      command: `${LO_SERVE} --root ${dir}`,
+      reason:
+        `${dir === "." ? "" : `${dir}/`}${pages[0]} is the only page in ` +
+        `${dir === "." ? "the project root" : `${dir}/`}, so it is served from there. ` +
+        `Name it index.html and it will be found without this guess` +
+        (dir === "doc" ? "; doc/ is for documents, code belongs in src/ (PM-11)" : ""),
     };
   }
 
   return {
     reason:
-      "nothing to preview: no dev, serve, preview or start script in package.json, no index.html " +
-      `in ${BUILD_DIRS.join(", ")}, and no index.html at the root of the project. Build the page ` +
-      "first, or start the preview with an explicit command.",
+      "nothing to preview: no dev, serve, preview or start script in package.json, and no " +
+      `index.html in src/, the project root or ${BUILD_DIRS.join(", ")}. Put the page at ` +
+      "src/index.html, or start the preview with an explicit command.",
   };
+}
+
+/** The .html files directly inside one directory; [] when it is missing or unreadable. */
+function htmlPagesIn(dir: string): string[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".html"))
+      .map((e) => e.name);
+  } catch {
+    return [];
+  }
 }
 
 export function isPreviewPlan(value: PreviewPlan | DetectFailure): value is PreviewPlan {

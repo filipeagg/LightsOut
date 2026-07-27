@@ -66,6 +66,38 @@ describe("what to serve, when nobody said (PV-07)", () => {
     expect(plan(detectPreview(dir)).kind).toBe("static");
   });
 
+  it("prefers src/index.html, which is where PM-11 says the code lives", async () => {
+    const dir = await project();
+    await mkdir(path.join(dir, "src"));
+    await writeFile(path.join(dir, "src", "index.html"), page, "utf8");
+
+    const chosen = plan(detectPreview(dir));
+    expect(chosen.command).toBe(`${LO_SERVE} --root src`);
+    expect(chosen.reason).toContain("src/index.html");
+  });
+
+  it("serves a differently named page when it is the only one, and says to rename it", async () => {
+    // The real case: a working 1912-line prototype at doc/efemis_prototipo.html that nobody
+    // could open. Refusing over a naming convention helps no one.
+    const dir = await project();
+    await mkdir(path.join(dir, "doc"));
+    await writeFile(path.join(dir, "doc", "efemis_prototipo.html"), page, "utf8");
+
+    const chosen = plan(detectPreview(dir));
+    expect(chosen.command).toBe(`${LO_SERVE} --root doc`);
+    expect(chosen.reason).toContain("efemis_prototipo.html");
+    expect(chosen.reason).toContain("index.html");
+    expect(chosen.reason).toContain("src/");
+  });
+
+  it("does not guess when a directory holds several pages", async () => {
+    const dir = await project();
+    await mkdir(path.join(dir, "src"));
+    await writeFile(path.join(dir, "src", "a.html"), page, "utf8");
+    await writeFile(path.join(dir, "src", "b.html"), page, "utf8");
+    expect(isPreviewPlan(detectPreview(dir))).toBe(false);
+  });
+
   it("refuses with what it looked for, not with a shrug", async () => {
     const dir = await project();
     const result = detectPreview(dir);
@@ -74,7 +106,8 @@ describe("what to serve, when nobody said (PV-07)", () => {
     // A refusal a person can act on names the places that were checked.
     expect(result.reason).toContain("package.json");
     expect(result.reason).toContain("dist");
-    expect(result.reason).toContain("root of the project");
+    expect(result.reason).toContain("project root");
+    expect(result.reason).toContain("src/index.html");
   });
 
   it("never throws on a directory that is not there", () => {

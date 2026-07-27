@@ -701,10 +701,22 @@ function newProjectForm() {
       <label class="tiny">Name<br><input id="pr-name" placeholder="Offline sync"></label>
       <label class="tiny">Template<br>
         <select id="pr-template" onchange="window.__pickedTemplate=this.value;paint()">
-          <option value="">(none — an empty project)</option>
+          <option value="">(choose one)</option>
           ${templates.map((t) => `<option value="${esc(t.id)}" ${
             t.id === window.__pickedTemplate ? "selected" : ""}>${esc(t.name)}</option>`).join("")}
-        </select></label>
+          <option value="none" ${window.__pickedTemplate === "none" ? "selected" : ""}>none — free tasks, no phases</option>
+        </select>
+        ${chosen && chosen.whenToUse
+          ? `<div class="tiny muted" style="max-width:32ch">Use when: ${esc(chosen.whenToUse)}</div>`
+          : ""}
+        ${chosen && chosen.notFor
+          ? `<div class="tiny muted" style="max-width:32ch">Not for: ${esc(chosen.notFor)}</div>`
+          : ""}</label>
+      ${window.__pickedTemplate === "none"
+        ? `<label class="tiny" style="flex:1 1 100%">Why no template? (TP-09)<br>
+             <input id="pr-template-reason" style="width:100%"
+               placeholder="one line: why no phase list fits this work"></label>`
+        : ""}
       <label class="tiny">Verify command<br><input id="pr-verify" placeholder="npm test"></label>
       <label class="tiny" style="flex:1 1 100%">
         Context — required, whatever the template (PM-09)<br>
@@ -734,8 +746,15 @@ async function createProjectFromPanel() {
     store.error = "a context brief is required (PM-09): what is this project for?";
     return paint();
   }
-  const payload = { name, context };
-  if (field("pr-template")) payload.template = field("pr-template");
+  // TP-09: the template is chosen, and "none" is a choice that carries its reason.
+  const template = field("pr-template");
+  if (!template) { store.error = "choose a template, or \"none\" and say why"; return paint(); }
+  const payload = { name, context, template };
+  if (template === "none") {
+    const reason = field("pr-template-reason");
+    if (!reason) { store.error = "say why no template fits (TP-09)"; return paint(); }
+    payload.templateReason = reason;
+  }
   if (field("pr-verify")) payload.verify = field("pr-verify");
   if (csv("pr-knowledge").length) payload.knowledge = csv("pr-knowledge");
   if (field("pr-writable")) payload.writableKnowledge = field("pr-writable");

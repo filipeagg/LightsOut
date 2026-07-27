@@ -72,7 +72,7 @@ docker cp scripts/mcp-call.mjs "$CONTAINER":/opt/lightsout/mcp-call.mjs >/dev/nu
 check "docker ps --format '{{.Names}}' | grep -qx $CONTAINER" "container running"
 
 echo "-- the builtin library ships in the image (BA-01)"
-check "docker exec $CONTAINER test -f /opt/lightsout/builtin/agents/prompt-architect.yaml" \
+check "docker exec $CONTAINER test -f /opt/lightsout/builtin/agents/planner.yaml" \
   "builtin agent profiles are in the image"
 check "docker exec $CONTAINER test -f /opt/lightsout/builtin/policies/curate.yaml" \
   "builtin policy packs are in the image"
@@ -81,17 +81,27 @@ check "docker exec $CONTAINER test -f /opt/lightsout/builtin/templates/full-deve
 check "docker exec $CONTAINER test -d /opt/lightsout/scaffold/doc" \
   "the project scaffold moved out of templates/ (DESIGN §2)"
 
+# BA-01 as it stands after the PE-14 pass: nine profiles that do work plus the internal judge.
+# `prompt-architect` and `coordinator` were removed there, and this list followed them.
 agents_json=$(mcp list_agents)
-for id in prompt-architect contract-prober planner builder coordinator software-auditor \
-          qa-engineer codebase-analyst answerer reviewer; do
+for id in contract-prober planner builder integrator software-auditor \
+          qa-engineer codebase-analyst answerer reviewer permission-judge; do
   check "printf '%s' \"\$agents_json\" | grep -q '\"${id}\"'" "profile ${id} is loaded (BA-01)"
 done
 
-echo "-- templates (TP-01, TP-02, TP-03)"
+echo "-- templates (TP-01, TP-02, TP-03, TP-10)"
 templates=$(mcp list_templates)
-for id in full-development quick-prototype knowledge-curation quick-answers; do
+for id in full-development quick-prototype knowledge-curation quick-answers api-prototype \
+          legacy-intake; do
   check "printf '%s' \"\$templates\" | grep -q '\"${id}\"'" "template ${id} is usable (TP-02)"
 done
+# TP-10: a template without selection criteria is one nobody will pick correctly.
+missing_criteria=$(jq_get "$templates" "j.templates.filter(t => !t.whenToUse || !t.notFor).map(t => t.id).join(',')")
+if [ -z "$missing_criteria" ]; then
+  ok "every builtin template says when to use it and what it is not for (TP-10)"
+else
+  bad "every builtin template says when to use it and what it is not for (TP-10) (${missing_criteria})"
+fi
 rejected=$(jq_get "$templates" "j.rejected.length")
 if [ "${rejected:-1}" = "0" ]; then
   ok "no builtin template is rejected (TP-03)"
@@ -182,43 +192,53 @@ docker exec "$CONTAINER" node -e '
   db.prepare("DELETE FROM decisions WHERE project_id = ?").run(id);
 ' "$PROJECT" >/dev/null 2>&1
 
-created=$(mcp create_project "{\"name\":\"${PROJECT}\",\"template\":\"full-development\",\"knowledge\":[\"${BASE}\"]}")
+P9_CONTEXT="goal: exercise the phase layer end to end from the gate\\nactors: the phase 9 script\\ndone_when: the plan phase produced doc/PLAN.md and its gate is holding"
+created=$(mcp create_project "{\"name\":\"${PROJECT}\",\"context\":\"${P9_CONTEXT}\",\"template\":\"full-development\",\"knowledge\":[\"${BASE}\"]}")
 phase_count=$(jq_get "$created" "j.phases")
-if [ "${phase_count:-0}" = "6" ]; then
-  ok "create_project materialised the six phases (TP-05)"
+# Five since the BA-01 pass removed `shape-the-prompt`: the planner does both jobs in one pass.
+if [ "${phase_count:-0}" = "5" ]; then
+  ok "create_project materialised the five phases (TP-05)"
 else
-  bad "create_project materialised the six phases (TP-05) (got '${phase_count}')"
+  bad "create_project materialised the five phases (TP-05) (got '${phase_count}')"
 fi
 check "printf '%s' \"\$created\" | grep -q '\"${BASE}\"'" "the knowledge base is attached (KB-03)"
 
 phases=$(mcp list_phases "{\"projectId\":\"${PROJECT}\"}")
 first_ref=$(jq_get "$phases" "j.phases[0].ref")
-if [ "$first_ref" = "shape-the-prompt" ]; then
+if [ "$first_ref" = "probe-contracts" ]; then
   ok "the phases are in template order (TP-06)"
 else
   bad "the phases are in template order (TP-06) (first is '${first_ref}')"
 fi
-check "printf '%s' \"\$phases\" | grep -q '\"gate\": \"human\"'" "the prompt phase carries a human gate (TP-01)"
+check "printf '%s' \"\$phases\" | grep -q '\"gate\": \"human\"'" "the plan phase carries a human gate (TP-01)"
 
-curation=$(mcp create_project "{\"name\":\"p9curation\",\"template\":\"knowledge-curation\"}")
+curation=$(mcp create_project "{\"name\":\"p9curation\",\"context\":\"goal: refused before anything is created\",\"template\":\"knowledge-curation\"}")
 check "printf '%s' \"\$curation\" | grep -q '\"ok\": false'" \
   "a curation project without a writable base is refused (KB-05)"
 
-echo "-- running the first phase for real (BA-04, TP-07)"
+echo "-- running the gated phase for real (BA-04, TP-07)"
+# `plan` rather than the first phase: it is the one that carries the human gate this section is
+# about, and the planner both understands the request and writes the plan (BA-01).
+# `probe-contracts` is left pending on purpose — it is optional and needs a live API — which is
+# why what answering the gate starts below is *it*: the next pending phase is by position, not
+# by whatever ran last. Skipping it here is not an option: skip_phase launches the next pending
+# one itself, which would race this launch.
 request="Add a --version flag to the project's CLI that prints the version from package.json and exits 0. Nothing else changes. Do not ask about scope, packaging, distribution or future features: the answer to any such question is that it is out of scope."
-launched=$(mcp launch_phase "{\"projectId\":\"${PROJECT}\",\"phase\":\"shape-the-prompt\",\"input\":\"${request}\"}")
+expects="doc/PLAN.md: the change broken into steps, each with the file it touches and how it is checked"
+launched=$(mcp launch_phase "{\"projectId\":\"${PROJECT}\",\"phase\":\"plan\",\"input\":\"${request}\",\"expects\":\"${expects}\"}")
 check "printf '%s' \"\$launched\" | grep -q '\"taskId\"'" "launch_phase created the phase's task"
 
 gate_ref=""
 for _ in $(seq 1 90); do
   sleep 5
   phases=$(mcp list_phases "{\"projectId\":\"${PROJECT}\"}")
-  first_status=$(jq_get "$phases" "j.phases[0].status")
+  # Index 1 is `plan`: index 0 is the optional `probe-contracts`, left pending on purpose.
+  first_status=$(jq_get "$phases" "j.phases[1].status")
   [ "$first_status" = "failed" ] && break
 
-  # prompt-architect is told to raise a doubt for anything it cannot decide, so an
-  # unattended gate must answer those to reach the phase gate at all. A `gate` doubt is
-  # the one this test is about; everything else is answered with its recommendation.
+  # The planner is told to raise a doubt for anything it cannot decide, so an unattended gate
+  # must answer those to reach the phase gate at all. A `gate` doubt is the one this test is
+  # about; everything else is answered with its recommendation.
   status=$(mcp project_status "{\"projectId\":\"${PROJECT}\"}")
   open_kind=$(jq_get "$status" "j.doubts.length ? j.doubts[0].kind : ''")
   open_ref=$(jq_get "$status" "j.doubts.length ? j.doubts[0].ref : ''")
@@ -232,16 +252,16 @@ for _ in $(seq 1 90); do
     mcp answer_doubt "{\"projectId\":\"${PROJECT}\",\"doubtId\":\"${open_ref}\",\"choice\":\"${choice}\",\"note\":\"phase 9 gate, unattended\"}" >/dev/null
   fi
 done
-echo "  INFO  first phase status: ${first_status:-unknown}"
+echo "  INFO  plan phase status: ${first_status:-unknown}"
 
 if [ "$first_status" = "done" ]; then
-  ok "the first phase finished and its deliverable was found on disk (BA-04)"
+  ok "the plan phase finished and its deliverable was found on disk (BA-04)"
 else
-  bad "the first phase finished (got '${first_status:-unknown}')"
+  bad "the plan phase finished (got '${first_status:-unknown}')"
 fi
-check "docker exec $CONTAINER test -f /workspace/projects/${PROJECT}/doc/PROMPT.md" \
-  "the deliverable doc/PROMPT.md exists"
-check "docker exec $CONTAINER grep -qi plumbago /workspace/projects/${PROJECT}/doc/PROMPT.md" \
+check "docker exec $CONTAINER test -f /workspace/projects/${PROJECT}/doc/PLAN.md" \
+  "the deliverable doc/PLAN.md exists"
+check "docker exec $CONTAINER grep -qi plumbago /workspace/projects/${PROJECT}/doc/PLAN.md" \
   "the agent read the curated knowledge it was given (KB-04)"
 
 if [ -n "$gate_ref" ]; then
@@ -249,7 +269,7 @@ if [ -n "$gate_ref" ]; then
 else
   bad "the human gate is open and holding (TP-01)"
 fi
-second_status=$(jq_get "$phases" "j.phases[1].status")
+second_status=$(jq_get "$phases" "j.phases[2].status")
 if [ "$second_status" = "pending" ]; then
   ok "the gate stopped the project instead of rolling on (§16.2)"
 else
@@ -263,16 +283,21 @@ if [ -n "$gate_ref" ]; then
   for _ in $(seq 1 12); do
     sleep 5
     phases=$(mcp list_phases "{\"projectId\":\"${PROJECT}\"}")
-    next_status=$(jq_get "$phases" "j.phases[1].status")
+    # The next *pending* phase, which is `probe-contracts` at position 0 (see above).
+    next_status=$(jq_get "$phases" "j.phases[0].status")
     if [ "$next_status" != "pending" ]; then moved="$next_status"; break; fi
   done
   if [ -n "$moved" ]; then
-    ok "the next phase started once the gate was answered (${moved})"
+    ok "the next pending phase started once the gate was answered (${moved})"
   else
-    bad "the next phase started once the gate was answered"
+    bad "the next pending phase started once the gate was answered"
   fi
+  # Nothing this gate started is left running: the probe it just launched has a live API on the
+  # other end and no reason to finish.
+  chain_id=$(jq_get "$(mcp project_status "{\"projectId\":\"${PROJECT}\"}")" "j.chain.id")
+  [ -n "$chain_id" ] && mcp abort_run "{\"chainId\":\"${chain_id}\"}" >/dev/null
 else
-  bad "the next phase started once the gate was answered (no gate to answer)"
+  bad "the next pending phase started once the gate was answered (no gate to answer)"
 fi
 
 echo "-- skip and ad-hoc phases (TP-07, TP-08)"
@@ -284,14 +309,14 @@ check "printf '%s' \"\$not_optional\" | grep -q '\"ok\": false'" \
 
 echo "-- the panel reads the same model (WP-10)"
 api_phases=$(curl -fsS "http://127.0.0.1:${PORT}/api/projects/${PROJECT}/phases" 2>/dev/null)
-check "printf '%s' \"\$api_phases\" | grep -q 'shape-the-prompt'" \
+check "printf '%s' \"\$api_phases\" | grep -q 'probe-contracts'" \
   "the HTTP API serves the phases (§12.1)"
 api_templates=$(curl -fsS "http://127.0.0.1:${PORT}/api/templates" 2>/dev/null)
 check "printf '%s' \"\$api_templates\" | grep -q 'full-development'" \
   "the HTTP API serves the templates (§12.1)"
 
 # Guard against a gate that silently skips checks.
-expected_checks=45
+expected_checks=48
 if [ "$((pass + fail))" -ne "$expected_checks" ]; then
   bad "gate integrity: ran $((pass + fail)) checks, expected $expected_checks"
 fi

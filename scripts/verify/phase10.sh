@@ -79,8 +79,27 @@ done
 check "docker ps --format '{{.Names}}' | grep -qx $CONTAINER" "container running"
 
 echo "-- the panel is served and parses (ST-04)"
-check "curl -fsS ${BASE}/ | grep -q 'data-r=\"/templates\"'" "the panel offers the new views"
-check "curl -fsS ${BASE}/ | grep -q 'data-r=\"/vault\"'" "the vault view is in the navigation"
+# Polled: the container was recreated a moment ago and `/health` answers before the static
+# handler has anything to serve. A red for asking early is a red nobody believes later.
+# The loop waits for the *content*, not for any answer: during a recreate the old container is
+# still on the port for a moment, and a body that arrives is not evidence it is the new one.
+panel=""
+for _ in $(seq 1 30); do
+  panel=$(curl -fsS "${BASE}/" 2>/dev/null)
+  case "$panel" in *'data-r="/vault"'*) break ;; esac
+  sleep 1
+done
+# Matched in the shell, not through a pipe: with `pipefail` on, `printf … | grep -q` reports a
+# failure whenever grep matches *early* and leaves printf writing into a closed pipe. On a 127 KB
+# page that is always, so the check was red while the page was perfect.
+case "$panel" in
+  *'data-r="/templates"'*) ok "the panel offers the new views" ;;
+  *) bad "the panel offers the new views"; echo "  INFO  ${#panel} bytes served from ${BASE}/" ;;
+esac
+case "$panel" in
+  *'data-r="/vault"'*) ok "the vault view is in the navigation" ;;
+  *) bad "the vault view is in the navigation" ;;
+esac
 if docker run --rm -v "$(pwd)/panel:/p" node:22-slim node -e '
   const fs = require("fs");
   const html = fs.readFileSync("/p/index.html", "utf8");
@@ -127,7 +146,9 @@ fi
 
 echo "-- a template, created and edited from the browser API (TP-04)"
 send DELETE "/api/templates/${TEMPLATE}" >/dev/null
-phases='[{"id":"shape","title":"Shape it","agent":"prompt-architect","gate":"human","deliverable":"doc/PROMPT.md","instructions":"Write doc/PROMPT.md from the request in the task spec. Keep it short."},{"id":"build","title":"Build it","agent":"'"${AGENT}"'","repeatable":true,"instructions":"Implement what doc/PROMPT.md asks for."}]'
+# `planner`, not `prompt-architect`: the BA-01 pass removed that profile, and a template naming
+# an agent that does not exist is rejected on load (TP-03) — which is what this fixture would be.
+phases='[{"id":"shape","title":"Shape it","agent":"planner","gate":"human","deliverable":"doc/PROMPT.md","instructions":"Write doc/PROMPT.md from the request in the task spec. Keep it short."},{"id":"build","title":"Build it","agent":"'"${AGENT}"'","repeatable":true,"instructions":"Implement what doc/PROMPT.md asks for."}]'
 tpl=$(send POST /api/templates "{\"id\":\"${TEMPLATE}\",\"name\":\"Panel flow\",\"phases\":${phases}}")
 check "printf '%s' \"\$tpl\" | grep -q '\"ok\": *true'" "POST /api/templates creates a template"
 check "get /api/templates | grep -q '${TEMPLATE}'" "it appears in the library"
@@ -170,7 +191,7 @@ docker exec "$CONTAINER" node -e '
   }
 ' "$PROJECT" >/dev/null 2>&1
 
-project=$(send POST /api/projects "{\"name\":\"${PROJECT}\",\"template\":\"${TEMPLATE}\",\"knowledge\":[\"${KB}\"]}")
+project=$(send POST /api/projects "{\"name\":\"${PROJECT}\",\"context\":\"goal: drive a whole project from the panel alone\\nactors: the phase 10 script\\ndone_when: the phases ran and the gate was answered from this surface\",\"template\":\"${TEMPLATE}\",\"knowledge\":[\"${KB}\"]}")
 phase_count=$(jq_get "$project" "j.phases")
 if [ "${phase_count:-0}" = "2" ]; then
   ok "POST /api/projects materialised the template's phases (TP-05)"
@@ -214,7 +235,8 @@ check "printf '%s' \"\$missing\" | grep -q '\"ok\": *false'" "an unknown phase a
 
 echo "-- launching a phase from the panel, for real"
 request="Add a --version flag to the CLI that prints the version and exits 0. Nothing else. Do not ask about scope: anything not stated is out of scope."
-launched=$(send POST "/api/phases/${phase_id}/launch" "{\"input\":\"${request}\"}")
+expects="doc/PROMPT.md: what the flag does, what it prints, and what is out of scope"
+launched=$(send POST "/api/phases/${phase_id}/launch" "{\"input\":\"${request}\",\"expects\":\"${expects}\"}")
 check "printf '%s' \"\$launched\" | grep -q '\"taskId\"'" "POST /api/phases/:id/launch starts it (TP-07)"
 
 gate_id=""

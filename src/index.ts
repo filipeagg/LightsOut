@@ -25,6 +25,7 @@ import { KnowledgeLoader } from "./knowledge/loader.js";
 import { Vault } from "./vault/vault.js";
 import { Actions } from "./control/actions.js";
 import { LoginFlows } from "./setup/login-flows.js";
+import { ensureCodexConfig } from "./setup/engine-config.js";
 import { PreviewManager } from "./preview/manager.js";
 
 async function readVersion(): Promise<string> {
@@ -77,6 +78,17 @@ async function main(): Promise<void> {
       (layout.created.length > 0 ? `: created ${layout.created.join(", ")}` : "") +
       (layout.gitignoreUpdated ? " (.gitignore updated)" : ""),
   );
+
+  // 4a. The engine's own sandbox (ST-09, §7.8). Left to its defaults, codex starts `read-only`
+  // with `approval: never`, so its writes fail inside the engine and the policy engine is never
+  // asked — a refusal with no audit row, which is the hardest kind to diagnose.
+  const engineConfig = await ensureCodexConfig(
+    process.env.CODEX_HOME ?? path.join(process.env.HOME ?? "/home/app", ".codex"),
+  );
+  console.log(`[boot] codex config ${engineConfig.action}: ${engineConfig.reason}`);
+  if (engineConfig.action === "kept" && engineConfig.reason.includes("refuse its own writes")) {
+    console.warn(`[boot] ${engineConfig.path} confines the engine below what LightsOut expects`);
+  }
 
   // 4b. Agent profiles and policy packs: the builtin library layered under the workspace
   // (AP-01..03, BA-01, DESIGN §2).

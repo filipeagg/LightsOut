@@ -949,6 +949,48 @@ a `path`, or an object keyed by path); and finally the patch text itself —
 enforced on everything it found, so a confined pack still confines: what changed is that it is now
 confining something it can see.
 
+### 7.8 The engine's own sandbox (ST-09)
+
+The most expensive hour of 2026-07-27 was spent in the classifier, and the classifier was innocent.
+
+`contract-prober` could not write a single file on `efemis-crop-map-prototype`. It said so plainly —
+*"the first file-write was denied before execution"* — and the timeline agreed. But the audit trail
+for the entire run held **one** `permission_audit` row, and it was an `allow`. A refusal that
+leaves no audit row did not come from here. Run by hand in the container, codex says what it is:
+
+```
+approval: never
+sandbox:  read-only
+```
+
+Codex ships its own sandbox and, with no `config.toml`, starts read-only with approvals off. Every
+write failed **inside the engine**, before ACP, so LightsOut was never asked and had nothing to
+record. The agent's honest report of its own failure was indistinguishable from a policy denial,
+and two rounds of investigation went into a component that was working correctly. §7.1e came out
+of that detour: real, worth having, and **not** the cause.
+
+The rule this establishes: **two sandboxes is one too many.** LightsOut mediates every action and
+the container is the boundary; an engine confinement nobody configured is a second veto that no
+surface displays and no audit row explains. `ensureCodexConfig()` runs at boot (§11.1 step 4a) and
+writes, when the file is absent or is an out-of-date copy of its own:
+
+```toml
+# managed by LightsOut (ST-09)
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+network_access = true
+```
+
+`workspace-write` rather than `danger-full-access` on purpose: the engine still refuses to write
+outside its working directory, which is defence in depth behind PE-02, while everything inside is
+announced over ACP where the policy engine decides. Network on, because a prober that cannot call
+the API it was launched to probe is the same class of contradiction as VT-07 (§7.5).
+
+A `config.toml` without the managed marker belongs to a person and is **never** overwritten. Boot
+logs what it found, and warns when the file confines the engine below what LightsOut expects, so
+the next hour is not spent in the classifier again.
+
 ### 7.7 Unattended mode (OR-12)
 
 LightsOut exists to run agents **unattended**. A permission gate that parks a session until a

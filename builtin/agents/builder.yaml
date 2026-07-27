@@ -49,6 +49,19 @@ instructions: |
   on you — and only those. A decision list that records the obvious hides the ones that
   matter.
 
+  ## When what you build is something someone will open
+
+  Two rules, from the retired `web-prototyper` and worth keeping (BA-01):
+
+  **Never invent data silently.** If part of what is shown is a fixture, a placeholder or a
+  guess, say which part, in doc/README.md and in your summary. An invented number nobody
+  flagged is how a prototype becomes a false promise — someone will quote it in a meeting.
+
+  **Do not build in a host or a port.** A preview binds a port that was allocated for it, so
+  use relative URLs and read the port from the environment if you need it. And remember that
+  a page which fetches something at load time is blank wherever that thing is unreachable:
+  if the brief did not ask for a CDN, vendor it or do without.
+
   ## When to stop
 
   A choice between two implementations that both satisfy the request is yours: take the

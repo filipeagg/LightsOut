@@ -853,38 +853,87 @@ async function launchPhase(phaseId) {
 }
 
 /** Attach and detach knowledge for one project (KB-03). */
+/**
+ * The project's knowledge (KB-03), in two lists rather than one.
+ *
+ * One table held every base, attached or not, and the only way to tell which was a pill in the
+ * fourth column. When everything that existed was already attached, the page showed nothing but
+ * Detach buttons and read as "this is what there is" — the user looked for a way to add another
+ * and could not see one, because "add" was a state of a row rather than a section of the page.
+ *
+ * So: what is attached, then what is available, then what could become available. Each says what
+ * it is, and each says what to do when it is empty.
+ */
 function viewProjectKnowledge() {
   const s = store.project;
   const k = store.knowledge;
   if (!s || !k) return `<div class="empty">Loading…</div>`;
+  const id = encodeURIComponent(s.project.id);
   const attached = (store.phases && store.phases.knowledge) || [];
-  return `<h1>${esc(s.project.name)}</h1>
-    <p class="sub mono">${esc(s.project.path)}</p>
+  const isHere = (b) => attached.find((a) => a.baseId === b.id);
+  const here = k.bases.filter(isHere);
+  const available = k.bases.filter((b) => !isHere(b));
+
+  const row = (b, cells) => `<tr>
+    <td><b>${esc(b.name)}</b> <code class="tiny">${esc(b.id)}</code>
+      ${b.enforcement === "hard" ? `<span class="pill amber">binding</span>` : ""}
+      ${b.source ? `<div class="tiny muted mono">${esc(b.source)}</div>` : ""}</td>
+    <td class="tiny">${esc(b.kind)}</td>
+    <td class="tiny num">${b.documents.length}</td>
+    ${cells}</tr>`;
+
+  return `${projectHeader(s.project)}
     ${projectTabs(s.project.id, "knowledge")}
-    <p class="sub">What this project's agents are told before they start. One base may be
-      writable, and only for a curation project (KB-05).</p>
-    <div class="card"><table>
-      <thead><tr><th>Base</th><th>Kind</th><th>Documents</th><th>Attached</th><th></th></tr></thead>
-      <tbody>${k.bases
-        .map((b) => {
-          const here = attached.find((a) => a.baseId === b.id);
-          return `<tr>
-        <td><b>${esc(b.name)}</b> <code class="tiny">${esc(b.id)}</code></td>
-        <td class="tiny">${esc(b.kind)}</td>
-        <td class="tiny num">${b.documents.length}</td>
-        <td>${here
-          ? here.writable
-            ? `<span class="pill amber"><span class="sdot"></span>writable</span>`
-            : `<span class="pill green"><span class="sdot"></span>read-only</span>`
-          : `<span class="tiny muted">—</span>`}</td>
+
+    <div class="card pad" style="margin-bottom:24px">
+      <div><b>Attached to this project</b>
+        <div class="tiny muted">Injected into every run's prompt, before the task. One base may be
+          writable, and only for a curation project (KB-05).</div></div>
+      ${here.length
+        ? `<table style="margin-top:12px"><tbody>${here
+            .map((b) =>
+              row(
+                b,
+                `<td>${
+                  isHere(b).writable
+                    ? `<span class="pill amber"><span class="sdot"></span>writable</span>`
+                    : `<span class="pill green"><span class="sdot"></span>read-only</span>`
+                }</td>
+        <td style="text-align:right"><button class="btn sm"
+          onclick="act('DELETE','/api/projects/${id}/knowledge/${encodeURIComponent(b.id)}')">Detach</button></td>`,
+              ),
+            )
+            .join("")}</tbody></table>`
+        : `<p class="tiny muted" style="margin-top:12px">Nothing attached. Agents on this project
+            are told only the brief and the task.</p>`}
+    </div>
+
+    <div class="card pad" style="margin-bottom:24px">
+      <div><b>Available in the workspace</b>
+        <div class="tiny muted">Bases that exist but are not attached here. Attaching one is
+          reversible and changes nothing on disk.</div></div>
+      ${available.length
+        ? `<table style="margin-top:12px"><tbody>${available
+            .map((b) =>
+              row(
+                b,
+                `<td></td>
         <td class="row" style="gap:6px;justify-content:flex-end">
-          ${here
-            ? `<button class="btn sm" onclick="act('DELETE','/api/projects/${encodeURIComponent(s.project.id)}/knowledge/${encodeURIComponent(b.id)}')">Detach</button>`
-            : `<button class="btn sm" onclick="act('POST','/api/projects/${encodeURIComponent(s.project.id)}/knowledge',{baseId:'${esc(b.id)}'})">Attach</button>
-               <button class="btn sm" onclick="act('POST','/api/projects/${encodeURIComponent(s.project.id)}/knowledge',{baseId:'${esc(b.id)}',writable:true})">Attach writable</button>`}
-        </td></tr>`;
-        })
-        .join("")}</tbody></table></div>
+          <button class="btn sm primary"
+            onclick="act('POST','/api/projects/${id}/knowledge',{baseId:'${esc(b.id)}'})">Attach</button>
+          <button class="btn sm"
+            onclick="act('POST','/api/projects/${id}/knowledge',{baseId:'${esc(b.id)}',writable:true})">Attach writable</button>
+        </td>`,
+              ),
+            )
+            .join("")}</tbody></table>`
+        : `<p class="tiny muted" style="margin-top:12px">
+            ${k.bases.length
+              ? "Every base in the workspace is already attached here."
+              : "There are no knowledge bases yet."}
+            <a href="#/knowledge">Create one on the Knowledge page</a>, or adopt a folder below.</p>`}
+    </div>
+
     ${adoptableHere(s.project.id, k.adoptable || [])}`;
 }
 
@@ -896,21 +945,25 @@ function viewProjectKnowledge() {
  * Adopting and attaching is one intention — "use this material here" — so it is one button.
  */
 function adoptableHere(projectId, adoptable) {
-  if (!adoptable.length) return "";
-  return `<div class="card pad" style="margin-top:24px">
+  const body = adoptable.length
+    ? `<table style="margin-top:12px"><tbody>${adoptable
+        .map(
+          (f) => `<tr>
+        <td class="mono tiny">${esc(f.path)}</td>
+        <td class="tiny muted">${f.documents} document(s)${f.hasIndex ? ", has an index" : ""}</td>
+        <td style="text-align:right"><button class="btn sm primary"
+          onclick="adoptAndAttach('${esc(projectId)}','${esc(f.path)}','${esc(f.suggestedId || "")}')">
+          Adopt and attach</button></td></tr>`,
+        )
+        .join("")}</tbody></table>`
+    : `<p class="tiny muted" style="margin-top:12px">None. Put a folder of Markdown anywhere in
+        the workspace and it appears here, ready to adopt.</p>`;
+
+  return `<div class="card pad">
     <div><b>Material in the workspace that is not a base yet</b>
       <div class="tiny muted">Folders holding documents. Adopting one registers it where it is —
         the folder is not copied or moved — and attaches it to this project.</div></div>
-    <table style="margin-top:12px"><tbody>${adoptable
-      .map(
-        (f) => `<tr>
-      <td class="mono tiny">${esc(f.path)}</td>
-      <td class="tiny muted">${f.documents} document(s)${f.hasIndex ? ", has an index" : ""}</td>
-      <td style="text-align:right"><button class="btn sm primary"
-        onclick="adoptAndAttach('${esc(projectId)}','${esc(f.path)}','${esc(f.suggestedId || "")}')">
-        Adopt and attach</button></td></tr>`,
-      )
-      .join("")}</tbody></table>
+    ${body}
   </div>`;
 }
 

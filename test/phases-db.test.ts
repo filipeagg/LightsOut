@@ -123,6 +123,7 @@ describe("migration 2", () => {
       "10:preview servers",
       "11:unattended projects",
       "12:writable areas",
+      "13:why a project has no template",
     ]);
     // Migration 4 gives the legacy project a brief it can be told apart from a real one (PM-09).
     expect(

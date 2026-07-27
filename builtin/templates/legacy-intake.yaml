@@ -12,6 +12,13 @@
 # a proposal — `set_project_context` is how a person makes it real, and the phase says so.
 id: legacy-intake
 name: Take in an existing codebase
+when_to_use: >
+  Code that arrived from somewhere else — an archive, a handover, a repository
+  nobody here wrote — and has to become a project this system can work on. Buys
+  understanding first, then changes one thing at a time.
+not_for: >
+  A codebase already set up as a project here, or one you only need to understand
+  and never modify (knowledge-curation).
 description: >
   Code that arrived as a zip. Unpack and inventory it, read it until it is understood, write the
   documents that make it a managed project, then improve it one change at a time.

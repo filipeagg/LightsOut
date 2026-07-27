@@ -2,6 +2,13 @@
 # knowledge base attached (KB-05): create_project rejects it without writableKnowledge.
 id: knowledge-curation
 name: Knowledge curation
+when_to_use: >
+  The deliverable is understanding, not code: turning a system that exists into a
+  knowledge base the next project reads. The only template that writes into a
+  knowledge base, so it needs writableKnowledge (KB-05).
+not_for: >
+  Changing the system it studies. If the point is to modify the code, use
+  legacy-intake, which does this analysis and then works on it.
 description: >
   Turning an existing system into a curated knowledge base the next project can read.
 requires_writable_knowledge: true

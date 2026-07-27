@@ -31,7 +31,10 @@ Rules that are expensive to get wrong:
 - A policy denial is an answer, mediated by the engine. If an agent needs to read something outside
   its project, declare a read-only area (add_area) rather than weakening anything.
 - The workspace is the user's own folder: call resolve_path before telling anyone where a file is.
-- Documents the system reads back are machine-first: key: value, no prose.
+- Documents the system reads back are machine-first: key: value, no prose. write_doc REPLACES;
+  append_doc adds; patch_doc edits part.
+- list_templates before create_project: a template brings phases, gates and frozen instructions,
+  and "none" is an answer that carries its reason.
 - A profile's engine and model are defaults; any launch may override them (list_agents.models).
 - Nothing that serves runs in an agent's terminal: it never returns. preview_start gives a URL.
 

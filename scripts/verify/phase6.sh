@@ -85,7 +85,7 @@ echo "-- the endpoint and its tool set (MC-01, MC-02)"
 tools=$(mcp)
 for name in health list_projects create_project project_status list_agents reload_agents \
             launch_chain launch_task abort_run list_doubts answer_doubt get_history \
-            read_doc write_doc consult; do
+            read_doc write_doc append_doc patch_doc consult; do
   if printf '%s' "$tools" | grep -q "\"$name\""; then
     ok "tool $name is exposed (MC-02)"
   else
@@ -106,7 +106,9 @@ docker exec "$CONTAINER" node -e '
   db.prepare("DELETE FROM decisions WHERE project_id = ?").run(process.argv[1]);
 ' "$PROJECT" >/dev/null 2>&1
 
-created=$(mcp create_project "{\"name\":\"${PROJECT}\",\"verify\":\"test -f mcp.txt\"}")
+# The launch contract this gate has to satisfy has grown since phase 6: a brief (PM-09), a
+# template choice with its reason when it is "none" (TP-09) and `expects` on every task (OR-10).
+created=$(mcp create_project "{\"name\":\"${PROJECT}\",\"verify\":\"test -f mcp.txt\",\"context\":\"goal: drive the MCP surface end to end from this gate\\nactors: the phase 6 script\\ndone_when: mcp.txt exists and the chain completed\",\"template\":\"none\",\"templateReason\":\"a gate fixture, not a plan: one file, one task\"}")
 project_id=$(jq_get "$created" "j.project.id")
 if [ "$project_id" = "$PROJECT" ]; then
   ok "create_project scaffolded the project (PM-01) (got $project_id)"
@@ -122,7 +124,7 @@ agents_json=$(mcp list_agents)
 check "printf '%s' \"\$agents_json\" | grep -q '\"${AGENT}\"'" "list_agents lists the profiles (AP-02)"
 
 start=$(date +%s)
-launched=$(mcp launch_chain "{\"projectId\":\"${PROJECT}\",\"title\":\"MCP flow\",\"tasks\":[{\"title\":\"Create mcp.txt\",\"spec\":\"Create a file mcp.txt in the project root containing the single line 'driven by mcp'. Nothing else.\",\"agentId\":\"${AGENT}\",\"level\":\"quick\"}]}")
+launched=$(mcp launch_chain "{\"projectId\":\"${PROJECT}\",\"title\":\"MCP flow\",\"tasks\":[{\"title\":\"Create mcp.txt\",\"spec\":\"Create a file mcp.txt in the project root containing the single line 'driven by mcp'. Nothing else.\",\"expects\":\"mcp.txt in the project root, one line, exactly 'driven by mcp'\",\"agentId\":\"${AGENT}\",\"level\":\"quick\"}]}")
 elapsed=$(( $(date +%s) - start ))
 chain_id=$(jq_get "$launched" "j.chainId")
 if [ -n "$chain_id" ]; then
@@ -173,7 +175,36 @@ check "printf '%s' \"\$written\" | grep -q '\"written\": true'" "write_doc write
 missing_project=$(mcp project_status '{"projectId":"does-not-exist"}')
 check "printf '%s' \"\$missing_project\" | grep -q 'NOT_FOUND'" \
   "an unknown project answers NOT_FOUND, not a crash (§10.2)"
-bad_agent=$(mcp launch_task "{\"projectId\":\"${PROJECT}\",\"title\":\"x\",\"spec\":\"y\",\"agentId\":\"ghost\"}")
+# MC-12/MC-13 (§9.2b): the three writing verbs, and the two documents that refuse to be replaced.
+appended=$(mcp append_doc "{\"projectId\":\"${PROJECT}\",\"doc\":\"DECISIONS\",\"content\":\"## G-1\\n\\nchoice: the gate wrote this\\n\"}")
+check "printf '%s' \"\$appended\" | grep -q '\"written\": true'" "append_doc adds to DECISIONS (MC-13)"
+replaced=$(mcp write_doc "{\"projectId\":\"${PROJECT}\",\"doc\":\"DECISIONS\",\"content\":\"gone\\n\"}")
+check "printf '%s' \"\$replaced\" | grep -q 'append_doc'" \
+  "write_doc refuses an append-only document and names the verb that works (MC-13)"
+check "docker exec $CONTAINER grep -q 'the gate wrote this' /workspace/projects/${PROJECT}/doc/DECISIONS.md" \
+  "the refused write destroyed nothing"
+patched=$(mcp patch_doc "{\"projectId\":\"${PROJECT}\",\"doc\":\"PLAN\",\"edits\":[{\"find\":\"written through mcp\",\"replace\":\"patched through mcp\"}]}")
+check "printf '%s' \"\$patched\" | grep -q '\"applied\": 1'" "patch_doc edits in place (MC-13)"
+ambiguous=$(mcp patch_doc "{\"projectId\":\"${PROJECT}\",\"doc\":\"PLAN\",\"edits\":[{\"find\":\"nowhere in this file\",\"replace\":\"x\"}]}")
+check "printf '%s' \"\$ambiguous\" | grep -q '\"ok\": false'" \
+  "patch_doc refuses a find that matches nothing rather than guessing"
+check "docker exec $CONTAINER test -d /workspace/projects/${PROJECT}/.lightsout/doc-history" \
+  "the previous version was kept where it can be found (MC-12)"
+
+# TP-09: the template choice is required, and "none" carries its reason.
+# A missing required argument is caught by the tool schema, so the refusal arrives as a protocol
+# validation error rather than an envelope. Either way it is a refusal, and it names the field.
+no_choice=$(mcp create_project "{\"name\":\"${PROJECT}-nochoice\",\"context\":\"goal: none\"}" 2>&1)
+check "printf '%s' \"\$no_choice\" | grep -q 'template'" \
+  "create_project without a template choice is refused (TP-09)"
+no_reason=$(mcp create_project "{\"name\":\"${PROJECT}-noreason\",\"context\":\"goal: none\",\"template\":\"none\"}")
+check "printf '%s' \"\$no_reason\" | grep -q 'templateReason'" \
+  "\"none\" without a reason is refused, naming the field (TP-09)"
+templates=$(mcp list_templates '{}')
+check "printf '%s' \"\$templates\" | grep -q 'whenToUse'" \
+  "list_templates leads with the criteria to choose by (TP-10)"
+
+bad_agent=$(mcp launch_task "{\"projectId\":\"${PROJECT}\",\"title\":\"x\",\"spec\":\"y\",\"expects\":\"nothing: this launch is refused\",\"agentId\":\"ghost\"}")
 check "printf '%s' \"\$bad_agent\" | grep -q '\"ok\": false'" \
   "an unknown agent profile is refused with an envelope"
 
@@ -188,7 +219,7 @@ else
 fi
 
 # Guard against a gate that silently skips checks.
-expected_checks=36
+expected_checks=47
 if [ "$((pass + fail))" -ne "$expected_checks" ]; then
   bad "gate integrity: ran $((pass + fail)) checks, expected $expected_checks"
 fi

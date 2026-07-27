@@ -17,6 +17,9 @@ import type { TemplatesLoader } from "../templates/loader.js";
 import type { KnowledgeLoader } from "../knowledge/loader.js";
 import type { PhaseService } from "../orchestrator/phases.js";
 
+/** The literal that means "I looked at the templates and none of them fits" (TP-09). */
+export const NO_TEMPLATE = "none";
+
 export type CreateProjectInput = {
   name: string;
   /**
@@ -31,8 +34,13 @@ export type CreateProjectInput = {
   verify?: string;
   push?: PushPolicy;
   defaultAgent?: string;
-  /** Project template to materialise phases from (TP-05). */
+  /**
+   * Project template to materialise phases from (TP-05). `"none"` is a legal answer and requires
+   * `templateReason`: not using a template is a decision, not a default (TP-09, §16.4).
+   */
   template?: string;
+  /** Why this project runs without a template. Required when `template` is `"none"`. */
+  templateReason?: string;
   /** Knowledge bases attached read-only (KB-03). */
   knowledge?: string[];
   /** The single base this project may write into; curation templates require it (KB-05). */
@@ -143,10 +151,23 @@ export async function createProject(
     );
   }
 
+  // TP-09: "none" is an answer, and it carries its reason. An omitted template is still accepted
+  // here — the scaffold is called by the phase 4 path and by tests that predate the question — but
+  // a caller that says "none" without saying why is refused, and that is the surface MCP exposes.
+  const noTemplate = input.template === NO_TEMPLATE;
+  const templateReason = input.templateReason?.trim();
+  if (noTemplate && !templateReason) {
+    throw new Error(
+      `template: "${NO_TEMPLATE}" needs templateReason — one line on why this work does not fit ` +
+        "any template (TP-09). list_templates shows what there is.",
+    );
+  }
+
   // Everything a template or a knowledge attachment can get wrong is checked before a single
   // directory is created, so a rejected request leaves nothing behind (TP-03, KB-05).
-  const template = input.template ? deps.templates?.getOrThrow(input.template) : undefined;
-  if (input.template && !template) {
+  const wanted = noTemplate ? undefined : input.template;
+  const template = wanted ? deps.templates?.getOrThrow(wanted) : undefined;
+  if (wanted && !template) {
     throw new Error("templates are not loaded in this process");
   }
   if (template?.requires_writable_knowledge && !input.writableKnowledge) {
@@ -234,6 +255,7 @@ export async function createProject(
       pushPolicy: input.push ?? "manual",
       verifyCmd: config.verify || null,
       templateId: template?.id ?? null,
+      templateReason: templateReason ?? null,
     });
 
   // One chain per project, created now so every phase task has somewhere to go (§16.2).

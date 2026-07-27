@@ -67,8 +67,11 @@ describe("the manual served over MCP (MC-09)", () => {
     expect(SERVER_INSTRUCTIONS).toMatch(/guide/);
     expect(SERVER_INSTRUCTIONS).toMatch(/doubt/);
     expect(SERVER_INSTRUCTIONS).toMatch(/127\.0\.0\.1:8484/);
-    // Short: it is in context for every conversation.
-    expect(SERVER_INSTRUCTIONS.length).toBeLessThan(1600);
+    // TP-09: choosing a template is one of the things a client gets wrong by never being told.
+    expect(SERVER_INSTRUCTIONS).toMatch(/list_templates/);
+    // Short: it is in context for every conversation. The budget grows only with a rule that
+    // earned its place; every line here is one a client demonstrably got wrong without it.
+    expect(SERVER_INSTRUCTIONS.length).toBeLessThan(1750);
   });
 });
 

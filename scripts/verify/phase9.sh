@@ -138,6 +138,19 @@ check "printf '%s' \"\$escape\" | grep -q '\"ok\": false'" \
   "read_knowledge refuses a path outside the base"
 
 echo "-- the vault never returns a value (VT-03)"
+# This gate needs a known entry, and the only vault the container reads is the user's own
+# (VT-02). It used to overwrite it and walk away, which on 2026-07-27 destroyed three real
+# entries and their secrets — a gate is not allowed to cost more than the bug it looks for.
+# So: copy it aside first, restore it on any exit, including a failure or a Ctrl-C.
+VAULT_BACKUP="/tmp/lo-vault-backup-$$.yaml"
+docker exec "$CONTAINER" sh -c "cp /workspace/vault.yaml '$VAULT_BACKUP' 2>/dev/null || true"
+restore_vault() {
+  docker exec "$CONTAINER" sh -c \
+    "if [ -f '$VAULT_BACKUP' ]; then cp '$VAULT_BACKUP' /workspace/vault.yaml && rm -f '$VAULT_BACKUP'; else rm -f /workspace/vault.yaml; fi" \
+    >/dev/null 2>&1
+}
+trap restore_vault EXIT INT TERM
+
 docker exec -i "$CONTAINER" sh -c "cat > /workspace/vault.yaml" <<'YAML'
 entries:
   - id: p9-sandbox

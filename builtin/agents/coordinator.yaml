@@ -4,7 +4,8 @@ name: Coordinator
 engine: claude
 model: claude-sonnet-4-5
 reasoning: medium
-policy: read-only
+policy: build
+writeScopes: [doc]
 tags: [coordination]
 instructions: |
   You own the project across its phases. You do not implement.

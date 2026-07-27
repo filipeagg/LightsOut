@@ -8,6 +8,7 @@
 # every later run. A library installed into .lightsout/tmp/deps does not, and classifies as
 # project_write, so the ordinary way to get one needs no gate at all (ST-03b).
 id: integrate
+deprecated: true  # PE-14: kept so profiles naming it keep working; hidden from pickers
 vault:
   test_only_required: false
 rules:

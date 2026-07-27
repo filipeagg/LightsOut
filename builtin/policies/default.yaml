@@ -2,6 +2,7 @@
 # The hard floor of PE-03 applies on top and cannot be relaxed here: outside_workspace
 # never allows; credentials and publish_external never go below require_human.
 id: default
+deprecated: true  # PE-14: superseded by `build`; still loads as the last-resort layer
 rules:
   - { class: project_read, verdict: allow }
   - { class: project_write, verdict: allow }

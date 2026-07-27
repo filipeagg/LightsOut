@@ -1,0 +1,28 @@
+# read: reads and reports. Runs nothing, writes nothing, reaches nothing (PE-14, §7.2b).
+#
+# For the agents whose whole job is an opinion: the answerer, the advisor sessions of §8.2, the
+# permission judge. An agent that exists to say what it thinks needs no way to act on it.
+#
+# Replaces `advisor` and `no-write`, whose rules were byte-identical.
+id: read
+name: Read only
+description: >
+  Reads the project and reports. Cannot write, run anything, or reach the network.
+rules:
+  - { class: project_read, verdict: allow }
+  - { class: project_write, verdict: deny, reason: "this agent reports, it does not change anything" }
+  - { class: exec_check, verdict: deny, reason: "this agent runs nothing" }
+  - { class: script_exec, verdict: deny, reason: "this agent runs nothing" }
+  - { class: serve, verdict: deny }
+  - { class: git_local, verdict: deny }
+  - { class: deps_install, verdict: deny }
+  - { class: toolchain_install, verdict: deny, reason: "this pack does not build anything" }
+  - { class: delete, verdict: deny }
+  - { class: git_push, verdict: deny }
+  - { class: network, verdict: deny }
+  - { class: knowledge_write, verdict: deny }
+  - { class: outside_workspace, verdict: deny }
+  - { class: credentials, verdict: deny }
+  - { class: publish_external, verdict: deny }
+  - { class: other, verdict: deny }
+matchers: {}

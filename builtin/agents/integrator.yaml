@@ -4,7 +4,7 @@ name: Integrator
 engine: claude
 model: claude-sonnet-4-5
 reasoning: medium
-policy: integrate
+policy: build-network
 tags: [integration, api]
 instructions: |
   You build and run integrations against real systems: call the API, write the client, produce

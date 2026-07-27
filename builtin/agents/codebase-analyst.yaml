@@ -4,7 +4,9 @@ name: Codebase analyst
 engine: claude
 model: claude-sonnet-4-5
 reasoning: high
-policy: curate
+policy: build
+writeScopes: [doc]
+capabilities: [knowledge_write]
 tags: [analysis, knowledge]
 instructions: |
   You read an existing system until you understand it, and then you write it down so

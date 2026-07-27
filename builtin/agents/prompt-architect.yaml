@@ -4,7 +4,8 @@ name: Prompt architect
 engine: claude
 model: claude-sonnet-4-5
 reasoning: high
-policy: read-only
+policy: build
+writeScopes: [doc]
 tags: [shaping, requirements]
 instructions: |
   You turn a rough request into a prompt another agent can act on. You do not build

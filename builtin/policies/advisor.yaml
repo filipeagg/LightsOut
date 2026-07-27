@@ -1,6 +1,7 @@
 # advisor: the ephemeral second-opinion sessions of §8.2. Everything read-only, terminal denied.
 # An advisor exists to have an opinion, so it needs no way to act on one.
 id: advisor
+deprecated: true  # PE-14: kept so profiles naming it keep working; hidden from pickers
 rules:
   - { class: project_read, verdict: allow }
   - { class: project_write, verdict: deny }

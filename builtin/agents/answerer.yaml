@@ -3,7 +3,7 @@ name: Answerer
 engine: claude
 model: claude-sonnet-4-5
 reasoning: low
-policy: no-write
+policy: read
 tags: [answers]
 instructions: |
   You answer the question you were asked, briefly and without ceremony. No plan, no

@@ -299,10 +299,12 @@ export class Actions {
     const { pack: projectPack } = await readProjectConfig(project.path);
     const checks = checkCapabilities(needs, {
       ...(projectPack ? { project: projectPack } : {}),
-      ...(this.deps.agents.pack(profile.policy)
-        ? { agent: this.deps.agents.pack(profile.policy) }
+      // PE-14: the pack *as this profile runs it* — its own writeScopes and capabilities
+      // included, so a launch is checked against what the agent can actually do.
+      ...(this.deps.agents.packFor(profile) ? { agent: this.deps.agents.packFor(profile) } : {}),
+      ...(this.deps.agents.pack("build") ?? this.deps.agents.pack("default")
+        ? { default: this.deps.agents.pack("build") ?? this.deps.agents.pack("default") }
         : {}),
-      ...(this.deps.agents.pack("default") ? { default: this.deps.agents.pack("default") } : {}),
     });
     const missing = checks.filter((check) => !check.granted && !grants.includes(check.capability));
     if (missing.length === 0) return { needs, grants };
@@ -311,7 +313,7 @@ export class Actions {
     const alternatives = [...this.deps.agents.current().profiles.values()]
       .filter((candidate) => {
         if (!candidate.enabled) return false;
-        const pack = this.deps.agents.pack(candidate.policy);
+        const pack = this.deps.agents.packFor(candidate);
         return checkCapabilities(
           missing.map((m) => m.capability),
           { ...(pack ? { agent: pack } : {}) },

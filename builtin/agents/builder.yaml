@@ -3,7 +3,7 @@ name: Builder
 engine: claude
 model: claude-sonnet-4-5
 reasoning: medium
-policy: default
+policy: build
 tags: [implementation]
 instructions: |
   You are a senior developer. You execute one piece of an unambiguous plan and

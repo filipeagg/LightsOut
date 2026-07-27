@@ -1,0 +1,31 @@
+# build: work inside the project (PE-14, §7.2b). Writes, runs checks and its own scripts, local
+# git. No network, no push, no knowledge, nothing outside the project.
+#
+# The default for anything that produces something. Where an agent may write is `writeScopes` on
+# its profile, not a pack of its own: confining an agent used to mean inventing one.
+#
+# The hard floor of PE-03 applies on top and cannot be relaxed here: outside_workspace never
+# allows; credentials and publish_external never go below require_human.
+id: build
+name: Build
+description: >
+  Works inside its project: writes files, runs checks and its own scripts, commits locally.
+  Cannot reach the network.
+rules:
+  - { class: project_read, verdict: allow }
+  - { class: project_write, verdict: allow }
+  - { class: exec_check, verdict: allow }
+  - { class: script_exec, verdict: allow, reason: "own tooling; the body was inspected (PE-07)" }
+  - { class: git_local, verdict: allow }
+  - { class: serve, verdict: deny, reason: "a server started here never ends; use preview_start (PV-02)" }
+  - { class: deps_install, verdict: require_human, reason: "a dependency changes the build for every later run (ST-03); install into .lightsout/tmp/deps instead" }
+  - { class: toolchain_install, verdict: require_human, reason: "a durable toolchain is authorised once per project and manager (ST-07)" }
+  - { class: delete, verdict: require_human, reason: "deletions are hard to undo" }
+  - { class: git_push, verdict: deny, reason: "pushing is the orchestrator's job (PM-05)" }
+  - { class: network, verdict: deny, reason: "use build-network when the task has to reach out" }
+  - { class: knowledge_write, verdict: deny, reason: "only a curation project writes knowledge (KB-05)" }
+  - { class: outside_workspace, verdict: deny }
+  - { class: credentials, verdict: require_human }
+  - { class: publish_external, verdict: require_human }
+  - { class: other, verdict: require_human }
+matchers: {}

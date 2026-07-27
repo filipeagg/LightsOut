@@ -226,7 +226,11 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
             error: r.error,
           })),
         ],
-        packs: [...snapshot.packs.keys()],
+        // PE-14: the three choosable packs, with what they mean. A retired id still resolves for
+        // a profile that names it, and is not offered to anyone choosing afresh.
+        packs: [...snapshot.packs.values()]
+          .filter((p) => !p.deprecated)
+          .map((p) => ({ id: p.id, name: p.name ?? p.id, description: p.description ?? "" })),
       };
     }),
   );

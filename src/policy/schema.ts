@@ -58,6 +58,15 @@ export const policyRuleSchema = z
 export const policyPackSchema = z
   .object({
     id: z.string().min(1),
+    /** What a person picking this pack reads (PE-14). Falls back to the id when absent. */
+    name: z.string().min(1).optional(),
+    description: z.string().optional(),
+    /**
+     * A pack kept only so profiles that already name it keep working (PE-14, §7.2b). It resolves
+     * exactly as before and is hidden from every picker: the ten packs became three, and breaking
+     * somebody's configuration is not a simplification.
+     */
+    deprecated: z.boolean().default(false),
     /** First match wins, evaluated top-down (DESIGN §7.2). */
     rules: z.array(policyRuleSchema).default([]),
     /**

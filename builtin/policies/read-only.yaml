@@ -1,6 +1,7 @@
 # read-only: thinking agents. They may write their deliverable under doc/ and nothing else,
 # so a planner physically cannot edit source (BA-05, DESIGN §19).
 id: read-only
+deprecated: true  # PE-14: kept so profiles naming it keep working; hidden from pickers
 write_scopes: [doc]
 rules:
   - { class: project_read, verdict: allow }

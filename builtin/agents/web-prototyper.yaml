@@ -5,7 +5,8 @@ name: Web prototyper
 engine: claude
 model: claude-sonnet-4-5
 reasoning: medium
-policy: web-prototype
+policy: build
+capabilities: [serve]
 tags: [web, prototype, ui]
 deliverable: a working page the user can open, plus doc/PROTOTYPE.md describing it
 instructions: |

@@ -434,6 +434,20 @@ async function confirmDeleteProject(id) {
   }
 }
 
+/**
+ * The id the server will derive from a name (KB-12), shown live so it is not a surprise.
+ * Deliberately the same rule as `slugify` in src/ids.ts; the server still has the last word.
+ */
+function slugifyLike(name) {
+  return (name || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+}
+
 const field = (id) => {
   const node = $(id);
   return node ? node.value.trim() : "";
@@ -2022,10 +2036,15 @@ function baseForm(b) {
     base.source && !folders.some((f) => f.path === base.source) ? [base.source] : [];
   return `<div class="card pad" style="margin-top:12px;margin-bottom:16px">
     <div class="row wrap" style="gap:16px">
+      <label class="tiny">Name<br>
+        <input id="kb-name" value="${esc(base.name)}" placeholder="Core platform"
+               ${isNew ? `oninput="paint()"` : ""}></label>
       ${isNew
-        ? `<label class="tiny">Id<br><input id="kb-id" placeholder="core-platform"></label>`
+        ? // KB-12: derived, and shown so it is not a surprise. Asking for both is asking twice
+          // for one thing, and the second answer has to satisfy a slug rule nobody was told.
+          `<label class="tiny">Id<br><input value="${esc(slugifyLike(field("kb-name")))}" readonly
+             title="derived from the name"></label>`
         : `<label class="tiny">Id<br><input value="${esc(base.id)}" readonly></label>`}
-      <label class="tiny">Name<br><input id="kb-name" value="${esc(base.name)}" placeholder="Core platform"></label>
       <label class="tiny">Kind<br><select id="kb-kind">${kinds
         .map((k) => `<option ${k === base.kind ? "selected" : ""}>${k}</option>`)
         .join("")}</select></label>
@@ -2035,6 +2054,12 @@ function baseForm(b) {
       </select></label>
       <label class="tiny">Tags<br><input id="kb-tags" value="${esc((base.tags || []).join(", "))}" placeholder="erp, legacy"></label>
     </div>
+    <label class="row tiny" style="gap:6px;margin-top:12px;cursor:pointer">
+      <input type="checkbox" id="kb-default" ${base.default_attach ? "checked" : ""}>
+      attach to every new project</label>
+    <p class="tiny muted" style="margin:4px 0 0">For standing context nobody should have to
+      remember — the API contract of the system every project talks to, the house conventions. A
+      project can still detach it; this only decides the default (KB-12).</p>
     <p class="tiny muted" style="margin:8px 0 0">A base of <b>hard rules</b> — a design system, a
       strict technology directive — is injected first and marked as binding, and an agent that would
       have to break one must stop and ask you instead. That question goes to nobody else: the other
@@ -2201,28 +2226,18 @@ async function saveBase(id) {
     enforcement: field("kb-enforcement") || "advisory",
     description: field("kb-description"),
     tags: csv("kb-tags"),
+    default_attach: checked("kb-default"),
   };
 
   if (id === null) {
+    // The name is the only thing asked for; the server derives the id and makes it unique (KB-12).
+    if (!patch.name) { store.error = "give the base a name"; return paint(); }
     // Creating against a folder is an adoption: the server writes the manifest into it, or a
     // base that links to it, and either way only what is missing (KB-10).
     if (folder) {
-      const suggested = folder.split("/").pop();
-      return act("POST", "/api/knowledge/adopt", {
-        folder,
-        id: field("kb-id") || suggested,
-        ...patch,
-        name: patch.name || field("kb-id") || suggested,
-      });
+      return act("POST", "/api/knowledge/adopt", { folder, ...patch });
     }
-    const newId = field("kb-id");
-    if (!newId) { store.error = "an id is required"; return paint(); }
-    return act("POST", "/api/knowledge", {
-      id: newId,
-      ...patch,
-      name: patch.name || newId,
-      source: null,
-    });
+    return act("POST", "/api/knowledge", { ...patch, source: null });
   }
 
   await act("PUT", `/api/knowledge/${encodeURIComponent(id)}`, { ...patch, source: folder });

@@ -13,6 +13,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import type { Actions } from "../control/actions.js";
 import { DOC_NAMES } from "../control/actions.js";
 import { failure, success, type Envelope } from "../mcp/envelope.js";
+import { slugify } from "../ids.js";
 
 export type WriteDeps = { actions: Actions };
 
@@ -70,6 +71,23 @@ const templateBody = z.object({
   requires_writable_knowledge: z.boolean().optional(),
   phases: z.array(phaseBody).min(1).optional(),
 });
+
+/**
+ * A base id from its name (KB-12): the slug, with `-2`, `-3`… when that is taken.
+ *
+ * Derived rather than asked for. The id has to be a lowercase slug because it is a directory name,
+ * and making a person satisfy that rule is making them do the system's arithmetic.
+ */
+function uniqueBaseId(deps: WriteDeps, name: string): string {
+  const base = slugify(name);
+  const existing = new Set(deps.actions.knowledgeIds());
+  const taken = (id: string) => existing.has(id);
+  if (!taken(base)) return base;
+  for (let n = 2; n < 100; n += 1) {
+    if (!taken(`${base}-${n}`)) return `${base}-${n}`;
+  }
+  throw new Error(`too many bases named like ${base}`);
+}
 
 export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void {
   const { actions } = deps;
@@ -151,15 +169,22 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
     description: z.string().optional(),
     tags: z.array(z.string().min(1)).optional(),
     owner: z.string().optional(),
+    /** KB-12: attach this base to every new project, without anyone having to remember. */
+    default_attach: z.boolean().optional(),
     /** A folder in the workspace to read the documents from; `null` unlinks (KB-08). */
     source: z.string().min(1).nullable().optional(),
   });
 
   app.post("/api/knowledge", async (request, reply) =>
     envelope(reply, async () => {
-      const input = body(manifestBody.extend({ id: z.string().min(1) }), request.body);
+      // KB-12: the id is derived from the name and only accepted when someone insists. Asking a
+      // person for both is asking twice for one thing, and the second answer has to be a slug.
+      const input = body(
+        manifestBody.extend({ id: z.string().min(1).optional(), name: z.string().min(1) }),
+        request.body,
+      );
       const { id, ...patch } = input;
-      return { base: await actions.writeKnowledge("panel", id, patch) };
+      return { base: await actions.writeKnowledge("panel", id ?? uniqueBaseId(deps, input.name), patch) };
     }),
   );
 
@@ -192,7 +217,10 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
         request.body,
       );
       const { folder, ...patch } = input;
-      return actions.adoptKnowledge("panel", folder, patch);
+      // KB-12: same rule as creating one — the name is what a person gives, the id is derived.
+      // Falling back to the folder's own name keeps the older callers working.
+      const id = patch.id ?? uniqueBaseId(deps, patch.name ?? folder.split("/").pop() ?? folder);
+      return actions.adoptKnowledge("panel", folder, { ...patch, id });
     }),
   );
 

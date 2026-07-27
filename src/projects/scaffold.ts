@@ -98,6 +98,33 @@ function renderConfig(input: CreateProjectInput, id: string): string {
  */
 export const PROJECT_DIRS = ["src", "probes"] as const;
 
+/**
+ * Which bases a new project starts with (KB-03, KB-12).
+ *
+ * A base carrying `default_attach` comes along without being asked for — the standing context
+ * nobody should have to remember, like the contract of the system every project talks to. Two
+ * properties matter and both are here rather than inline, so they can be tested without a git:
+ *
+ * - **added, never substituted**: an explicit list still gets everything it named;
+ * - **never a downgrade**: a base the caller wanted writable is not re-added as read-only.
+ */
+export function knowledgeAttachments(
+  input: { knowledge?: string[]; writableKnowledge?: string },
+  bases: { id: string; default_attach?: boolean }[],
+): { baseId: string; writable: boolean }[] {
+  const asked = new Set([
+    ...(input.knowledge ?? []),
+    ...(input.writableKnowledge ? [input.writableKnowledge] : []),
+  ]);
+  return [
+    ...(input.knowledge ?? []).map((baseId) => ({ baseId, writable: false })),
+    ...bases
+      .filter((base) => base.default_attach && !asked.has(base.id))
+      .map((base) => ({ baseId: base.id, writable: false })),
+    ...(input.writableKnowledge ? [{ baseId: input.writableKnowledge, writable: true }] : []),
+  ];
+}
+
 export async function createProject(
   repos: Repos,
   workspace: string,
@@ -127,12 +154,13 @@ export async function createProject(
       `template ${template.id} needs a writable knowledge base (KB-05): pass writableKnowledge`,
     );
   }
-  const attachments = [
-    ...(input.knowledge ?? []).map((baseId) => ({ baseId, writable: false })),
-    ...(input.writableKnowledge
-      ? [{ baseId: input.writableKnowledge, writable: true }]
-      : []),
-  ];
+  const attachments = knowledgeAttachments(
+    {
+      ...(input.knowledge ? { knowledge: input.knowledge } : {}),
+      ...(input.writableKnowledge ? { writableKnowledge: input.writableKnowledge } : {}),
+    },
+    (deps.knowledge?.list() ?? []).map((base) => base.manifest),
+  );
   if (attachments.length > 0 && !deps.knowledge) {
     throw new Error("knowledge is not loaded in this process");
   }

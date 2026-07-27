@@ -1210,6 +1210,11 @@ export class Actions {
    * only if it has none. Under `knowledge/` the folder becomes the base in place; anywhere else
    * in the workspace it gets a base that links to it.
    */
+  /** The ids of every loaded base, so a caller can derive one that is free (KB-12). */
+  knowledgeIds(): string[] {
+    return (this.deps.knowledge?.list() ?? []).map((base) => base.manifest.id);
+  }
+
   async adoptKnowledge(
     actor: Actor,
     folder: string,

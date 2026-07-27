@@ -7,6 +7,12 @@
 # pass buys a document nobody reads before code that was going to be thrown away anyway.
 id: quick-prototype
 name: Quick prototype
+when_to_use: >
+  Finding out whether an idea works, on code nobody has promised to keep. One
+  builder, straight from the brief, and a smoke test if you want one.
+not_for: >
+  Anything that will be maintained (full-development), or a prototype that has to
+  talk to a real service (api-prototype).
 description: >
   Proving an idea works. Straight to building from the brief, with an optional smoke test.
   Use api-prototype instead when it has to work against a real service.

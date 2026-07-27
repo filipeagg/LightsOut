@@ -1377,6 +1377,44 @@ doubts.open: none
 
 Everything outside the markers is never touched. `PLAN.md` uses one checkbox line per task with the task id in a trailing tag (`- [x] Wire repository  <!-- lo:t_01H… -->`); the orchestrator flips checkboxes by id. DECISIONS.md and QUESTIONS.md are append-only (§8.3).
 
+### 9.2b Writing a document without destroying it (MC-12, MC-13, MC-14)
+
+**The failure this fixes.** A client called `write_doc` on `DECISIONS.md` to add one entry. The tool
+does what its name says — it replaces the file — and eight recorded decisions stopped existing. No
+run was active, so nothing refused it; no commit had been made since they were written, so git had
+nothing to give back. The tool behaved as designed and the design was wrong: the only writing verb
+was the destructive one, and it could be used by a caller who had never read the file.
+
+Four changes, none of which trust the caller to be careful.
+
+**A snapshot before every overwrite.** `write_doc` and `patch_doc` copy the current file to
+`.lightsout/doc-history/<DOC>-<ts>.md` before writing, keeping the last ten. `.lightsout/` is already
+git-ignored and already swept for scratch (PE-08), and the history directory is exempt from that
+sweep. This is not version control and does not try to be: it is the ten seconds of regret that git
+cannot cover, because doc writes happen between commits.
+
+**`append_doc`, and a refusal.** `DECISIONS.md` and `QUESTIONS.md` are append-only by design (§8.3)
+and were append-only by convention only. `append_doc {projectId, doc, content}` adds to the end with
+one blank line of separation; `write_doc` on either of those two now refuses, naming `append_doc`.
+A document the system also writes from the database is not a document a client may replace wholesale.
+
+**`patch_doc`, because a 1500-line STATE.md is not worth resending.** `patch_doc {projectId, doc,
+edits:[{find, replace, expectCount?}]}` applies exact-string edits, all or nothing: a `find` that
+matches zero times is an error, a `find` that matches more than once is an error unless
+`expectCount` says so, and no edit is written unless every edit resolved. Ambiguity is refused
+rather than guessed at, for the same reason the policy engine refuses an unreadable script body.
+
+**Optimistic concurrency on `write_doc`.** The optional `baseHash` is the sha256 of the content the
+caller read. When it is given and does not match, the write is refused with `CONFLICT` and the
+current hash, which is the machine-checkable form of "you are about to overwrite something you have
+not seen". Optional now because the panel and existing clients predate it; the intent is that the
+docs the system also writes eventually require it.
+
+The same snapshot applies to `write_knowledge_doc`, under
+`$LIGHTSOUT_WORKSPACE/.lightsout/knowledge-history/<baseId>/`, and deliberately *not* inside the
+base's own folder: a linked base points at a folder that belongs to the user, and LightsOut does not
+leave litter in it (KB-08).
+
 ### 9.3 Git strategy (PM-04, PM-05)
 
 - `create_project`: `git init` if needed, `.lightsout/tmp/` created with a `.gitignore` that ignores
@@ -1532,8 +1570,8 @@ Two layers, both over MCP and nothing else:
 1. **Server instructions** (`src/mcp/server.ts`), short and always in the client's context: what
    LightsOut is, the four nouns (project, phase, chain, agent), the handful of rules that are
    expensive to get wrong (every launch states its request and its expected return; a doubt is a
-   decision, not an error; the workspace is the user's own folder), and one line saying that
-   `guide` has the details.
+   decision, not an error; the workspace is the user's own folder; a project without a template is
+   the exception and says why, §16.4), and one line saying that `guide` has the details.
 2. **`guide { topic? }`** — with no topic it lists them; with one it returns that section whole.
    The text lives in `builtin/guide/*.md`, shipped in the image and machine-first like everything
    else the system writes (BA-07): `key: value`, tables, worked examples, no prose. Sections:
@@ -1613,14 +1651,14 @@ two surfaces are skins, and a skin that is missing a control is a fork in slow m
 | `list_projects` | `{archived?:bool}` | `{projects:[{id,name,status,activeRun?,openDoubts,lastActivity}]}` | |
 | `archive_project` | `{projectId, archived?:bool}` | `{project:{id,archived}}` | reversible; hides it and refuses new launches (PM-08) |
 | `delete_project` | `{projectId, confirm, keepFiles?:bool}` | `{deleted:true, filesRemoved:bool}` | irreversible; `confirm` must equal `projectId`, refused while a run is active (PM-08) |
-| `create_project` | `{name, template?, knowledge?:[baseId], writableKnowledge?:baseId, remote?, verify?, push?}` | `{project:{id,path}, phases:[{phaseId,title,agentId,gate}]}` | scaffolds and materialises the phases (PM-01, TP-05); `writableKnowledge` is required by the curation template and refused by every other (KB-05) |
+| `create_project` | `{name, context, template, templateReason?, knowledge?:[baseId], writableKnowledge?:baseId, remote?, verify?, push?}` | `{project:{id,path}, phases:[{phaseId,title,agentId,gate}]}` | scaffolds and materialises the phases (PM-01, TP-05); `template` is required and `"none"` is a valid answer that requires `templateReason` (TP-09); `writableKnowledge` is required by the curation template and refused by every other (KB-05) |
 | `project_status` | `{projectId}` | `{project:{…,templateId,knowledge:[…]}, phases:[{phaseId,title,agentId,status,deliverable,gate,startedAt,endedAt}], chain?:{id,title,tasks:[…]}, run?:{id,status,engine,model,elapsedS,inactivityS,lastAction,timeoutS}, doubts:[…], state:{phase,lastDecision,next}}` | one call = full picture including what is done, running and pending (MC-06, TP-06) |
 | `list_agents` | `{}` | `{agents:[{id,name,engine,model,enabled,source,valid,error?}]}` | AP-02, AP-07, BA-01 |
 | `write_agent` | `{agentId, name?, engine?, model?, reasoning?, instructions?, policy?, tags?, deliverable?, advisor?, enabled?}` | `{agent:{…}}` | create or edit; on a builtin it writes the workspace copy that shadows it (AP-06). An unknown model is rejected with the accepted list (AP-08) |
 | `set_agent_enabled` | `{agentId, enabled:bool}` | `{agent:{id,enabled}}` | AP-07 |
 | `delete_agent` | `{agentId}` | `{revealedBuiltin:bool}` | deletes the workspace copy; a builtin of the same id reappears under it (AP-06) |
 | `reload_agents` | `{}` | `{loaded,rejected:[{file,error}]}` | AP-03 |
-| `list_templates` | `{}` | `{templates:[{id,name,description,source,phases:[{id,title,agentId,gate,optional,repeatable}],valid,error?}]}` | TP-03 |
+| `list_templates` | `{}` | `{templates:[{id,name,whenToUse,notFor,description,source,phases:[…],valid,error?}]}` | TP-03. `whenToUse`/`notFor` come first in each entry: the caller is choosing, not reading (TP-10) |
 | `write_template` | `{templateId, name?, description?, requiresWritableKnowledge?, phases?:[{id,title,agent,instructions,deliverable?,verify?,gate?,optional?,repeatable?}]}` | `{template:{…}}` | create, clone a builtin, or replace the phase list in order (TP-04) |
 | `delete_template` | `{templateId}` | `{revealedBuiltin:bool}` | workspace copies only (TP-04) |
 | `list_phases` | `{projectId}` | `{phases:[{phaseId,title,agentId,status,gate,deliverable,optional,repeatable,startedAt,endedAt}]}` | TP-06 |
@@ -1642,8 +1680,10 @@ two surfaces are skins, and a skin that is missing a control is a fork in slow m
 | `list_doubts` | `{projectId?, status?:'open'}` | `{doubts:[{id,ref,projectId,taskTitle,kind,context,blocks,options,recommendation,secondOpinion?,ageMin}]}` | Desktop renders options as buttons (MC-03) |
 | `answer_doubt` | `{doubtId, choice, note?}` | `{resumed:bool, runId?}` | DO-04; `doubtId` accepts the ulid or the `ref` (`D-3`) when `projectId` context is unambiguous |
 | `get_history` | `{projectId?, limit?:20, before?}` | `{runs:[{id,task,engine,model,status,startedAt,durationS,costUsd?,summary}], totals:{byStatus,costUsd}}` | OB-05 |
-| `read_doc` | `{projectId, doc:'STATE'\|'PLAN'\|'DECISIONS'\|'QUESTIONS'}` | `{content, updatedAt}` | |
-| `write_doc` | `{projectId, doc, content}` | `{written:true}` | rejected if a run is active on the project (`CONFLICT`); scoped to doc/ (MC-04) |
+| `read_doc` | `{projectId, doc:'STATE'\|'PLAN'\|'DECISIONS'\|'QUESTIONS'}` | `{content, hash, updatedAt}` | `hash` is what `write_doc.baseHash` expects back (MC-14) |
+| `write_doc` | `{projectId, doc, content, baseHash?}` | `{written:true, hash, snapshot?}` | replaces the file. Rejected if a run is active (`CONFLICT`), if `doc` is append-only, or if `baseHash` does not match; scoped to doc/ (MC-04, MC-12, MC-14) |
+| `append_doc` | `{projectId, doc, content}` | `{written:true, hash}` | adds to the end. The only writing verb allowed on DECISIONS and QUESTIONS (MC-13, §8.3) |
+| `patch_doc` | `{projectId, doc, edits:[{find,replace,expectCount?}]}` | `{written:true, hash, applied, snapshot?}` | exact-string edits, all or nothing; zero or ambiguous matches are refused (MC-13) |
 | `consult` | `{projectId?, engine?, question}` | `{answer, engine, model, durationS}` | on-demand advisor (MC-05/DO-06) |
 
 Behavioral notes: `launch_*` returns within ~1 s (run starts async); `project_status` is the polling primitive Desktop uses after launches; every mutating tool emits events so the panel updates in real time without extra wiring.
@@ -2000,6 +2040,12 @@ name: Full development
 description: >
   End-to-end delivery of a feature or a system, from a rough idea to audited and
   tested code. Use it when the result has to be maintainable.
+when_to_use: >
+  The result is code someone else will maintain, the scope is more than an
+  afternoon, and correctness matters more than speed.
+not_for: >
+  Throwaway demos, one-off questions about an existing codebase, or anything
+  where nobody will read the audit.
 phases:
   - id: shape-the-prompt
     title: Turn the idea into a workable prompt
@@ -2044,6 +2090,11 @@ phases:
     deliverable: doc/AUDIT.md
     instructions: …
 ```
+
+`when_to_use` and `not_for` are the selection criteria (TP-10) and are separate from `description`
+on purpose: a description says what the template *is*, and a caller choosing between six of them
+needs to know when it *applies*. Both default to the empty string, so existing files stay valid, but
+a template written from now on without them is a template nobody will pick correctly.
 
 `zod` validates: unique `id` per phase, `agent` resolves to a loaded and enabled profile
 (AP-07), `gate` in `auto|human`, `verify` a non-empty string when present, `deliverable` a
@@ -2105,7 +2156,10 @@ optional in the contract only because a project created before phase 9 may not h
 pilot has no reason for a second chain per project, and `project_phases` is what carries the
 plan anyway.
 
-### 16.3 The four builtin templates (TP-02)
+### 16.3 The builtin templates (TP-02)
+
+*(The table below is the original four. The image ships six: `api-prototype` and `legacy-intake`
+were added later, with the work that needed them.)*
 
 | Template | Phases (agent) | For |
 |---|---|---|
@@ -2144,7 +2198,35 @@ under `doc/`), `no-write` (no writes at all), `probe` (network and execute, writ
 test directories), `curate` (`knowledge_write: allow`, narrowed to the project's writable base)
 and `advisor` (everything read-only, terminal denied — the pack the second-opinion sessions of
 §8.2 already use). `default` and `advisor` were already shipping; the other five are new in
-phase 9.
+phase 9. *(Superseded: PE-14 reduced the packs to three — `read`, `build`, `build-network` — and
+moved write scopes and capabilities onto the profile. See §7.2b; this paragraph is kept because the
+reasoning for splitting them is still the reasoning for the three that remain.)*
+
+### 16.4 Choosing a template is a decision, not a default (TP-09, TP-10)
+
+**The failure this fixes.** Templates were listable and optional, so the cheapest path through the
+MCP surface was `create_project` with no template followed by `launch_task`, and that is the path
+clients took. Nothing was broken — every run worked — but phases, gates, deliverables and frozen
+instructions went unused, which is most of what the system knows how to do. A feature that is
+correct, documented and never reached is a feature that does not exist.
+
+The cause is not ignorance, it is shape. Three fixes, all about shape:
+
+1. **`template` is a required argument of `create_project`**, and `"none"` is a legal answer that
+   requires `templateReason`. This is the `expects` lesson (§10.0b) applied again: a required field
+   with an honest escape hatch changes behaviour, and a paragraph of documentation does not. The
+   reason is stored on the project and shown in the panel, so "no template" stays a decision someone
+   made rather than a default nobody noticed.
+2. **The selection criteria travel with the template** (`when_to_use`, `not_for`, §16.1) and are the
+   first fields of each `list_templates` entry. A caller comparing six templates needs the criterion,
+   not the phase list; the phase list is what it needs *after* it has chosen.
+3. **The omission is named where it hurts.** `launch_task` on a project that has a template and a
+   pending phase adds a non-blocking `hint` to its envelope, naming the phase and `launch_phase`.
+   It does not refuse: an ad-hoc task alongside a plan is legitimate (TP-08). It just stops being
+   silent.
+
+The server instructions (§10.0) carry one more line for the same reason — they are the only text
+guaranteed to be in the client's context — and `guide{topic:"templates"}` remains the detail.
 
 ## 17. Curated knowledge (KB-01..07, phase 9)
 

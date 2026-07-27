@@ -74,6 +74,8 @@ export type ProjectRow = {
   policy_pack: string;
   verify_cmd: string | null;
   template_id: string | null;
+  /** TP-09: why there is no template, when there is none. NULL on rows that predate the question. */
+  template_reason: string | null;
   /**
    * OR-12 (§7.7): runs of this project finish without a person. A `require_human` verdict off the
    * hard floor is settled by the judge or the advisor, or refused with its reason — never parked.

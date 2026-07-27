@@ -430,10 +430,26 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
     envelope(reply, async () => {
       const { id } = idParam.parse(request.params);
       const input = body(
-        z.object({ doc: z.enum(DOC_NAMES), content: z.string() }),
+        z.object({
+          doc: z.enum(DOC_NAMES),
+          content: z.string(),
+          // MC-13: the panel gets the same two verbs the tools have. `patch` is not offered here —
+          // the panel has the whole document in a textarea, so it has nothing to patch with.
+          mode: z.enum(["replace", "append"]).optional(),
+          baseHash: z.string().optional(),
+        }),
         request.body,
       );
-      return actions.writeDoc("panel", id, input.doc, input.content);
+      if (input.mode === "append") {
+        return actions.appendDoc("panel", id, input.doc, input.content);
+      }
+      return actions.writeDoc(
+        "panel",
+        id,
+        input.doc,
+        input.content,
+        input.baseHash === undefined ? {} : { baseHash: input.baseHash },
+      );
     }),
   );
 

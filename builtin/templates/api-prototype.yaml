@@ -6,6 +6,12 @@
 # No human gates: every phase runs into the next (OR-12).
 id: api-prototype
 name: API prototype
+when_to_use: >
+  A prototype whose whole risk is the external service: the API is real, the
+  credentials exist, and what it actually returns is not what its docs say.
+not_for: >
+  Work with no external dependency (quick-prototype), or a durable integration
+  that has to be maintained afterwards (full-development).
 description: >
   Proving an idea against a real API, fast. Probe the live service first, build from what it
   actually returns, smoke-test it. No human gates: every phase runs into the next.

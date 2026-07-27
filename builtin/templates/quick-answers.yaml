@@ -2,6 +2,12 @@
 # exists so that asking something does not require creating a whole project ceremony.
 id: quick-answers
 name: Quick answers
+when_to_use: >
+  A question whose answer is text, asked again and again against attached
+  knowledge. One repeatable phase, no gate, no verify, nothing committed.
+not_for: >
+  Anything that has to change a file. An answer that should have been a change is
+  the failure this template makes easy.
 description: >
   Questions against curated knowledge, or generic ones. No gate, no verify, nothing to commit.
 phases:

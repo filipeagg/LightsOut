@@ -7,6 +7,7 @@
  */
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { writeFileDurable } from "../workspace/durable.js";
+import { snapshotFile } from "../projects/doc-history.js";
 import path from "node:path";
 import { dump as dumpYaml } from "js-yaml";
 import { stat } from "node:fs/promises";
@@ -209,7 +210,13 @@ export class KnowledgeWriter {
    * what a base is for is text that goes into a prompt, so anything else is refused with the
    * list of extensions rather than stored as a file the agent is told about and cannot read.
    */
-  async putDocument(baseId: string, file: string, content: string): Promise<string> {
+  async putDocument(
+    baseId: string,
+    file: string,
+    content: string,
+    /** Where to keep the previous version, when the caller wants one kept (MC-12, §9.2b). */
+    opts: { historyDir?: string } = {},
+  ): Promise<string> {
     // The base has to exist first. Without this, writing a document to a name that is not a base
     // creates a directory holding one file and no manifest — which the loader then reports as a
     // rejected base, and the user is left with an error where they expected a document.
@@ -225,9 +232,14 @@ export class KnowledgeWriter {
       );
     }
     await mkdir(path.dirname(target), { recursive: true });
+    const relative = path.relative(dir, target);
+    if (opts.historyDir) {
+      // One flat name per document, so `a/b.md` and `a-b.md` cannot share a history.
+      await snapshotFile(target, opts.historyDir, relative.replace(/[\\/]/g, "__"));
+    }
     await writeFileDurable(target, content);
     await this.loader.load();
-    return path.relative(dir, target);
+    return relative;
   }
 
   /** Delete one document. Refused on a linked base: that folder belongs to something else. */

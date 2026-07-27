@@ -10,6 +10,13 @@ name: Full development
 description: >
   End-to-end delivery of a feature or a system, from a rough idea to audited and
   tested code. Use it when the result has to be maintainable.
+when_to_use: >
+  The result is code someone will maintain, the work is more than an afternoon,
+  and being right matters more than being quick. Also whenever you want a person
+  to approve the plan before anything is built.
+not_for: >
+  Proving an idea (quick-prototype), answering a question (quick-answers), or
+  code that arrived as an archive and is not understood yet (legacy-intake).
 phases:
   - id: probe-contracts
     title: Probe the external contracts

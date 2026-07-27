@@ -74,6 +74,28 @@ function docPath(project: ProjectRow, doc: string): string {
   return path.join(project.path, "doc", `${doc}.md`);
 }
 
+/**
+ * TP-09, §16.4: the project has a plan and the caller is launching something else. Says so, in
+ * one line, and never refuses — an ad-hoc task alongside a plan is legitimate (TP-08). Returns
+ * undefined when there is nothing to say, and never throws: a hint that breaks a launch would be
+ * a worse defect than the silence it replaces.
+ */
+function pendingPhaseHint(deps: McpDeps, projectId: string): string | undefined {
+  try {
+    const row = deps.repos.projects.get(projectId);
+    if (!row?.template_id) return undefined;
+    const next = deps.repos.phases.list(row.id).find((phase) => phase.status === "pending");
+    if (!next) return undefined;
+    return (
+      `this project follows template ${row.template_id} and phase "${next.phase_id}" ` +
+      `(${next.title}) is still pending — launch_phase runs it with its frozen instructions ` +
+      "and its deliverable check. Launching a free task instead is fine if you meant to."
+    );
+  } catch {
+    return undefined;
+  }
+}
+
 export function registerTools(server: McpServer, deps: McpDeps): void {
   const { repos, orchestrator, agents, doubts, actions } = deps;
 
@@ -171,7 +193,20 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       verify: z.string().optional(),
       push: z.enum(["auto", "manual", "never"]).optional(),
       defaultAgent: z.string().optional(),
-      template: z.string().optional(),
+      /** TP-09: required, with an honest way out. */
+      template: z
+        .string()
+        .min(1)
+        .describe(
+          "The template id from list_templates, or the literal \"none\". A template gives the " +
+            "project phases, gates and frozen instructions; without one you are launching free " +
+            "tasks and doing the planning yourself. Choose deliberately (TP-09).",
+        ),
+      templateReason: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Required when template is "none": one line on why no template fits.'),
       knowledge: z.array(z.string().min(1)).optional(),
       writableKnowledge: z.string().optional(),
     },
@@ -183,7 +218,8 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
         ...(args.verify !== undefined ? { verify: args.verify } : {}),
         ...(args.push !== undefined ? { push: args.push } : {}),
         ...(args.defaultAgent !== undefined ? { defaultAgent: args.defaultAgent } : {}),
-        ...(args.template !== undefined ? { template: args.template } : {}),
+        template: args.template,
+        ...(args.templateReason !== undefined ? { templateReason: args.templateReason } : {}),
         ...(args.knowledge !== undefined ? { knowledge: args.knowledge } : {}),
         ...(args.writableKnowledge !== undefined
           ? { writableKnowledge: args.writableKnowledge }
@@ -362,8 +398,11 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       chainId: z.string().optional(),
       ...modelChoiceSchema,
     },
-    async (args) =>
-      actions.launchTask("mcp", {
+    async (args) => {
+      // TP-09: a free task on a project that has a plan is legitimate (TP-08) and easy to reach
+      // for by accident. Name the phase; do not refuse it.
+      const hint = pendingPhaseHint(deps, args.projectId);
+      const result = await actions.launchTask("mcp", {
         ...(args.needs?.length ? { needs: args.needs } : {}),
         ...(args.grants?.length ? { grants: args.grants } : {}),
         projectId: args.projectId,
@@ -377,7 +416,9 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
         ...(args.engine ? { engine: args.engine } : {}),
         ...(args.model ? { model: args.model } : {}),
         ...(args.reasoning ? { reasoning: args.reasoning } : {}),
-      }),
+      });
+      return { ...result, ...(hint ? { hint } : {}) };
+    },
   );
 
   tool(
@@ -502,7 +543,8 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
 
   tool(
     "read_doc",
-    "Read one of the project's managed documents.",
+    "Read one of the project's managed documents. The `hash` it returns is what `write_doc` " +
+      "takes as `baseHash` to prove you are replacing the version you actually read.",
     { projectId: z.string().min(1), doc: z.enum(DOC_NAMES) },
     async ({ projectId, doc }) => {
       try {
@@ -792,14 +834,84 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
 
   tool(
     "write_doc",
-    "Overwrite one of the project's doc/ files. Refused while a run is active (MC-04).",
-    { projectId: z.string().min(1), doc: z.enum(DOC_NAMES), content: z.string() },
+    "REPLACE one of the project's doc/ files with `content`. It does not add: whatever is in the " +
+      "file now is gone. To add an entry use append_doc; to change part of a long document use " +
+      "patch_doc. DECISIONS and QUESTIONS are append-only and refuse this tool. The previous " +
+      "version is kept in .lightsout/doc-history/ (MC-04, MC-12).",
+    {
+      projectId: z.string().min(1),
+      doc: z.enum(DOC_NAMES),
+      content: z.string(),
+      baseHash: z
+        .string()
+        .optional()
+        .describe(
+          "The `hash` read_doc gave you. When set, the write is refused if the file changed " +
+            "since — which is how you find out you were about to overwrite someone else's edit.",
+        ),
+    },
+    async ({ projectId, doc, content, baseHash }) => {
+      const row = project(projectId);
+      if (activeRunFor(deps, row.id)) {
+        throw conflict(`a run is active on ${row.id}; try again when it finishes`);
+      }
+      return actions.writeDoc(
+        "mcp",
+        row.id,
+        doc,
+        content,
+        baseHash === undefined ? {} : { baseHash },
+      );
+    },
+  );
+
+  tool(
+    "append_doc",
+    "Add to the end of one of the project's doc/ files, keeping what is already there. The only " +
+      "way to write DECISIONS and QUESTIONS, which the system also appends to (MC-13, §8.3).",
+    {
+      projectId: z.string().min(1),
+      doc: z.enum(DOC_NAMES),
+      content: z.string().min(1).describe("What to add. A blank line is inserted before it."),
+    },
     async ({ projectId, doc, content }) => {
       const row = project(projectId);
       if (activeRunFor(deps, row.id)) {
         throw conflict(`a run is active on ${row.id}; try again when it finishes`);
       }
-      return actions.writeDoc("mcp", row.id, doc, content);
+      return actions.appendDoc("mcp", row.id, doc, content);
+    },
+  );
+
+  tool(
+    "patch_doc",
+    "Change part of one of the project's doc/ files with exact-string edits, all or nothing. " +
+      "Use this instead of resending a long document. A `find` that matches nothing, or matches " +
+      "more times than expected, is refused rather than guessed at (MC-13).",
+    {
+      projectId: z.string().min(1),
+      doc: z.enum(DOC_NAMES),
+      edits: z
+        .array(
+          z.object({
+            find: z.string().min(1).describe("Exact text, as it appears in the file. Not a regex."),
+            replace: z.string().describe("What replaces it. Empty string deletes it."),
+            expectCount: z
+              .number()
+              .int()
+              .min(1)
+              .optional()
+              .describe("How many occurrences you expect. Default 1."),
+          }),
+        )
+        .min(1),
+    },
+    async ({ projectId, doc, edits }) => {
+      const row = project(projectId);
+      if (activeRunFor(deps, row.id)) {
+        throw conflict(`a run is active on ${row.id}; try again when it finishes`);
+      }
+      return actions.patchDoc("mcp", row.id, doc, edits);
     },
   );
 
@@ -844,7 +956,9 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
 
   tool(
     "list_templates",
-    "Project templates, usable and rejected with their reason (TP-01, TP-03).",
+    "Project templates, usable and rejected with their reason. Call this before create_project: " +
+      "`whenToUse` and `notFor` are the criteria to choose by, and the phase list is what you " +
+      "read after choosing (TP-01, TP-03, TP-10).",
     {},
     async () => {
       const loader = need(deps.templates, "templates");
@@ -853,6 +967,9 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
         templates: loader.list().map((t) => ({
           id: t.id,
           name: t.name,
+          // First, because the caller is choosing (TP-10, §16.4).
+          whenToUse: t.when_to_use,
+          notFor: t.not_for,
           description: t.description,
           requiresWritableKnowledge: t.requires_writable_knowledge,
           phases: t.phases.map((p) => ({
@@ -1073,6 +1190,11 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       templateId: z.string().min(1),
       name: z.string().min(1).optional(),
       description: z.string().optional(),
+      whenToUse: z
+        .string()
+        .optional()
+        .describe("When this template is the right one. This is what a caller chooses by (TP-10)."),
+      notFor: z.string().optional().describe("What it is not for, so it is not picked by mistake."),
       requiresWritableKnowledge: z.boolean().optional(),
       phases: z
         .array(
@@ -1091,9 +1213,11 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
         .min(1)
         .optional(),
     },
-    async ({ templateId, requiresWritableKnowledge, ...rest }) => ({
+    async ({ templateId, requiresWritableKnowledge, whenToUse, notFor, ...rest }) => ({
       template: await actions.writeTemplate("mcp", templateId, {
         ...stripUndefined(rest),
+        ...(whenToUse === undefined ? {} : { when_to_use: whenToUse }),
+        ...(notFor === undefined ? {} : { not_for: notFor }),
         ...(requiresWritableKnowledge === undefined
           ? {}
           : { requires_writable_knowledge: requiresWritableKnowledge }),

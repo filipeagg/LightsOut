@@ -362,6 +362,18 @@ ALTER TABLE project_areas ADD COLUMN access TEXT NOT NULL DEFAULT 'read'
   CHECK (access IN ('read','write'));
 `;
 
+/**
+ * Version 13 (TP-09, §16.4): why a project has no template.
+ *
+ * `template_id` was nullable and null meant two different things — "no template" and "nobody
+ * chose". Creating a project now states one or the other, and the reason for the second lands
+ * here. Existing rows keep NULL: they predate the question, and inventing a reason for them would
+ * be the migration putting words in someone's mouth.
+ */
+const TEMPLATE_REASON_SQL = `
+ALTER TABLE projects ADD COLUMN template_reason TEXT;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial schema", up: applyInitialSchema },
   {
@@ -390,6 +402,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 10, name: "preview servers", up: PREVIEWS_SQL },
   { version: 11, name: "unattended projects", up: UNATTENDED_SQL },
   { version: 12, name: "writable areas", up: AREA_ACCESS_SQL },
+  { version: 13, name: "why a project has no template", up: TEMPLATE_REASON_SQL },
 ];
 
 /** The marker migration 4 writes, and the panel looks for (PM-09). */

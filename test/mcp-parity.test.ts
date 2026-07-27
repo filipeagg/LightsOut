@@ -71,6 +71,11 @@ const INTERNAL = new Set([
   "requireCapabilities",
   // AP-09/OR-11: validates the launch's engine and model before a task row exists.
   "requireModelChoice",
+  // MC-12..14: the plumbing the three document verbs share (§9.2b).
+  "docFile",
+  "requireNoActiveRun",
+  "currentDoc",
+  "commitDoc",
 ]);
 
 /** The one exception, with its reason (VT-02, MC-07). Adding to this list is a design decision. */
@@ -103,6 +108,8 @@ const TOOL_FOR: Record<string, string> = {
   revokeToolchainGrant: "revoke_toolchain_grant",
   resumeChain: "resume_chain",
   writeDoc: "write_doc",
+  appendDoc: "append_doc",
+  patchDoc: "patch_doc",
   writeAgent: "write_agent",
   setAgentEnabled: "set_agent_enabled",
   deleteAgent: "delete_agent",

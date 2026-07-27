@@ -64,6 +64,13 @@ import {
   type DocContent,
   type DocEntry,
 } from "../projects/docs-index.js";
+import {
+  docHistoryDir,
+  hashContent,
+  knowledgeHistoryDir,
+  snapshotFile,
+} from "../projects/doc-history.js";
+import { applyEdits, type DocEdit } from "../projects/doc-patch.js";
 
 export type Actor = "mcp" | "panel" | "system";
 
@@ -88,6 +95,12 @@ export type ActionDeps = {
 
 export const DOC_NAMES = ["STATE", "PLAN", "DECISIONS", "QUESTIONS"] as const;
 export type DocName = (typeof DOC_NAMES)[number];
+
+/**
+ * Documents the system itself keeps adding to (§8.3). They were append-only by convention and
+ * replaceable by tool, which is not a convention, it is a hope. `write_doc` refuses them (MC-13).
+ */
+export const APPEND_ONLY_DOCS: readonly DocName[] = ["DECISIONS", "QUESTIONS"];
 
 export class Actions {
   private readonly agentWriter: AgentWriter;
@@ -741,31 +754,148 @@ export class Actions {
     return { ref: result.ref, resumed: result.resumed };
   }
 
-  async writeDoc(
-    actor: Actor,
-    projectId: string,
-    doc: DocName,
-    content: string,
-  ): Promise<{ written: true; doc: DocName }> {
-    const project = this.project(projectId);
+  // --- Writing a document without destroying it (MC-12..14, DESIGN §9.2b) ----
+
+  /** The three writing verbs share this: the file, the guard, the snapshot and the event. */
+  private docFile(project: ProjectRow, doc: DocName): string {
+    return path.join(project.path, "doc", `${doc}.md`);
+  }
+
+  private requireNoActiveRun(project: ProjectRow): void {
     // A run rewrites these files as it goes; a write underneath it would be lost or would
     // clobber the agent's own edit (MC-04).
     if (activeRunFor({ config: this.deps.config, repos: this.deps.repos }, project.id)) {
       throw new Error(`a run is active on ${project.id}; try again when it finishes`);
     }
-    await writeFile(path.join(project.path, "doc", `${doc}.md`), content, "utf8");
-    this.deps.repos.events.append({
-      type: "system",
-      payload: { reason: "doc written", projectId: project.id, doc, actor },
-    });
-    return { written: true, doc };
   }
 
-  async readDoc(projectId: string, doc: DocName): Promise<{ content: string; path: string }> {
-    const project = this.project(projectId);
-    const file = path.join(project.path, "doc", `${doc}.md`);
+  private async currentDoc(project: ProjectRow, doc: DocName): Promise<string> {
     try {
-      return { content: await readFile(file, "utf8"), path: file };
+      return await readFile(this.docFile(project, doc), "utf8");
+    } catch {
+      return "";
+    }
+  }
+
+  private async commitDoc(
+    actor: Actor,
+    project: ProjectRow,
+    doc: DocName,
+    content: string,
+    how: "replace" | "append" | "patch",
+    snapshot: string | null,
+  ): Promise<{ written: true; doc: DocName; hash: string; snapshot: string | null }> {
+    await writeFile(this.docFile(project, doc), content, "utf8");
+    this.deps.repos.events.append({
+      type: "system",
+      payload: {
+        reason: "doc written",
+        projectId: project.id,
+        doc,
+        how,
+        bytes: Buffer.byteLength(content, "utf8"),
+        snapshot: snapshot ? path.basename(snapshot) : null,
+        actor,
+      },
+    });
+    return { written: true, doc, hash: hashContent(content), snapshot };
+  }
+
+  /**
+   * Replace a document whole. Refused on the append-only ones, and refused when `baseHash` names
+   * a version that is no longer current: a caller who has not read the file has no business
+   * replacing it (MC-12, MC-14).
+   */
+  async writeDoc(
+    actor: Actor,
+    projectId: string,
+    doc: DocName,
+    content: string,
+    opts: { baseHash?: string } = {},
+  ): Promise<{ written: true; doc: DocName; hash: string; snapshot: string | null }> {
+    const project = this.project(projectId);
+    this.requireNoActiveRun(project);
+
+    if (APPEND_ONLY_DOCS.includes(doc)) {
+      throw new Error(
+        `${doc}.md is append-only (§8.3): the system adds to it from the database and a ` +
+          "replacement destroys entries nobody can get back. Use append_doc, or patch_doc to " +
+          "correct an entry in place.",
+      );
+    }
+
+    if (opts.baseHash) {
+      const currentHash = hashContent(await this.currentDoc(project, doc));
+      if (currentHash !== opts.baseHash) {
+        throw new Error(
+          `${doc}.md changed since you read it (current hash ${currentHash.slice(0, 12)}); ` +
+            "read it again before writing.",
+        );
+      }
+    }
+
+    const snapshot = await snapshotFile(
+      this.docFile(project, doc),
+      docHistoryDir(project.path),
+      doc,
+    );
+    return this.commitDoc(actor, project, doc, content, "replace", snapshot);
+  }
+
+  /** Add to the end of a document. The only writing verb allowed on DECISIONS and QUESTIONS. */
+  async appendDoc(
+    actor: Actor,
+    projectId: string,
+    doc: DocName,
+    content: string,
+  ): Promise<{ written: true; doc: DocName; hash: string; snapshot: string | null }> {
+    const project = this.project(projectId);
+    this.requireNoActiveRun(project);
+    const current = await this.currentDoc(project, doc);
+    // One blank line between what was there and what arrives; nothing is rewritten, so there is
+    // nothing to snapshot.
+    const next = current.trim() ? `${current.trimEnd()}\n\n${content.trim()}\n` : `${content.trim()}\n`;
+    return this.commitDoc(actor, project, doc, next, "append", null);
+  }
+
+  /** Exact-string edits, all or nothing (MC-13). Ambiguity is refused, not resolved. */
+  async patchDoc(
+    actor: Actor,
+    projectId: string,
+    doc: DocName,
+    edits: DocEdit[],
+  ): Promise<{
+    written: true;
+    doc: DocName;
+    hash: string;
+    snapshot: string | null;
+    applied: number;
+  }> {
+    const project = this.project(projectId);
+    this.requireNoActiveRun(project);
+    const current = await this.currentDoc(project, doc);
+    if (!current) throw new Error(`${doc}.md does not exist in ${project.id}`);
+
+    const { content, applied } = applyEdits(current, edits);
+    const snapshot = await snapshotFile(
+      this.docFile(project, doc),
+      docHistoryDir(project.path),
+      doc,
+    );
+    const result = await this.commitDoc(actor, project, doc, content, "patch", snapshot);
+    return { ...result, applied };
+  }
+
+  async readDoc(
+    projectId: string,
+    doc: DocName,
+  ): Promise<{ content: string; path: string; hash: string }> {
+    const project = this.project(projectId);
+    const file = this.docFile(project, doc);
+    try {
+      const content = await readFile(file, "utf8");
+      // The hash goes back with the content so a caller can hand it to `write_doc` (MC-14).
+      return { content, path: file, hash: hashContent(content) };
     } catch {
       throw new Error(`${doc}.md does not exist in ${project.id}`);
     }
@@ -1190,6 +1320,8 @@ export class Actions {
       baseId,
       file,
       content,
+      // Outside the base's own folder: a linked base belongs to the user (KB-08, §9.2b).
+      { historyDir: knowledgeHistoryDir(this.deps.config.workspace, baseId) },
     );
     this.changed("knowledge", baseId, actor);
     return { file: written };

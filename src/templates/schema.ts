@@ -38,6 +38,13 @@ export const projectTemplateSchema = z
     name: z.string().min(1),
     description: z.string().default(""),
     /**
+     * The selection criteria (TP-10, §16.4). Separate from `description` on purpose: a
+     * description says what the template is, and a caller comparing six of them needs to know
+     * when it applies. Empty by default so files written before this stay valid.
+     */
+    when_to_use: z.string().default(""),
+    not_for: z.string().default(""),
+    /**
      * Only a template that declares this may carry `workspace:` deliverables, and
      * create_project refuses it without a writable base (KB-05, §16.3).
      */

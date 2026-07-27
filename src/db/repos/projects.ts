@@ -14,6 +14,8 @@ export type CreateProject = {
   policyPack?: string;
   verifyCmd?: string | null;
   templateId?: string | null;
+  /** TP-09: why this project has no template, when it has none on purpose. */
+  templateReason?: string | null;
   /** OR-12: runs finish without a person. Defaults to on — that is what the system is for. */
   unattended?: boolean;
 };
@@ -33,8 +35,8 @@ export class ProjectsRepo {
       .prepare(
         `INSERT INTO projects
            (id, name, path, context, repo_remote, push_policy, policy_pack, verify_cmd,
-            template_id, unattended, archived, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+            template_id, template_reason, unattended, archived, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
       )
       .run(
         input.id,
@@ -46,6 +48,7 @@ export class ProjectsRepo {
         input.policyPack ?? "default",
         input.verifyCmd ?? null,
         input.templateId ?? null,
+        input.templateReason ?? null,
         input.unattended === false ? 0 : 1,
         nowIso(),
       );

@@ -1,36 +1,47 @@
 # Builtin template (TP-02, DESIGN §16.3). No planning phase and no audit: speed over
 # durability, and the code is expected to be thrown away.
+#
+# The `shape-the-prompt` phase is gone (BA-01, 2026-07-27). It produced 36.5 kB of PROMPT.md for a
+# single HTML page — a specification longer than the thing it specified — and the project brief
+# (PM-09) is already the spec, required and injected into every run. For a prototype, a shaping
+# pass buys a document nobody reads before code that was going to be thrown away anyway.
 id: quick-prototype
 name: Quick prototype
 description: >
-  Proving an idea works. One shaping pass, then build, with an optional smoke test.
+  Proving an idea works. Straight to building from the brief, with an optional smoke test.
+  Use api-prototype instead when it has to work against a real service.
 phases:
-  - id: shape-the-prompt
-    title: Turn the idea into a workable prompt
-    agent: prompt-architect
-    gate: human
-    deliverable: doc/PROMPT.md
-    instructions: |
-      The user's raw request is in the task spec. State what the prototype has to
-      demonstrate and what it explicitly will not do. Keep it short: this is a
-      prototype, so the non-goals matter more than the details. Produce
-      doc/PROMPT.md with the demonstration criteria and the shortcuts you are taking
-      on purpose.
   - id: build
     title: Build the prototype
     agent: builder
     repeatable: true
     instructions: |
-      Build the smallest thing that demonstrates what doc/PROMPT.md asks for. Take the
-      shortcuts it lists and no others. Do not generalise, do not add configuration
-      and do not build for a second use case. Say in your summary which shortcuts
-      would have to be undone to make this real.
+      Build the smallest thing that demonstrates what the project brief asks for.
+
+      Read the brief and this launch's request. If they disagree, the request is what is
+      wanted now and the brief is the standing context; say in your summary which you
+      followed and why.
+
+      Take the shortcuts the brief lists and no others. Do not generalise, do not add
+      configuration, do not build for a second use case, do not add a dependency for
+      something the standard library does. A prototype that grew an abstraction cost
+      more than it proved.
+
+      The page or entry point goes at src/index.html (PM-11), so it can be previewed
+      without anyone being told its name.
+
+      When you finish, say plainly which shortcuts would have to be undone to make this
+      real, and which of them would change the design rather than only the code.
   - id: qa-smoke
     title: Smoke-test the prototype
     agent: qa-engineer
     optional: true
     deliverable: doc/QA-REPORT.md
     instructions: |
-      Check that the demonstration criteria of doc/PROMPT.md actually hold when the
-      thing runs. One pass, happy path plus the two most likely failures. Report in
-      doc/QA-REPORT.md.
+      Check that what the brief asks for actually holds when the thing runs. One pass:
+      the happy path, plus the two failures most likely to happen in front of someone.
+
+      There is no browser here, so a page is checked by parsing what was written and by
+      calling what it calls. Say so, rather than implying the rendered result was seen.
+
+      Machine-first: one check per id, with its verdict and the evidence.

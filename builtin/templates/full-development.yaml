@@ -1,21 +1,16 @@
-# Builtin template (TP-02, DESIGN §16.3). Two human gates, on the prompt and on the plan,
-# because those are the two places where a wrong turn is cheapest to fix.
+# Builtin template (TP-02, DESIGN §16.3). One human gate, on the plan, because that is where a
+# wrong turn is cheapest to fix and everything after it is executed faithfully.
+#
+# The separate `shape-the-prompt` phase is gone (BA-01, 2026-07-27): asking one agent to turn the
+# request into a specification and another to turn the specification into a plan produced 36 kB of
+# PROMPT.md for a single page, and the second agent read the first agent's prose rather than the
+# code. The planner does both, from the brief and the request, in one pass.
 id: full-development
 name: Full development
 description: >
   End-to-end delivery of a feature or a system, from a rough idea to audited and
   tested code. Use it when the result has to be maintainable.
 phases:
-  - id: shape-the-prompt
-    title: Turn the idea into a workable prompt
-    agent: prompt-architect
-    gate: human
-    deliverable: doc/PROMPT.md
-    instructions: |
-      The user's raw request is in the task spec. Interrogate it. Name every risk you
-      see, in plain words, without softening them. List what you cannot decide alone
-      and raise a doubt for each. Produce doc/PROMPT.md covering scope, non-goals,
-      actors, data, integrations, constraints, acceptance criteria and failure modes.
   - id: probe-contracts
     title: Probe the external contracts
     agent: contract-prober
@@ -23,21 +18,32 @@ phases:
     repeatable: true
     deliverable: doc/CONTRACTS.md
     instructions: |
-      For every API or integration doc/PROMPT.md depends on, write real Python probes
-      under probes/ against the test credentials in the vault and record what actually
-      happens in doc/CONTRACTS.md: status codes, pagination, rate limits, auth
-      behaviour and error shapes, with real examples. Mark as unverified anything you
-      could not call. Raise a doubt when an entry you need is missing from the vault.
+      For every API or integration the brief depends on, write real probes under probes/
+      against the test credentials in the vault and record what actually happens in
+      doc/CONTRACTS.md: status codes, pagination, rate limits, auth behaviour and error
+      shapes, with real examples. Mark as unverified anything you could not call. Raise
+      a doubt when an entry you need is missing from the vault.
   - id: plan
-    title: Write the development plan
+    title: Understand the request and write the plan
     agent: planner
     gate: human
     deliverable: doc/PLAN.md
     instructions: |
-      Turn doc/PROMPT.md, and doc/CONTRACTS.md when it exists, into doc/PLAN.md: an
-      ordered list of tasks, each stating what it changes, which files, the interface,
-      the edge cases and how it is verified. Name the order dependencies. Keep each
-      task reviewable in one sitting. Raise a doubt rather than deciding quietly.
+      Two jobs in one pass, and the order matters: first work out what is actually being
+      asked, then write the plan for it.
+
+      Read the project brief and this launch's request, doc/CONTRACTS.md when it exists,
+      and the code that already exists. The brief is the standing truth; the request is
+      what changes this time.
+
+      Then produce doc/PLAN.md. Open it with what you understood — scope, non-goals,
+      actors, the acceptance criteria in checkable terms — in no more than twenty lines,
+      because a specification longer than the plan it introduces is a specification
+      nobody will read. Then the ordered tasks: what each changes, which files, the
+      interface, the edge cases, how it is verified, what it depends on.
+
+      Every risk you see goes in, in plain words, unsoftened. Anything you cannot decide
+      alone is a doubt, not a guess and not a paragraph hedging both ways.
   - id: build
     title: Implement the plan
     agent: builder

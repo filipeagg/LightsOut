@@ -54,7 +54,7 @@ const TEMPLATE = projectTemplateSchema.parse({
     {
       id: "shape",
       title: "Shape it",
-      agent: "prompt-architect",
+      agent: "planner",
       gate: "human",
       deliverable: "doc/PROMPT.md",
       instructions: "shape the request",

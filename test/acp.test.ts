@@ -194,7 +194,7 @@ describe("agents loader", () => {
     const loader = new AgentsLoader(workspace);
     const report = await loader.load();
     // 10 builtin profiles and 7 builtin packs, with builder and default shadowed (§2).
-    expect(report).toMatchObject({ loaded: 13, packs: 12, fromWorkspace: 1, rejected: [] });
+    expect(report).toMatchObject({ loaded: 10, packs: 12, fromWorkspace: 1, rejected: [] });
     expect(loader.profileOrThrow("builder").engine).toBe("claude");
     // PE-14: `builder` names `build` now. `default` still resolves for a profile that names it.
     expect(loader.profile("builder")?.policy).toBe("build");
@@ -210,7 +210,7 @@ describe("agents loader", () => {
 
     const loader = new AgentsLoader(workspace);
     const report = await loader.load();
-    expect(report.loaded).toBe(14); // 13 builtin + good.yaml
+    expect(report.loaded).toBe(11); // 10 builtin + good.yaml
     expect(report.rejected.map((r) => r.file).sort()).toEqual([
       "bad-engine.yaml",
       "bad-extra.yaml",
@@ -234,7 +234,7 @@ describe("agents loader", () => {
     const loader = new AgentsLoader(workspace);
     const report = await loader.load();
     expect(report.rejected.map((r) => r.file)).toEqual(["broken.yaml"]);
-    expect(report.loaded).toBe(13); // builder shadowed, broken rejected
+    expect(report.loaded).toBe(10); // builder shadowed, broken rejected
     expect(loader.instructionsFor(loader.profileOrThrow("builder"))).toBe(
       "HOUSE RULES\n\nOWN RULES",
     );
@@ -243,11 +243,11 @@ describe("agents loader", () => {
   it("serves the builtin library when the workspace has no profiles (BA-01)", async () => {
     const loader = new AgentsLoader(workspace);
     const report = await loader.load();
-    expect(report.loaded).toBe(13);
+    expect(report.loaded).toBe(10);
     expect(report.fromWorkspace).toBe(0);
     expect(report.packs).toBe(12);
     expect(report.rejected).toEqual([]);
-    for (const id of ["prompt-architect", "planner", "builder", "answerer"]) {
+    for (const id of ["planner", "builder", "answerer", "qa-engineer"]) {
       expect(loader.profile(id)).toBeDefined();
     }
     for (const id of ["default", "read-only", "no-write", "probe", "test", "curate", "advisor"]) {
@@ -264,7 +264,7 @@ describe("agents loader", () => {
     await writeAgent("builder.yaml", "name: Mine\nengine: codex\ninstructions: LOCAL\n");
     const loader = new AgentsLoader(workspace);
     const report = await loader.load();
-    expect(report.loaded).toBe(13);
+    expect(report.loaded).toBe(10);
     expect(report.fromWorkspace).toBe(1);
     const builder = loader.profileOrThrow("builder");
     expect(builder.name).toBe("Mine");

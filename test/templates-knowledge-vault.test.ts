@@ -41,16 +41,18 @@ describe("templates loader", () => {
     ]);
     const full = loader.getOrThrow("full-development");
     expect(full.phases.map((p) => p.id)).toEqual([
-      "shape-the-prompt",
       "probe-contracts",
       "plan",
       "build",
       "qa",
       "audit",
     ]);
-    expect(full.phases[0]?.gate).toBe("human");
-    expect(full.phases[1]?.optional).toBe(true);
-    expect(full.phases[3]?.verify).toBe("npm test");
+    // By id, not by index: the list lost a phase when the planner absorbed the shaping pass
+    // (BA-01), and an assertion tied to a position says nothing about what it meant to check.
+    const phase = (id: string) => full.phases.find((p) => p.id === id);
+    expect(phase("plan")?.gate).toBe("human");
+    expect(phase("probe-contracts")?.optional).toBe(true);
+    expect(phase("build")?.verify).toBe("npm test");
   });
 
   it("rejects a template whose agent does not resolve (TP-03, AP-07)", async () => {

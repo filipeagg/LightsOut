@@ -884,7 +884,50 @@ function viewProjectKnowledge() {
                <button class="btn sm" onclick="act('POST','/api/projects/${encodeURIComponent(s.project.id)}/knowledge',{baseId:'${esc(b.id)}',writable:true})">Attach writable</button>`}
         </td></tr>`;
         })
-        .join("")}</tbody></table></div>`;
+        .join("")}</tbody></table></div>
+    ${adoptableHere(s.project.id, k.adoptable || [])}`;
+}
+
+/**
+ * Folders in the workspace that hold documents and are not bases yet (KB-10).
+ *
+ * They were listed only on the global Knowledge page, so from a project you could attach a base
+ * that existed and do nothing at all about the folder of eighteen documents sitting next to it.
+ * Adopting and attaching is one intention — "use this material here" — so it is one button.
+ */
+function adoptableHere(projectId, adoptable) {
+  if (!adoptable.length) return "";
+  return `<div class="card pad" style="margin-top:24px">
+    <div><b>Material in the workspace that is not a base yet</b>
+      <div class="tiny muted">Folders holding documents. Adopting one registers it where it is —
+        the folder is not copied or moved — and attaches it to this project.</div></div>
+    <table style="margin-top:12px"><tbody>${adoptable
+      .map(
+        (f) => `<tr>
+      <td class="mono tiny">${esc(f.path)}</td>
+      <td class="tiny muted">${f.documents} document(s)${f.hasIndex ? ", has an index" : ""}</td>
+      <td style="text-align:right"><button class="btn sm primary"
+        onclick="adoptAndAttach('${esc(projectId)}','${esc(f.path)}','${esc(f.suggestedId || "")}')">
+        Adopt and attach</button></td></tr>`,
+      )
+      .join("")}</tbody></table>
+  </div>`;
+}
+
+/** Adopt a folder as a base, then attach it here. Two calls, one intention (KB-10, KB-03). */
+async function adoptAndAttach(projectId, folder, suggestedId) {
+  const id = (suggestedId || folder.split("/").pop() || "").trim();
+  const adopted = await act("POST", "/api/knowledge/adopt", {
+    folder,
+    ...(id ? { id } : {}),
+    kind: "technical",
+  });
+  if (!adopted || !adopted.manifest) return;
+  await act("POST", `/api/projects/${encodeURIComponent(projectId)}/knowledge`, {
+    baseId: adopted.manifest.id,
+  });
+  store.notice = `${adopted.manifest.id} adopted from ${folder} and attached to this project`;
+  paint();
 }
 
 /**

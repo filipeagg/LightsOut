@@ -211,6 +211,7 @@ existing codebase is put together, how an API behaves, how the organisation does
 - VT-04 MUST. An agent that needs a credential which is absent opens a doubt naming the entry it needs, instead of guessing, hardcoding or failing obscurely.
 - VT-05 MUST. Vault reads are audited (PE-04): which run read which entry id, when. Values are never in the audit row.
 - VT-06 SHOULD. Entries can be marked `test-only`; a policy pack can refuse any probe against an entry not so marked.
+- VT-08 MUST. A vault entry is identified by its label; the id is internal, derived from it and unique. Editing an entry never renames its id, because the id is part of the environment variable a script already uses. A stored id in an older shape is normalised when the file is read, never a reason to reject the file: one bad entry must not be able to stop every run in the system.
 - VT-07 MUST. A project holding credentials for an API is a project meant to call that API: when a run resolves a vault entry that declares a `base_url`, the run gets network access and the host is recorded on the run. Asking for a token and then denying the call is the contradiction the vault exists to remove — the shape of "the only profile with network is `contract-prober`".
 
 ## 16. BA — Builtin agent library

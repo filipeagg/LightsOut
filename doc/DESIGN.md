@@ -2441,6 +2441,22 @@ event plus a `vault_audit` row with the field names only. The prompt gets the in
 URLs, notes, variable names), never a value (VT-02). Values are excluded from `scrubbedEnv` for
 every other run, so an agent with no network grant cannot see them at all.
 
+**The id is internal and derived from the label (VT-08).** The same rule as knowledge bases
+(KB-12), for the same reason and after the same failure: an id has to be a lowercase slug because
+it becomes part of an environment variable name (`LO_VAULT_<ENTRY>_<FIELD>`), and asking a person
+to satisfy that rule is asking them to do the system's arithmetic. `POST /api/vault` takes a label
+and derives `slugify(label)`, with `-2`, `-3`… when that is taken. `PUT /api/vault/:id` edits an
+existing entry and **never renames it**: the id is referenced by the variable name a script already
+uses and by `scope`, so a rename would break work that is running.
+
+And what is stored is normalised on read rather than rejected. One entry saved with an uppercase
+id — `DEVEXTREME` — made the whole file fail validation, which made `list_vault` fail, which made
+*every run* fail before it started, with a zod error nobody could connect to a credential. A file
+the system wrote in an older shape is a migration, not a fault: on load, an id that is not a slug
+becomes `slugify(id)`, or `slugify(label)` when there is nothing left of it, and a collision after
+normalising gets the same `-2` suffix. The file itself is rewritten in the canonical shape the next
+time anything writes to it.
+
 The panel's `GET /api/vault` returns `{id, label, base_url, auth, test_only, scope, notes,
 fields: [{name, present, updated}]}`. A `PUT` with a field omitted leaves the stored value
 untouched; a field set to `null` clears it. There is no route that returns a value, which is why

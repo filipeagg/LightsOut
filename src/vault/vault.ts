@@ -9,10 +9,12 @@ import { chmod, readFile } from "node:fs/promises";
 import path from "node:path";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { writeFileDurable } from "../workspace/durable.js";
+import { slugify } from "../ids.js";
 import {
   envVarName,
+  normaliseEntries,
   toView,
-  vaultFileSchema,
+  vaultFileLenientSchema,
   type VaultEntry,
   type VaultEntryView,
 } from "./schema.js";
@@ -64,7 +66,22 @@ export class Vault {
     }
     const raw = loadYaml(text);
     if (raw === null || raw === undefined) return [];
-    return vaultFileSchema.parse(raw).entries;
+    // VT-08: an id in an older shape is repaired, not a reason to fail every run in the system.
+    return normaliseEntries(vaultFileLenientSchema.parse(raw).entries, slugify);
+  }
+
+  /**
+   * The id for a new entry, from its label (VT-08). Derived rather than asked for: it ends up
+   * inside `LO_VAULT_<ENTRY>_<FIELD>`, and that is the system's arithmetic, not the user's.
+   */
+  async idForLabel(label: string): Promise<string> {
+    const base = slugify(label);
+    const taken = new Set((await this.readAll()).map((entry) => entry.id));
+    if (!taken.has(base)) return base;
+    for (let n = 2; n < 100; n += 1) {
+      if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
+    }
+    throw new Error(`too many entries labelled like ${label}`);
   }
 
   /** Everything the panel and the MCP tools may see (VT-03). */
@@ -77,11 +94,14 @@ export class Vault {
    * set to null clears it. There is no route that reads a value back out (§18).
    */
   async put(
-    id: string,
+    rawId: string,
     patch: Partial<Omit<VaultEntry, "id" | "fields">> & {
       fields?: Record<string, string | null>;
     },
   ): Promise<VaultEntryView> {
+    // VT-08: the canonical form, whoever is calling. Stored ids are already canonical after
+    // `readAll`, so for an edit this is a no-op; for anything else it keeps the invariant.
+    const id = slugify(rawId);
     const entries = await this.readAll();
     const index = entries.findIndex((entry) => entry.id === id);
     const current: VaultEntry =

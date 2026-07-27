@@ -39,6 +39,8 @@ import type { ProjectPhaseRow, ProjectRow, TaskLevel } from "../db/types.js";
 import { existsSync } from "node:fs";
 import { activeRunFor } from "../views.js";
 import { validateArea } from "../projects/areas.js";
+import { detectPreview, isPreviewPlan } from "../preview/detect.js";
+import type { AreaAccess } from "../db/repos/areas.js";
 import {
   TOOLCHAIN_MANAGERS,
   isRootManager,
@@ -531,20 +533,42 @@ export class Actions {
    * ordinary command it holds the run open until the watchdog kills it (PV-02). LightsOut owns
    * the process, publishes the port and keeps it alive after the run finishes.
    */
+  /**
+   * Start a preview. `command` is optional (PV-07): without one, the project is inspected and the
+   * choice is made here, so the button has nothing to type into.
+   */
   async startPreview(
     actor: Actor,
-    input: { projectId: string; command: string; port?: number; cwd?: string; ttlMinutes?: number },
-  ): Promise<PreviewView> {
+    input: {
+      projectId: string;
+      command?: string;
+      port?: number;
+      cwd?: string;
+      ttlMinutes?: number;
+    },
+  ): Promise<PreviewView & { detected?: string }> {
     this.requireNotArchived(input.projectId);
     const previews = this.need(this.deps.previews, "previews");
-    return previews.start({
+
+    let command = input.command?.trim();
+    let detected: string | undefined;
+    if (!command) {
+      const project = this.project(input.projectId);
+      const plan = detectPreview(path.resolve(project.path, input.cwd ?? "."));
+      if (!isPreviewPlan(plan)) throw new Error(plan.reason);
+      command = plan.command;
+      detected = plan.reason;
+    }
+
+    const started = await previews.start({
       projectId: input.projectId,
-      command: input.command,
+      command,
       ...(input.port !== undefined ? { port: input.port } : {}),
       ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
       ...(input.ttlMinutes !== undefined ? { ttlMinutes: input.ttlMinutes } : {}),
       startedBy: actor,
     });
+    return detected ? { ...started, detected } : started;
   }
 
   async stopPreview(
@@ -847,6 +871,9 @@ export class Actions {
     areas: {
       id: string;
       path: string;
+      /** `read` or `write` (PE-09 amended). Reported everywhere areas are: a grant whose extent
+       *  is invisible on a surface has not been reviewed by whoever is looking at that surface. */
+      access: AreaAccess;
       absolute: string;
       hostPath: string | null;
       note: string | null;
@@ -863,6 +890,7 @@ export class Actions {
         return {
           id: row.id,
           path: row.path,
+          access: (row.access ?? "read") as AreaAccess,
           absolute,
           hostPath: hostPathFor(config.workspace, config.workspaceHost, absolute),
           note: row.note,
@@ -874,31 +902,50 @@ export class Actions {
   }
 
   /**
-   * Declare a directory of the workspace this project may read (PE-09). Every rule about what
-   * cannot be an area lives in `validateArea`, so both surfaces refuse the same things for the
-   * same stated reason.
+   * Declare a directory of the workspace this project may reach (PE-09). `access` is `read` by
+   * default — the narrower grant — and `write` when someone chose it deliberately.
+   *
+   * Every rule about what cannot be an area at all lives in `validateArea`, so both surfaces
+   * refuse the same things for the same stated reason, and `write` widens nothing there: the
+   * workspace root, agents/, templates/, vault.yaml, knowledge/ and another project are refused
+   * before access is even looked at.
    */
   addArea(
     actor: Actor,
     projectId: string,
-    input: { path: string; note?: string },
-  ): { projectId: string; path: string; absolute: string; hostPath: string | null } {
+    input: { path: string; access?: AreaAccess; note?: string },
+  ): {
+    projectId: string;
+    path: string;
+    access: AreaAccess;
+    absolute: string;
+    hostPath: string | null;
+  } {
     const project = this.project(projectId);
     const { config } = this.deps;
     const target = validateArea(config.workspace, project.path, input.path);
+    const access: AreaAccess = input.access === "write" ? "write" : "read";
     this.deps.repos.areas.add({
       projectId: project.id,
       path: target.relative,
+      access,
       ...(input.note ? { note: input.note } : {}),
       addedBy: actor,
     });
     this.deps.repos.events.append({
       type: "config.changed",
-      payload: { kind: "area", id: `${project.id}:${target.relative}`, op: "add", actor },
+      payload: {
+        kind: "area",
+        id: `${project.id}:${target.relative}`,
+        op: "add",
+        access,
+        actor,
+      },
     });
     return {
       projectId: project.id,
       path: target.relative,
+      access,
       absolute: target.absolute,
       hostPath: hostPathFor(config.workspace, config.workspaceHost, target.absolute),
     };

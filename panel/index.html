@@ -245,6 +245,8 @@ let showArchived = false;
 let editingJson = false;
 /** The folder chosen in the open knowledge form; `null` means "not opened yet" (KB-08). */
 let sourcePick = null;
+/** The folder chosen in the Access tab, "" for none. Panel-local, like `sourcePick`. */
+let areaPick = "";
 let stream = null;
 let runListener = null;
 let timeline = [];
@@ -304,9 +306,12 @@ async function write(method, path, payload) {
 async function act(method, path, payload) {
   store.error = "";
   store.notice = "";
+  // Returned so a caller can say something the generic confirmation cannot — the preview's URL
+  // is the whole point of pressing the button, and only the response knows it (PV-07).
+  let result;
   try {
-    const body = await write(method, path, payload);
-    store.notice = describeResult(method, path, body);
+    result = await write(method, path, payload);
+    store.notice = describeResult(method, path, result);
   } catch (err) {
     store.error = err.message;
   }
@@ -315,6 +320,7 @@ async function act(method, path, payload) {
   editingJson = false;
   sourcePick = null;
   await load();
+  return result;
 }
 
 /** One line naming what the server actually did, read from what it sent back. */
@@ -725,7 +731,13 @@ function projectTabs(id, tab) {
   const item = (href, key, label) =>
     `<a href="${href}" class="${tab === key ? "on" : ""}">${label}</a>`;
   const base = `#/p/${encodeURIComponent(id)}`;
+  // Context and Access have their own tabs: the brief is a page of prose that buried the run it
+  // sits above, and access is a decision people come looking for rather than scroll past.
   return `<div class="tabs">${item(base, null, "Current")}${item(`${base}/docs`, "docs", "Docs")}${item(
+    `${base}/context`,
+    "context",
+    "Context",
+  )}${item(`${base}/access`, "access", "Access")}${item(
     `${base}/history`,
     "history",
     "History",
@@ -745,13 +757,19 @@ function phaseList() {
       existed; launch tasks through Claude Desktop, or create a new project from a template.
     </div></div>`;
   }
-  const running = data.phases.some((p) => p.status === "running");
+  // Two sources, because they have disagreed: the phase rows, and the run actually in flight.
+  // A phase row that says `pending` while an agent is working offered a Launch button for work
+  // already running — the live run is the one that cannot be stale, so it wins.
+  const live = store.project && store.project.run ? store.project.run : null;
+  const liveTaskId = live ? live.taskId : null;
+  const running = data.phases.some((p) => p.status === "running") || Boolean(live);
+  const isLive = (p) =>
+    p.status === "running" || (liveTaskId !== null && p.taskId === liveTaskId);
   return `<div class="card"><table>
     <thead><tr><th>#</th><th>Phase</th><th>Agent</th><th>Deliverable</th><th>Status</th><th></th></tr></thead>
     <tbody>${data.phases
       .map((p) => {
-        const canLaunch =
-          !running && (p.status === "pending" || (p.repeatable && p.status !== "running"));
+        const canLaunch = !running && (p.status === "pending" || p.repeatable) && !isLive(p);
         const row = `<tr>
       <td class="tiny muted num">${p.position + 1}</td>
       <td><b>${esc(p.title)}</b> <code class="tiny">${esc(p.ref)}</code>
@@ -760,13 +778,16 @@ function phaseList() {
         ${p.repeatable ? `<span class="pill">repeatable</span>` : ""}</td>
       <td class="tiny">${esc(p.agent)}</td>
       <td class="tiny mono">${p.deliverable ? esc(p.deliverable) : "—"}</td>
-      <td>${statusPill(p.status === "done" ? "ok" : p.status)}</td>
+      <td>${statusPill(isLive(p) && p.status !== "running" ? "running" : p.status === "done" ? "ok" : p.status)}</td>
       <td class="row" style="gap:6px;justify-content:flex-end">
+        ${isLive(p) && live
+          ? `<button class="btn sm danger" onclick="stopRun('${esc(live.id)}')">Stop</button>`
+          : ""}
         ${canLaunch
           ? `<button class="btn sm primary" onclick="editing='launch:${esc(p.id)}';paint()">
                ${p.status === "pending" ? "Launch" : "Re-launch"}</button>`
           : ""}
-        ${p.optional && p.status === "pending"
+        ${p.optional && p.status === "pending" && !isLive(p)
           ? `<button class="btn sm" onclick="act('POST','/api/phases/${esc(p.id)}/skip')">Skip</button>`
           : ""}
       </td></tr>`;
@@ -903,17 +924,35 @@ function contextCard(p) {
  * The preview servers of this project (PV-01, PV-03). The URL is a real link: the port is
  * published on this machine's loopback, so it opens in the browser the panel is already in.
  */
+/**
+ * PV-07: one button, and the answer is a link.
+ *
+ * This card used to lead with an empty text box, `npm run dev` as its placeholder, and two
+ * sentences about why a dev server in an agent's terminal would hang a run. All true, none of it
+ * the user's problem — the person reading this does not write code and wants to see the page. The
+ * command still exists, behind "Use a different command", for the run where detection is wrong.
+ */
 function previewCard(p) {
   const previews = p.previews || [];
+  const open = editing === `preview:${p.id}`;
   return `<div class="card pad" style="margin-bottom:24px">
-    <div><b>Preview</b>
-      <div class="tiny muted">Development servers LightsOut is running for this project. They stay
-        up after the run that started them finishes, and expire on their own.</div></div>
+    <div class="row" style="justify-content:space-between;align-items:flex-start;gap:16px">
+      <div><b>Preview</b>
+        <div class="tiny muted">${
+          previews.length
+            ? "Open the link to see this project in your browser. It stays up after the run that started it and expires on its own."
+            : "Publish this project and open it in your browser. LightsOut works out what to serve."
+        }</div></div>
+      ${previews.length
+        ? ""
+        : `<button class="btn primary" onclick="startPreview('${esc(p.id)}')">Preview</button>`}
+    </div>
     ${previews.length
       ? `<table style="margin-top:12px"><tbody>${previews
           .map(
             (v) => `<tr>
-        <td><a href="${esc(v.url)}" target="_blank" rel="noreferrer" class="mono">${esc(v.url)}</a></td>
+        <td><a href="${esc(v.url)}" target="_blank" rel="noreferrer" class="mono"
+               style="font-size:15px">${esc(v.url)}</a></td>
         <td class="tiny mono muted">${esc(v.command)}</td>
         <td class="tiny muted">since ${esc((v.startedAt || "").slice(11, 16))}${
           v.expiresAt ? `, until ${esc(v.expiresAt.slice(11, 16))}` : ""
@@ -922,59 +961,148 @@ function previewCard(p) {
           onclick="act('DELETE','/api/previews/${esc(v.id)}')">Stop</button></td></tr>`,
           )
           .join("")}</tbody></table>`
-      : `<p class="tiny muted" style="margin-top:12px">Nothing is being served. An agent asks for one
-          with preview_start; a dev server it runs in its own terminal is refused, because it would
-          hang the run.</p>`}
-    <div class="row" style="gap:8px;margin-top:12px">
-      <input id="preview-cmd" placeholder="npm run dev" style="flex:2 1 280px">
-      <button class="btn" onclick="startPreview('${esc(p.id)}')">Serve it</button>
-    </div>
+      : ""}
+    ${open
+      ? `<div class="row" style="gap:8px;margin-top:12px">
+           <input id="preview-cmd" placeholder="npm run dev" style="flex:2 1 280px">
+           <button class="btn" onclick="startPreview('${esc(p.id)}', true)">Serve it</button>
+           <button class="btn" onclick="editing=null;paint()">Cancel</button>
+         </div>
+         <div class="tiny muted" style="margin-top:6px">The host and the port are set for you; a
+           command that names its own port is refused.</div>`
+      : `<div class="tiny muted" style="margin-top:12px">
+           <a href="#" onclick="editing='preview:${esc(p.id)}';paint();return false">Use a different command</a>
+         </div>`}
   </div>`;
 }
 
-async function startPreview(projectId) {
-  const command = field("preview-cmd");
-  if (!command) {
-    store.error = "say what to run, e.g. npm run dev";
+/**
+ * Start a preview. With no command the server detects what to serve (PV-07) and says what it
+ * chose; the confirmation carries the URL, because that is the only part anyone wanted.
+ */
+async function startPreview(projectId, explicit) {
+  const command = explicit ? field("preview-cmd") : "";
+  if (explicit && !command) {
+    store.error = "say what to run, or cancel and press Preview to let LightsOut decide";
     return paint();
   }
-  await act("POST", `/api/projects/${encodeURIComponent(projectId)}/previews`, { command });
+  editing = null;
+  const result = await act(
+    "POST",
+    `/api/projects/${encodeURIComponent(projectId)}/previews`,
+    command ? { command } : {},
+  );
+  if (result && result.url) {
+    store.notice = result.detected
+      ? `Published at ${result.url} — ${result.detected}`
+      : `Published at ${result.url}`;
+    paint();
+  }
 }
 
-function areasCard(p) {
+/**
+ * The Access tab (PE-09 amended): what this project may reach outside itself, and whether it may
+ * write there. The folder is picked from the workspace tree, not typed — the old card asked for a
+ * path from memory, which is the one thing nobody has.
+ */
+function viewProjectAccess() {
+  const p = store.project && store.project.project;
+  if (!p) return `<div class="card pad">Loading…</div>`;
   const areas = p.areas || [];
-  return `<div class="card pad" style="margin-bottom:24px">
-    <div class="row" style="justify-content:space-between;align-items:flex-start;gap:16px">
-      <div><b>Readable outside this project</b>
-        <div class="tiny muted">Directories of the workspace this project may read and copy from.
-          Read-only, and never agents/, templates/, vault.yaml, knowledge/ or another project.</div></div>
+  const folders = store.folders ? store.folders.folders : [];
+  const chosen = areaPick;
+
+  const tree =
+    store.folders && store.folders.loading
+      ? `<div class="muted tiny" style="padding:8px">Reading the workspace…</div>`
+      : store.folders && store.folders.failed
+        ? `<div class="tiny" style="padding:8px">The workspace could not be read.</div>`
+        : folders.length
+          ? folders
+              .map(
+                (f) => `<label class="row" style="gap:8px;padding:5px 8px;padding-left:${
+                  8 + f.depth * 18
+                }px;border-radius:var(--r-sm);cursor:pointer">
+              <input type="checkbox" ${f.path === chosen ? "checked" : ""}
+                     onchange="areaPick = areaPick === '${esc(f.path)}' ? '' : '${esc(f.path)}'; paint()"
+                     style="pointer-events:none">
+              <span>${esc(f.name)}</span>
+              <span class="tiny muted mono">${esc(f.path)}</span></label>`,
+              )
+              .join("")
+          : `<div class="tiny muted" style="padding:8px">The workspace has no folders to offer.</div>`;
+
+  return `${projectHeader(p)}${projectTabs(p.id, "access")}
+    <div class="card pad" style="margin-bottom:24px">
+      <div><b>What this project may reach</b>
+        <div class="tiny muted">Its own folder is always readable and writable. Anything else in
+          the workspace is denied until it is listed here. Never available, whatever you pick:
+          agents/, templates/, vault.yaml, knowledge/ (attach a base instead) and other projects.</div></div>
+      ${areas.length
+        ? `<table style="margin-top:12px"><tbody>${areas
+            .map(
+              (a) => `<tr>
+          <td class="mono tiny">${esc(a.path)}<div class="tiny muted">${esc(a.hostPath || "")}</div></td>
+          <td>${
+            a.access === "write"
+              ? `<span class="pill amber">read and write</span>`
+              : `<span class="pill">read only</span>`
+          }</td>
+          <td class="tiny muted">${esc(a.note || "")}</td>
+          <td class="tiny muted">by ${esc(a.addedBy)}</td>
+          <td style="text-align:right;white-space:nowrap">
+            <button class="btn sm" onclick="setAreaAccess('${esc(p.id)}','${esc(a.path)}','${
+              a.access === "write" ? "read" : "write"
+            }')">${a.access === "write" ? "Make read-only" : "Allow writing"}</button>
+            <button class="btn sm danger"
+              onclick="removeArea('${esc(p.id)}','${esc(a.path)}')">Remove</button></td></tr>`,
+            )
+            .join("")}</tbody></table>`
+        : `<p class="tiny muted" style="margin-top:12px">Nothing yet. Everything outside the
+            project is denied.</p>`}
     </div>
-    ${areas.length
-      ? `<table style="margin-top:12px"><tbody>${areas
-          .map(
-            (a) => `<tr>
-        <td class="mono tiny">${esc(a.path)}<div class="tiny muted">${esc(a.hostPath || "")}</div></td>
-        <td class="tiny muted">${esc(a.note || "")}</td>
-        <td class="tiny muted">by ${esc(a.addedBy)}</td>
-        <td style="text-align:right"><button class="btn sm danger"
-          onclick="removeArea('${esc(p.id)}','${esc(a.path)}')">Remove</button></td></tr>`,
-          )
-          .join("")}</tbody></table>`
-      : `<p class="tiny muted" style="margin-top:12px">None. Everything outside the project is denied.</p>`}
-    <div class="row" style="gap:8px;margin-top:12px">
-      <input id="area-path" placeholder="sources/efemis_django-master" style="flex:2 1 260px">
-      <input id="area-note" placeholder="why (optional)" style="flex:1 1 160px">
-      <button class="btn" onclick="addArea('${esc(p.id)}')">Allow reading</button>
-    </div>
-  </div>`;
+
+    <div class="card pad">
+      <div><b>Add a folder</b>
+        <div class="tiny muted">Pick it from the workspace; read-only unless you say otherwise.</div></div>
+      <div class="card" style="max-height:300px;overflow:auto;padding:6px;margin-top:12px">${tree}</div>
+      <div class="row" style="gap:8px;margin-top:12px;align-items:center">
+        <input id="area-note" placeholder="why (optional)" style="flex:1 1 220px">
+        <label class="row tiny" style="gap:6px;cursor:pointer">
+          <input type="checkbox" id="area-write"> may also write here</label>
+        <button class="btn primary" onclick="addArea('${esc(p.id)}')"
+          ${chosen ? "" : "disabled"}>Allow ${chosen ? esc(chosen) : "…"}</button>
+      </div>
+    </div>`;
+}
+
+/** The Context tab (PM-09). Its own page: it is long, and it was burying the run. */
+function viewProjectContext() {
+  const p = store.project && store.project.project;
+  if (!p) return `<div class="card pad">Loading…</div>`;
+  return `${projectHeader(p)}${projectTabs(p.id, "context")}
+    ${contextCard(p)}`;
 }
 
 async function addArea(projectId) {
-  const target = field("area-path");
-  if (!target) { store.error = "give a path inside the workspace"; return paint(); }
+  const target = areaPick || field("area-path");
+  if (!target) { store.error = "pick a folder from the workspace"; return paint(); }
   const note = field("area-note");
-  await act("POST", `/api/projects/${encodeURIComponent(projectId)}/areas`,
-    note ? { path: target, note } : { path: target });
+  const write = $("area-write") && $("area-write").checked;
+  areaPick = "";
+  await act("POST", `/api/projects/${encodeURIComponent(projectId)}/areas`, {
+    path: target,
+    ...(write ? { access: "write" } : {}),
+    ...(note ? { note } : {}),
+  });
+}
+
+/** Declaring the same path again is how access changes (PE-09 amended). */
+async function setAreaAccess(projectId, target, access) {
+  await act("POST", `/api/projects/${encodeURIComponent(projectId)}/areas`, {
+    path: target,
+    access,
+  });
 }
 
 async function removeArea(projectId, area) {
@@ -1057,17 +1185,22 @@ async function openDoc(projectId, relative) {
   paint();
 }
 
+/** The name and both paths, above every project tab, so a tab is never orphaned. */
+function projectHeader(p) {
+  return `<h1>${esc(p.name)}</h1>
+    <p class="sub mono">${esc(p.path)}</p>
+    ${p.hostPath ? `<p class="tiny muted mono">on this machine: ${esc(p.hostPath)}</p>` : ""}`;
+}
+
 function viewProject() {
   const s = store.project;
   if (!s) return `<div class="empty">Loading…</div>`;
   const p = s.project;
-  return `<h1>${esc(p.name)}</h1>
-    <p class="sub mono">${esc(p.path)}</p>
-    ${p.hostPath ? `<p class="tiny muted mono">on this machine: ${esc(p.hostPath)}</p>` : ""}
+  // Context and access moved to their own tabs: a page of brief above the run pushed the thing
+  // the person came to look at below the fold.
+  return `${projectHeader(p)}
     ${projectTabs(p.id, null)}
-    ${contextCard(p)}
     ${previewCard(p)}
-    ${areasCard(p)}
     <div class="row wrap" style="margin-bottom:24px">
       ${statusPill(s.chain ? s.chain.status : "idle")}
       <span class="pill">push: ${esc(p.pushPolicy)}</span>
@@ -2089,7 +2222,11 @@ const RENDER = {
         ? viewProjectKnowledge()
         : route.tab === "docs"
           ? viewProjectDocs()
-          : viewProject(),
+          : route.tab === "context"
+            ? viewProjectContext()
+            : route.tab === "access"
+              ? viewProjectAccess()
+              : viewProject(),
   "/agents": viewAgents,
   "/templates": viewTemplates,
   "/knowledge": viewKnowledge,
@@ -2146,6 +2283,20 @@ async function load() {
       // The document list (PM-10). Re-read on every load so a deliverable written by the run
       // in flight shows up without a manual reload.
       if (route.tab === "docs") store.docs = await api(`/api/projects/${id}/docs`);
+      // The Access tab picks a folder from the workspace rather than asking someone to type a
+      // path from memory (PE-09). The walk is slow enough to be worth loading in the background.
+      if (route.tab === "access" && !store.folders) {
+        store.folders = { folders: [], loading: true };
+        api("/api/knowledge/folders")
+          .then((data) => {
+            store.folders = data;
+            paint();
+          })
+          .catch(() => {
+            store.folders = { folders: [], failed: true };
+            paint();
+          });
+      }
       // Live run if there is one, otherwise the last one that ended: its events were already
       // stored and served, and until now nothing in the panel could reach them.
       watchRun(

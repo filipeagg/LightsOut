@@ -627,7 +627,16 @@ export class DoubtService {
       return { reject: true, explanation };
     }
 
-    const waitMs = input.waitMs ?? this.config.permissionWaitHours * 3_600_000;
+    // OR-12, the other half. This is the hard floor, so a person really is the only one who may
+    // answer — but "waits for a person" must not mean "waits all night". An unattended run held
+    // 5 h 29 min on one gate and produced nothing; the same run, refused at thirty minutes, would
+    // have written down what it could not verify and delivered the rest. The bound is the point:
+    // silence is the failure mode this mode exists to remove, and a floor gate is still silence.
+    const unattendedCapMs = this.config.unattendedWaitMin * 60_000;
+    const configuredMs = this.config.permissionWaitHours * 3_600_000;
+    const waitMs =
+      input.waitMs ??
+      (input.unattended ? Math.min(unattendedCapMs, configuredMs) : configuredMs);
     const answer = await this.waitForAnswer(doubt.id, waitMs, input.pollMs);
 
     if (answer === undefined) {
@@ -637,9 +646,24 @@ export class DoubtService {
         payload: {
           reason: "permission wait expired",
           hours: this.config.permissionWaitHours,
+          ...(input.unattended ? { unattended: true, cappedMin: this.config.unattendedWaitMin } : {}),
           doubtRef: doubt.ref,
         },
       });
+      if (input.unattended) {
+        // The doubt stays open — a person may still want to see what was asked — but the run
+        // stops waiting on it and is told why, so it can finish with an honest gap.
+        return {
+          reject: true,
+          explanation:
+            `Refused after ${this.config.unattendedWaitMin} minutes: this action needs a person ` +
+            `(${input.actionClass} is on the hard floor of PE-03) and this project runs ` +
+            `unattended, so nobody was going to answer. Policy said: ${input.reason}. Take ` +
+            `another route if there is one; otherwise record what you could not do under ` +
+            `\`unverified:\` in your deliverable and finish with the rest of the work. Doubt ` +
+            `${doubt.ref} stays open for a person to read afterwards.`,
+        };
+      }
       return {
         reject: true,
         explanation: `No human answered within ${this.config.permissionWaitHours} h. The action stays refused; stop and report what you needed.`,

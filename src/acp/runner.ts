@@ -219,7 +219,11 @@ export class TaskRunner {
     const readAreas = this.repos.areas.list(project.id).map((row) => ({
       relative: row.path,
       absolute: path.resolve(this.config.workspace, row.path),
+      access: row.access ?? "read",
     }));
+    // The subset that may also be written to (PE-09 amended). Kept separate rather than inferred
+    // in the classifier, so "may read" and "may write" can never drift apart.
+    const writeAreas = readAreas.filter((a) => a.access === "write").map((a) => a.absolute);
 
     const agentPack = this.agents.pack(profile.policy);
     const context = await this.runContext(project, task, input.projectPack ?? agentPack);
@@ -329,6 +333,7 @@ export class TaskRunner {
         : {}),
       // PE-09: what this project may read outside itself, resolved once before the session.
       ...(readAreas.length ? { readAreas: readAreas.map((area) => area.absolute) } : {}),
+      ...(writeAreas.length ? { writeAreas } : {}),
       // require_human opens a permission doubt and holds the ACP response until it is
       // answered or the slow clock runs out (DESIGN §6.5, §8.4).
       humanGate:

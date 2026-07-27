@@ -61,6 +61,12 @@ export type ClassifyInput = {
    */
   readAreas?: string[] | undefined;
   /**
+   * The subset of `readAreas` this project may also **write** to (PE-09 amended, §9.5). A write
+   * inside one is `project_write`; a write inside any other area stays `outside_workspace`, and
+   * what may never be an area at all is unchanged.
+   */
+  writeAreas?: string[] | undefined;
+  /**
    * Environment variable names of the vault entries **this run resolved** — `LO_VAULT_EFEMIS_
    * PASSWORD` and friends (PE-13, §7.1d). A secret the system handed over on purpose is not the
    * same thing as a secret found lying around, and four separate runs have now been stopped by
@@ -120,10 +126,28 @@ function hostsIn(segment: string): string[] {
  * were the entire case — `grep -rqF "$LO_VAULT_EFEMIS_PASSWORD" .` and every future spelling of
  * the same idea. If something still matches, a real secret is in play and nothing changes.
  *
- * One exception, and it is the reason this is safe: a segment carrying a host that is not one the
- * vault entry declares is `vault_foreign` — sending the EFEMIS password to somewhere that is not
- * EFEMIS is precisely what the class exists to stop.
+ * One exception, and it is the reason this is safe: a vault value on its way to somewhere that is
+ * not the entry's own host is `vault_foreign` — sending the EFEMIS password anywhere but EFEMIS is
+ * precisely what the class exists to stop.
+ *
+ * **That exception was written too crudely and cost five and a half hours.** The first version
+ * asked "does this segment mention any host the entry does not declare", and a probe script that
+ * mentioned `http://localhost:8000` once, in an `Origin` header for the CORS test the phase had
+ * explicitly asked for, was ruled exfiltration — while `https://efemis-back.hispatec.com`, the
+ * entry's own host, sat three lines above it. A script may name any number of URLs in a header, a
+ * comment or a docs link without a secret going to any of them.
+ *
+ * So the question is narrowed to the one it was always meant to be: **is there a foreign host and
+ * no declared one?** If the entry's own host is named, that is where the credential is going. And
+ * loopback is never exfiltration — a value that does not leave the container has not leaked.
+ *
+ * This is a heuristic and stays one. It is deliberately biased toward `vault_own`, because
+ * `vault_own` does not allow anything: it hands the gate to the judge (§7.4), which reads the
+ * command and still fails toward the human. A false `vault_foreign`, by contrast, parks the run
+ * with no way back — which is exactly what happened.
  */
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1", "host.docker.internal"]);
+
 export function credentialEvidence(
   segment: string,
   patterns: RegExp[],
@@ -137,8 +161,13 @@ export function credentialEvidence(
   if (mentioned.length === 0) return "key_name";
 
   const allowed = new Set((vaultHosts ?? []).map((h) => h.toLowerCase()));
-  const foreign = hostsIn(segment).filter((h) => !allowed.has(h));
-  if (foreign.length > 0) return "vault_foreign";
+  const hosts = hostsIn(segment);
+  const declared = hosts.some((h) => allowed.has(h));
+  const foreign = hosts.filter((h) => !allowed.has(h) && !LOOPBACK.has(h));
+  // Foreign hosts *and* no sign of the entry's own: the only shape where "the secret is going
+  // somewhere else" is the reading a careful person would reach for. Naming the entry's host
+  // settles it, and loopback never counts — see the note above, and the run it cost.
+  if (foreign.length > 0 && !declared) return "vault_foreign";
 
   // Blank out the run's own variables — every spelling of them — and ask again.
   let residue = segment;
@@ -749,14 +778,39 @@ export class Classifier {
     // A directory this project was explicitly allowed to read (PE-09). Checked after the two
     // absolute prohibitions above and before anything else, so an area can never be declared over
     // the system's own configuration even if a row said so.
+    // Another project's directory. `validateArea()` refuses to declare one, but that is a check
+    // at declaration time and this is the one that has to hold at run time — a stored row, a
+    // renamed project or a future caller must not be able to put one project's agent inside
+    // another's files. Before areas were writable this was covered by the blanket refusal; a test
+    // caught that the guarantee had quietly become an assumption.
+    const projectsRoot = path.join(workspace, "projects");
+    if (
+      writing &&
+      Classifier.isInside(projectsRoot, resolved) &&
+      !Classifier.isInside(input.projectPath, resolved)
+    ) {
+      return {
+        class: "outside_workspace",
+        reason: `write into another project: ${target} (PE-09)`,
+      };
+    }
+
     for (const area of input.readAreas ?? []) {
       if (!Classifier.isInside(area, resolved)) continue;
       if (!writing) {
         return { class: "project_read", reason: `read of a declared area: ${target}` };
       }
+      // PE-09 as amended: an area is declared `read` or `write`, and a write into a writable one
+      // is an ordinary project write — the pack decides it, and the audit records where it landed.
+      // What cannot be declared at all is unchanged and absolute (agents/, templates/, vault.yaml,
+      // knowledge/, the workspace root, another project), and those are handled above this loop,
+      // so no row can widen them however it was written.
+      if ((input.writeAreas ?? []).some((w) => Classifier.isInside(w, resolved))) {
+        return { class: "project_write", reason: `write into a writable area: ${target}` };
+      }
       return {
         class: "outside_workspace",
-        reason: `an area is read-only; writing to ${target} is not allowed (PE-09)`,
+        reason: `this area is read-only; declare it writable to write to ${target} (PE-09)`,
       };
     }
 

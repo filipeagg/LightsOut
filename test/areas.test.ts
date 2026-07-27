@@ -151,6 +151,97 @@ describe("classification with an area (the case that failed)", () => {
   });
 });
 
+describe("an area may be writable, and only where it was declared so (PE-09 amended)", () => {
+  const shared = () => path.join(workspace, "sources", "efemis_django-master");
+  const permissive = policyPackSchema.parse({
+    id: "default",
+    rules: [
+      { class: "project_read", verdict: "allow" },
+      { class: "project_write", verdict: "allow" },
+      { class: "outside_workspace", verdict: "deny" },
+      { class: "credentials", verdict: "require_human" },
+    ],
+  });
+
+  const decide = (command: string, writable: boolean) =>
+    new PolicyEngine({ default: permissive }).evaluate({
+      projectPath: project,
+      workspacePath: workspace,
+      readAreas: [shared()],
+      ...(writable ? { writeAreas: [shared()] } : {}),
+      command,
+    });
+
+  it("turns a write into a declared write area into an ordinary project write", () => {
+    const decision = decide(`cp ./doc/x.md ${shared()}/x.md`, true);
+    expect(decision.class).toBe("project_write");
+    expect(decision.verdict).toBe("allow");
+  });
+
+  it("still denies the same write when the area is only readable", () => {
+    const decision = decide(`cp ./doc/x.md ${shared()}/x.md`, false);
+    expect(decision.class).toBe("outside_workspace");
+    expect(decision.verdict).toBe("deny");
+  });
+
+  it("reads the same either way", () => {
+    for (const writable of [true, false]) {
+      expect(decide(`cat ${shared()}/README.md`, writable).class).toBe("project_read");
+    }
+  });
+
+  it("cannot be used to reach what may never be an area at all", () => {
+    // Even with the row claiming these are writable areas, the absolute prohibitions win: they
+    // are checked ahead of the area loop, so no row can widen them however it was written.
+    const engine = new PolicyEngine({ default: permissive });
+    const forbidden = [
+      path.join(workspace, "agents", "builder.yaml"),
+      path.join(workspace, "vault.yaml"),
+      path.join(workspace, "projects", "other", "x.md"),
+    ];
+    for (const target of forbidden) {
+      const decision = engine.evaluate({
+        projectPath: project,
+        workspacePath: workspace,
+        readAreas: [path.dirname(target)],
+        writeAreas: [path.dirname(target)],
+        command: `cp ./doc/x.md ${target}`,
+      });
+      expect(decision.verdict, target).not.toBe("allow");
+    }
+  });
+
+  it("stores the access and changes it when the same path is declared again", () => {
+    repos.projects.create({ id: "curation", name: "C", path: project, context: "c" });
+    const first = repos.areas.add({
+      projectId: "curation",
+      path: "sources/efemis_django-master",
+      addedBy: "panel",
+    });
+    expect(first.access).toBe("read");
+
+    const promoted = repos.areas.add({
+      projectId: "curation",
+      path: "sources/efemis_django-master",
+      access: "write",
+      addedBy: "mcp",
+    });
+    expect(promoted.id).toBe(first.id);
+    expect(promoted.access).toBe("write");
+    expect(repos.areas.list("curation")).toHaveLength(1);
+
+    // …and narrowing it again is equally a decision someone made.
+    expect(
+      repos.areas.add({
+        projectId: "curation",
+        path: "sources/efemis_django-master",
+        access: "read",
+        addedBy: "panel",
+      }).access,
+    ).toBe("read");
+  });
+});
+
 describe("write targets", () => {
   it("tells the destination of a copy from its sources", () => {
     expect(writeTargets("cp -r /workspace/sources/x ./sources/x")).toEqual(["./sources/x"]);

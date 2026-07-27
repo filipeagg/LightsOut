@@ -86,6 +86,8 @@ export type RunSessionDeps = {
   writableKnowledgeBase?: string;
   /** Absolute paths of the workspace directories this project may read (PE-09). */
   readAreas?: string[];
+  /** The subset of those it may also write to (PE-09 amended, §9.5). */
+  writeAreas?: string[];
   /** Defaults to rejecting with an explanation, which is honest for phase 3. */
   humanGate?: HumanGate;
   onStderr?: (line: string) => void;
@@ -208,7 +210,57 @@ export function pathCandidates(update: ToolCallUpdate): string[] {
       if (typeof value === "string") paths.push(...pathsInPatch(value));
     }
   }
+
+  // ACP carries an edit as a `diff` content entry — `{type:"diff", path, oldText, newText}` —
+  // and that is where Codex puts it: no locations, no title, no rawInput. Reading only the
+  // first three left every one of its writes a `project_write` naming nothing, which a confined
+  // pack must refuse. The type is not pinned down by the schema, so this reads any content entry
+  // that names a path rather than matching on `type`.
+  for (const item of update.content ?? []) {
+    if (!item || typeof item !== "object") continue;
+    const entry = item as Record<string, unknown>;
+    for (const key of ["path", "newPath", "oldPath", "file", "filePath"]) {
+      const value = entry[key];
+      if (typeof value === "string" && value.trim()) paths.push(value.trim());
+    }
+    const nested = entry["content"];
+    if (nested && typeof nested === "object") {
+      const value = (nested as Record<string, unknown>)["path"];
+      if (typeof value === "string" && value.trim()) paths.push(value.trim());
+    }
+    for (const key of ["newText", "diff", "patch"]) {
+      const value = entry[key];
+      if (typeof value === "string") paths.push(...pathsInPatch(value));
+    }
+  }
   return [...new Set(paths)];
+}
+
+/**
+ * The shape of what an adapter sent, for the audit row — keys and content types, never values.
+ *
+ * Engines disagree about where they put things and the ACP schema does not pin it down, so when a
+ * request arrives that the classifier cannot read, the only way to find out why is to have
+ * recorded what arrived. Twice now that has been reconstructed by hand from a running container.
+ */
+export function adapterShape(update: ToolCallUpdate): Record<string, unknown> {
+  const raw = (update as { rawInput?: unknown }).rawInput;
+  return {
+    keys: Object.keys(update as Record<string, unknown>).sort(),
+    contentTypes: (update.content ?? []).map(
+      (item) => (item as { type?: string }).type ?? "unknown",
+    ),
+    contentKeys: [
+      ...new Set(
+        (update.content ?? []).flatMap((item) =>
+          item && typeof item === "object" ? Object.keys(item as Record<string, unknown>) : [],
+        ),
+      ),
+    ].sort(),
+    rawInputKeys:
+      raw && typeof raw === "object" ? Object.keys(raw as Record<string, unknown>).sort() : null,
+    locations: (update.locations ?? []).length,
+  };
 }
 
 /** Paths named by an apply_patch envelope or a unified diff header. */
@@ -488,6 +540,7 @@ export class RunSession {
         : {}),
       // PE-09: the directories this project was allowed to read outside itself.
       ...(this.deps.readAreas?.length ? { readAreas: this.deps.readAreas } : {}),
+      ...(this.deps.writeAreas?.length ? { writeAreas: this.deps.writeAreas } : {}),
       // PE-13: which secrets are this run's own, so a command handling them is told apart from
       // one handling somebody else's. The names only — a value never reaches the classifier.
       ...(this.deps.vaultEnv ? { vaultVars: Object.keys(this.deps.vaultEnv) } : {}),
@@ -512,6 +565,10 @@ export class RunSession {
         paths,
         command: command ?? null,
         reason: decision.reason,
+        // What the adapter actually sent, in shape only (§7.1e). A write denied for naming no
+        // path is indistinguishable, in the timeline, from a write denied on its merits — and
+        // twice now that ambiguity has cost hours. Keys and content types, never values.
+        adapter: adapterShape(toolCall),
       },
       ruleSource: decision.ruleSource,
       verdict: decision.verdict,

@@ -442,16 +442,18 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
       const { id } = idParam.parse(request.params);
       const input = body(
         z.object({
-          command: z.string().min(1),
+          // PV-07: optional. Without one the project is inspected and the choice is made for you,
+          // because the person pressing Preview is not the person who knows the command.
+          command: z.string().optional(),
           port: z.number().int().optional(),
           cwd: z.string().optional(),
           ttlMinutes: z.number().int().positive().optional(),
         }),
-        request.body,
+        request.body ?? {},
       );
       return (await actions.startPreview("panel", {
         projectId: id,
-        command: input.command,
+        ...(input.command?.trim() ? { command: input.command.trim() } : {}),
         ...(input.port !== undefined ? { port: input.port } : {}),
         ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
         ...(input.ttlMinutes !== undefined ? { ttlMinutes: input.ttlMinutes } : {}),
@@ -498,7 +500,11 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
     envelope(reply, async () => {
       const { id } = idParam.parse(request.params);
       const input = body(
-        z.object({ path: z.string().min(1), note: z.string().optional() }),
+        z.object({
+          path: z.string().min(1),
+          access: z.enum(["read", "write"]).optional(),
+          note: z.string().optional(),
+        }),
         request.body,
       );
       return actions.addArea("panel", id, input);

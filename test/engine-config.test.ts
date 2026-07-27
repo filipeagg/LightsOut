@@ -23,11 +23,16 @@ describe("the engine's own sandbox (ST-09)", () => {
     expect(result.action).toBe("written");
 
     const written = await readFile(path.join(dir, "config.toml"), "utf8");
-    expect(written).toContain('sandbox_mode = "workspace-write"');
-    expect(written).toContain("network_access = true");
-    // Not full access: the engine still refuses to write outside its working directory,
-    // which is defence in depth behind PE-02.
-    expect(written).not.toContain("danger-full-access");
+    // Full access *to the container*, which holds one workspace and nothing else (RT-01).
+    // `workspace-write` looks safer and cannot work: it starts bubblewrap, which needs
+    // unprivileged user namespaces that a Docker Desktop container does not grant.
+    expect(written).toContain('sandbox_mode = "danger-full-access"');
+    // Only one setting line, and it is not the one that cannot start. The comments explain why
+    // `workspace-write` was tried and rejected, so match the directives, not the prose.
+    const directives = written
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("#") && line.includes("sandbox_mode"));
+    expect(directives).toEqual(['sandbox_mode = "danger-full-access"']);
     expect(written).toContain(MANAGED_MARKER);
   });
 

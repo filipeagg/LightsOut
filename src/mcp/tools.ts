@@ -606,19 +606,26 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
 
   tool(
     "preview_start",
-    "Start a development server the user can open in their own browser, and return its URL " +
-      "(PV-01). Use this and never run `npm run dev`, `vite` or `python -m http.server` in a " +
-      "terminal: those never return, so they hold the run open until the watchdog kills it — the " +
-      "policy refuses them for that reason. LightsOut owns the process, binds it to a published " +
-      "port, and keeps it alive after the run finishes so the result can be looked at.",
+    "Publish the project so the user can open it in their own browser, and return its URL " +
+      "(PV-01, PV-07). `command` is optional and usually omitted: LightsOut looks at the project " +
+      "and serves the right thing — a dev script, a built directory, or a single page at the " +
+      "root — and tells you which it chose in `detected`. **Always report the returned `url` to " +
+      "the user in words**; a preview nobody was given the address of has not been published. " +
+      "Use this and never run `npm run dev`, `vite` or `python -m http.server` in a terminal: " +
+      "those never return, so they hold the run open until the watchdog kills it, and the policy " +
+      "refuses them for that reason. LightsOut owns the process, binds it to a published port, " +
+      "and keeps it alive after the run finishes so the result can be looked at.",
     {
       projectId: z.string().min(1),
       command: z
         .string()
         .min(1)
+        .optional()
         .describe(
-          "The server command, without host or port: those are set for you (PV-04). " +
-            "e.g. `npm run dev`, or `node /opt/lightsout/dist/preview/serve.js --root dist --spa`.",
+          "Optional, and the exception (PV-07). Omit it and the project is inspected. Give one " +
+            "only when the detected choice is wrong: without host or port, which are set for " +
+            "you (PV-04). e.g. `npm run dev`, or " +
+            "`node /opt/lightsout/dist/preview/serve.js --root dist --spa`.",
         ),
       port: z.number().int().optional().describe("A specific port from the pool; refused if taken."),
       cwd: z.string().optional().describe("Directory inside the project to run in."),
@@ -627,7 +634,7 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
     async ({ projectId, command, port, cwd, ttlMinutes }) =>
       (await actions.startPreview("mcp", {
         projectId,
-        command,
+        ...(command ? { command } : {}),
         ...(port !== undefined ? { port } : {}),
         ...(cwd !== undefined ? { cwd } : {}),
         ...(ttlMinutes !== undefined ? { ttlMinutes } : {}),
@@ -715,13 +722,28 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
 
   tool(
     "add_area",
-    "Let this project read a directory of the workspace outside itself (PE-09) — the imported " +
-      "source of a system, a folder of material. Read-only: an agent may copy from it into the " +
-      "project, never write to it. Refused for the workspace root, agents/, templates/, " +
-      "vault.yaml, knowledge/ and other projects.",
-    { projectId: z.string().min(1), path: z.string().min(1), note: z.string().optional() },
-    async ({ projectId, path: target, note }) =>
-      actions.addArea("mcp", projectId, { path: target, ...(note ? { note } : {}) }),
+    "Let this project reach a directory or a file of the workspace outside itself (PE-09) — the " +
+      "imported source of a system, a folder of material, a shared output directory. `access` is " +
+      "`read` by default, which lets an agent read it and copy from it into the project; " +
+      "`write` also lets it write there, and is a decision worth stating in the note. Declaring " +
+      "the same path again changes its access. Refused whatever the access, and not negotiable: " +
+      "the workspace root, agents/, templates/, vault.yaml, knowledge/ (attach a base instead) " +
+      "and any other project.",
+    {
+      projectId: z.string().min(1),
+      path: z.string().min(1),
+      access: z
+        .enum(["read", "write"])
+        .optional()
+        .describe("read (default) or write. Prefer read; widen only when the task needs it."),
+      note: z.string().optional(),
+    },
+    async ({ projectId, path: target, access, note }) =>
+      actions.addArea("mcp", projectId, {
+        path: target,
+        ...(access ? { access } : {}),
+        ...(note ? { note } : {}),
+      }),
   );
 
   tool(

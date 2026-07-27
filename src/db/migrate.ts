@@ -351,6 +351,17 @@ const UNATTENDED_SQL = `
 ALTER TABLE projects ADD COLUMN unattended INTEGER NOT NULL DEFAULT 1;
 `;
 
+/**
+ * Version 12 (PE-09 amended, §9.5): an area is declared `read` or `write`.
+ *
+ * Default `read`, and every existing row keeps it: widening an already-granted boundary by
+ * migration would be the system making a decision that belongs to a person.
+ */
+const AREA_ACCESS_SQL = `
+ALTER TABLE project_areas ADD COLUMN access TEXT NOT NULL DEFAULT 'read'
+  CHECK (access IN ('read','write'));
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial schema", up: applyInitialSchema },
   {
@@ -378,6 +389,7 @@ export const MIGRATIONS: Migration[] = [
   },
   { version: 10, name: "preview servers", up: PREVIEWS_SQL },
   { version: 11, name: "unattended projects", up: UNATTENDED_SQL },
+  { version: 12, name: "writable areas", up: AREA_ACCESS_SQL },
 ];
 
 /** The marker migration 4 writes, and the panel looks for (PM-09). */

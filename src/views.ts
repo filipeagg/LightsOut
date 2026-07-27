@@ -146,6 +146,9 @@ export function projectStatusView(deps: ViewDeps, project: ProjectRow) {
           deps.config.workspaceHost,
           `${deps.config.workspace}/${row.path}`,
         ),
+        // PE-09 amended: `read` or `write`. Shown, never inferred — the difference is the whole
+        // point of the grant and a panel that hides it is lying about what was allowed.
+        access: row.access ?? "read",
         note: row.note,
         addedBy: row.added_by,
       })),

@@ -97,7 +97,18 @@ for _ in $(seq 1 40); do
   sleep 1
 done
 docker cp scripts/mcp-call.mjs "$CONTAINER":/opt/lightsout/mcp-call.mjs >/dev/null 2>&1
-check "curl -fsS ${BASE}/ | grep -q 'LightsOut'" "the panel is served at /"
+# Polled, not asked once: `/health` answers as soon as the process listens, and the container was
+# recreated a moment ago. A gate that reports a red because it asked half a second early is a gate
+# nobody will believe the next time it is red.
+# Matched in the shell rather than through a pipe: with `pipefail` on, `curl … | grep -q` goes red
+# whenever grep matches early and curl is left writing into a closed pipe (see phase 10).
+panel_ok=""
+for _ in $(seq 1 20); do
+  case "$(curl -fsS "${BASE}/" 2>/dev/null)" in *LightsOut*) panel_ok="yes" ;; esac
+  [ -n "$panel_ok" ] && break
+  sleep 1
+done
+if [ -n "$panel_ok" ]; then ok "the panel is served at /"; else bad "the panel is served at /"; fi
 
 echo "-- preconditions"
 # A dead engine makes the live-chain part of this gate fail for a reason that has nothing to do
@@ -117,7 +128,7 @@ docker exec "$CONTAINER" node -e '
   db.prepare("DELETE FROM doubts WHERE project_id = ?").run(process.argv[1]);
   db.prepare("DELETE FROM decisions WHERE project_id = ?").run(process.argv[1]);
 ' "$PROJECT" >/dev/null 2>&1
-created=$(mcp create_project "{\"name\":\"${PROJECT}\",\"verify\":\"test -f panel.txt\"}")
+created=$(mcp create_project "{\"name\":\"${PROJECT}\",\"verify\":\"test -f panel.txt\",\"context\":\"goal: give the panel something real to render\\nactors: the phase 7 script\\ndone_when: panel.txt exists and the stream showed it happen\",\"template\":\"none\",\"templateReason\":\"a gate fixture: one file, watched over SSE\"}")
 check "printf '%s' \"\$created\" | grep -q '\"ok\": true'" "a project exists to render"
 
 echo "-- read-only endpoints (§12.1)"
@@ -137,12 +148,14 @@ agents_json=$(curl -fsS "${BASE}/api/agents" 2>/dev/null)
 has "$agents_json" "\"$AGENT\"" "/api/agents lists the profiles (AP-02)"
 models=$(curl -fsS "${BASE}/api/agents/models" 2>/dev/null)
 has "$models" '"reasoning"' "/api/agents/models answers the accepted values (AP-08)"
+# Phase 9 landed: these are loaded now, and what the gate checks is that each one answers with
+# its own collection rather than the "not in this process" shape it had while phase 7 was built.
 for resource in templates knowledge vault; do
   body=$(curl -fsS "${BASE}/api/${resource}" 2>/dev/null)
-  has "$body" '"available":false' "/api/${resource} answers its empty shape until phase 9"
+  has "$body" '"available":true' "/api/${resource} is served by this process"
 done
 phases=$(curl -fsS "${BASE}/api/projects/${PROJECT}/phases" 2>/dev/null)
-has "$phases" '"phases"' "/api/projects/:id/phases answers its empty shape until phase 9"
+has "$phases" '"phases"' "/api/projects/:id/phases answers with the phase list (TP-06)"
 missing=$(curl -sS -o /dev/null -w '%{http_code}' "${BASE}/api/projects/ghost" 2>/dev/null)
 if [ "$missing" = "404" ]; then ok "an unknown project answers 404, not a crash";
 else bad "an unknown project answers 404, not a crash (got $missing)"; fi
@@ -182,7 +195,7 @@ else
   bad "a fresh subscriber gets the whole overview immediately"
 fi
 
-launched=$(mcp launch_chain "{\"projectId\":\"${PROJECT}\",\"title\":\"Panel flow\",\"tasks\":[{\"title\":\"Create panel.txt\",\"spec\":\"Create a file panel.txt in the project root containing the single line 'watched from the panel'. Nothing else.\",\"agentId\":\"${AGENT}\",\"level\":\"quick\"}]}")
+launched=$(mcp launch_chain "{\"projectId\":\"${PROJECT}\",\"title\":\"Panel flow\",\"tasks\":[{\"title\":\"Create panel.txt\",\"spec\":\"Create a file panel.txt in the project root containing the single line 'watched from the panel'. Nothing else.\",\"expects\":\"panel.txt in the project root, one line, exactly 'watched from the panel'\",\"agentId\":\"${AGENT}\",\"level\":\"quick\"}]}")
 chain_id=$(jq_get "$launched" "j.chainId")
 if [ -n "$chain_id" ]; then ok "a chain was launched through MCP while the stream was open";
 else bad "a chain was launched through MCP while the stream was open"; echo "  $launched"; fi

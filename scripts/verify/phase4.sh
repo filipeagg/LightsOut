@@ -124,8 +124,11 @@ check "docker exec -w /workspace/projects/${GOOD} $CONTAINER git log --format=%s
   "commit messages carry the task id (PM-04)"
 check "docker exec $CONTAINER grep -q 'lightsout:begin' /workspace/projects/${GOOD}/doc/STATE.md" \
   "STATE.md has the managed block (PM-02)"
-check "docker exec $CONTAINER grep -q 'chain \"Three files\" 3/3' /workspace/projects/${GOOD}/doc/STATE.md" \
+# Machine-first since BA-07 (§20): the block is `key: value`, not the sentence it used to be.
+check "docker exec $CONTAINER grep -q 'chain.progress: 3/3' /workspace/projects/${GOOD}/doc/STATE.md" \
   "STATE.md reports the finished chain from the database (PM-02, OB-01)"
+check "docker exec $CONTAINER grep -q 'chain.title: Three files' /workspace/projects/${GOOD}/doc/STATE.md" \
+  "and names the chain it is reporting (PM-02)"
 plan_ticked=$(docker exec "$CONTAINER" grep -c -- "- \[x\]" "/workspace/projects/${GOOD}/doc/PLAN.md" 2>/dev/null)
 expect_eq "${plan_ticked:-0}" "3" "PLAN.md checkboxes ticked by task id (PM-02)"
 expect_ge "$(sql "SELECT COUNT(*) AS n FROM events WHERE type='verify.result'")" 1 \
@@ -193,7 +196,7 @@ check "! docker exec $CONTAINER test -f /workspace/projects/${BAD}/second.txt" \
   "the second task produced nothing"
 
 # Guard against a gate that silently skips checks.
-expected_checks=26
+expected_checks=27
 if [ "$((pass + fail))" -ne "$expected_checks" ]; then
   bad "gate integrity: ran $((pass + fail)) checks, expected $expected_checks"
 fi

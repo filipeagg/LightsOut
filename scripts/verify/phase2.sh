@@ -74,7 +74,12 @@ schema_version=$(sql 'SELECT MAX(version) AS v FROM schema_migrations')
 table_count=$(sql "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table'")
 view_count=$(sql "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='view'")
 
-expect_eq "$schema_version" "1" "migration 1 applied in /data/lightsout.db (DB-01)"
+# The head the code carries, not a number written here: this gate was pinned to 1 and went red
+# on every migration since. What it is really checking is that the database is at the version
+# the image expects, and that a restart does not move it (RT-07).
+expected_version=$(grep -Eo '^  \{ version: [0-9]+' src/db/migrate.ts | grep -Eo '[0-9]+' | sort -n | tail -1)
+expect_eq "$schema_version" "$expected_version" \
+  "the database is at the version this image carries (DB-01)"
 expect_ge "$table_count" 10 "all tables created (DB-01)"
 expect_ge "$view_count" 2 "aggregation views created (OB-05)"
 check "docker exec $CONTAINER test -f /data/lightsout.db-wal" "WAL journal in use (DB-01)"
@@ -92,7 +97,7 @@ for _ in $(seq 1 30); do
   curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1 && break
   sleep 1
 done
-expect_eq "$(sql 'SELECT MAX(version) AS v FROM schema_migrations')" "1" \
+expect_eq "$(sql 'SELECT MAX(version) AS v FROM schema_migrations')" "$schema_version" \
   "migrations are idempotent across restarts"
 
 health_after=$(curl -fsS "http://127.0.0.1:${PORT}/health" 2>/dev/null)

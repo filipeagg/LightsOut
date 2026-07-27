@@ -226,7 +226,7 @@ docker exec "$CONTAINER" node -e '
   const Database = require("better-sqlite3");
   new Database(process.env.LO_DB).prepare("DELETE FROM projects WHERE id = ?").run(process.argv[1]);
 ' "$PROJECT" >/dev/null 2>&1
-created=$(post /api/projects "{\"name\":\"${PROJECT}\",\"verify\":\"true\"}")
+created=$(post /api/projects "{\"name\":\"${PROJECT}\",\"verify\":\"true\",\"context\":\"goal: prove the wizard creates a project the way MCP does\\nactors: the phase 8 script\\ndone_when: the folder is visible on the host and exports as a zip\",\"template\":\"none\",\"templateReason\":\"a wizard fixture: nothing is built in it\"}")
 project_id=$(jq_get "$created" "j.project.id")
 if [ "$project_id" = "$PROJECT" ]; then ok "the wizard creates the project through the same call as MCP (PM-01)";
 else bad "the wizard creates the project through the same call as MCP (PM-01) (got '$project_id')"; fi

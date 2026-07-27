@@ -313,7 +313,10 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
           verify: z.string().optional(),
           push: z.enum(["auto", "manual", "never"]).optional(),
           defaultAgent: z.string().optional(),
+          // TP-09: the panel's select always sends one, and "none" carries its reason. Optional
+          // here only because the field arrived after projects existed without it.
           template: z.string().optional(),
+          templateReason: z.string().optional(),
           knowledge: z.array(z.string().min(1)).optional(),
           writableKnowledge: z.string().optional(),
         }),

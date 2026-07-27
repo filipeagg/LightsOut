@@ -399,6 +399,9 @@ export class TaskRunner {
       };
     } finally {
       this.live.unregister(run.id);
+      // DO-08: the per-run permission memory dies with the run, which is what makes it safe for
+      // classes that must never be remembered across runs.
+      this.doubts.forgetRun(run.id);
     }
 
     this.repos.runs.finish(run.id, {

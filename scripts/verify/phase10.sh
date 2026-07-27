@@ -172,6 +172,9 @@ check "get '/api/knowledge/${KB}/doc?path=rules.md' | grep -q CINNABAR" \
   "GET /api/knowledge/:id/doc reads it back"
 
 echo "-- the vault, write-only values (VT-03)"
+# Its own entry, taken back out on every exit path: the only vault the container reads is the
+# user's (VT-02), and a gate does not get to leave things in it (see the phase 9 note).
+trap 'send DELETE /api/vault/p10-entry >/dev/null 2>&1' EXIT INT TERM
 send DELETE /api/vault/p10-entry >/dev/null
 entry=$(send PUT /api/vault/p10-entry '{"label":"Panel entry","auth":"bearer","test_only":true,"fields":{"token":"panel-secret-value"}}')
 check "printf '%s' \"\$entry\" | grep -q '\"ok\": *true'" "PUT /api/vault/:id stores an entry"

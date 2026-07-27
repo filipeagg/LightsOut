@@ -76,6 +76,8 @@ const INTERNAL = new Set([
   "requireNoActiveRun",
   "currentDoc",
   "commitDoc",
+  // SR-09: resolving "the run in flight for this project" for steer and stop.
+  "liveRunFor",
 ]);
 
 /** The one exception, with its reason (VT-02, MC-07). Adding to this list is a design decision. */
@@ -98,6 +100,7 @@ const TOOL_FOR: Record<string, string> = {
   answerDoubt: "answer_doubt",
   abortRun: "abort_run",
   stopRun: "stop_run",
+  steerRun: "steer_run",
   setProjectContext: "set_project_context",
   setProjectUnattended: "set_project_unattended",
   addArea: "add_area",

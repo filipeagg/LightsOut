@@ -737,6 +737,43 @@ Per run: hard timer (`quick`→`LO_TIMEOUT_QUICK_MIN`, `full`→`LO_TIMEOUT_FULL
 
 From ACP turn metadata when the adapter reports usage; `cost_usd` stays NULL otherwise (Codex reports tokens only — mirrored from the current system's experience). Never estimated.
 
+### 6.8 Steering a run that is already going (SR-09, MC-15)
+
+**The failure this fixes.** A run is doing the right thing badly, or the user learns something the
+run needs, and the only verbs are `stop_run` and `abort_run`. Everything the agent has understood so
+far is thrown away to say one sentence to it.
+
+**What is not possible, and why.** Two obvious ideas are dead ends, and they are written down here
+so nobody spends another afternoon on them. First, the permission response cannot carry a message:
+ACP's `RequestPermissionResponse` is `{outcome: "selected", optionId}` or `{outcome: "cancelled"}`,
+and nothing else — the `explanation` of a rejection already ends up in the timeline rather than in
+the agent's context (`session.ts`). Second, there is no mid-turn injection: a turn is one
+`session/prompt` call, and the adapter will not accept a second while it is in flight.
+
+So a note reaches the agent by two routes, and the second one does not need its cooperation.
+
+1. **The inbox file, read while the turn runs.** `steer_run` appends to
+   `.lightsout/inbox.md` in the project. The protocol block (MC-11) tells every agent to read that
+   file before each significant step and to honour what it finds. Immediate when the agent obeys,
+   and free when it does not.
+2. **A steering turn at the end of the turn.** When the turn ends, the runner asks for notes that
+   have not been delivered yet; if there are any, it sends them as a **new prompt on the same
+   session** and keeps going. The agent keeps its whole context — files read, decisions made — and
+   answers the correction instead of being killed for it. Capped at `MAX_STEERING_TURNS = 3` so a
+   note that arrives during a steering turn is honoured, and a loop is not.
+
+The run therefore cannot finish with a note unread. If the agent ignores the file, it still gets the
+note before it is allowed to stop.
+
+**Persistence.** Notes are rows in `run_notes` (migration 14): the run, the text, who wrote it, when
+it was written and when it was delivered. A run that was steered is not reproducible from the
+sequence of events alone (OB-02) unless the steering is part of that sequence, so each note is also
+an event, `run.steered`, and appears in the panel's timeline as a decision.
+
+**A steer is not an answer.** It never resolves a doubt, never closes a gate, and never grants a
+permission. A run waiting on a human is waiting on `answer_doubt`; a note left on it is delivered
+when the run is running again.
+
 ## 7. Policy engine (PE-01..06)
 
 ### 7.1 Action classes (`classify.ts`)
@@ -1676,6 +1713,7 @@ two surfaces are skins, and a skin that is missing a control is a fork in slow m
 | `launch_chain` | `{projectId, title, tasks:[{title,spec,agentId,level?,verify?}]}` | `{chainId, taskIds, started:bool, queued:bool}` | fire-and-forget (MC-06) |
 | `launch_task` | `{projectId, title, spec, agentId, level?, verify?, chainId?}` | `{taskId, runId?, queued}` | appends to chain if given |
 | `abort_run` | `{runId?, chainId?}` | `{aborted:[ids]}` | OR-06 |
+| `steer_run` | `{projectId?, runId?, note}` | `{runId, noteId, pending, inbox}` | corrects a run in flight without killing it: the note lands in the agent's inbox and anything unread is handed over in a steering turn before the run may finish (SR-09, §6.8) |
 | `resume_chain` | `{projectId?, chainId?}` | `{chainId, requeued:[ids], started:bool}` | OR-05. The counterpart to the pause: queues the tasks that did not finish and leaves `ok` ones alone. Never automatic — a chain paused by a container restart or a failed task had no way back before this |
 | `list_doubts` | `{projectId?, status?:'open'}` | `{doubts:[{id,ref,projectId,taskTitle,kind,context,blocks,options,recommendation,secondOpinion?,ageMin}]}` | Desktop renders options as buttons (MC-03) |
 | `answer_doubt` | `{doubtId, choice, note?}` | `{resumed:bool, runId?}` | DO-04; `doubtId` accepts the ulid or the `ref` (`D-3`) when `projectId` context is unambiguous |

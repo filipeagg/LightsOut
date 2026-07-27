@@ -359,6 +359,13 @@ export class TaskRunner {
             ...(request.judgeEligible ? { judgeEligible: true } : {}),
             ...(project.unattended ? { unattended: true } : {}),
           })),
+      // SR-09 (§6.8): whatever the person left for this run and the agent has not been handed.
+      // Taken and marked delivered in one transaction, so the inbox file and the steering turn
+      // cannot both claim the same note.
+      takeSteering: () =>
+        this.repos.runNotes
+          .takePending(run.id, "turn")
+          .map((row) => ({ note: row.note, created_at: row.created_at })),
       ...(input.onStderr ? { onStderr: input.onStderr } : {}),
     });
 

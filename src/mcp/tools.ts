@@ -456,6 +456,31 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
   );
 
   tool(
+    "steer_run",
+    "Correct a run that is already going, without killing it (SR-09). The note lands in the " +
+      "agent's inbox, which the protocol tells it to read between steps, and whatever it has not " +
+      "read is handed to it before the run is allowed to finish. Use this instead of abort_run " +
+      "when the work so far is worth keeping. It is not an answer to a doubt and grants nothing.",
+    {
+      projectId: z.string().min(1).optional().describe("The project whose run is in flight."),
+      runId: z.string().min(1).optional().describe("Or the run itself, when you have its id."),
+      note: z
+        .string()
+        .min(1)
+        .describe(
+          "What should change, in your words. One correction, stated plainly: it outranks the " +
+            "task spec on the point it makes and changes nothing else.",
+        ),
+    },
+    async ({ projectId, runId, note }) =>
+      actions.steerRun("mcp", {
+        ...(runId ? { runId } : {}),
+        ...(projectId ? { projectId } : {}),
+        note,
+      }),
+  );
+
+  tool(
     "resume_chain",
     "Put a paused or interrupted chain back to work, queueing the tasks that did not finish (OR-05).",
     { projectId: z.string().optional(), chainId: z.string().optional() },

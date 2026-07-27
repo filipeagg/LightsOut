@@ -564,11 +564,27 @@ function runCard(run) {
     </div>
     ${last ? `<div class="note" style="margin-top:16px"><span class="mono">${esc(last.type)}</span>
       — ${esc(JSON.stringify(last.payload).slice(0, 200))}</div>` : ""}
-    <div class="row" style="margin-top:16px">
+    <label class="tiny" style="display:block;margin-top:16px">Correct it without killing it (SR-09)<br>
+      <input id="steer-${esc(run.id)}" style="width:100%"
+        placeholder="what should change — it lands in the agent's inbox and it will get it before it can finish"></label>
+    <div class="row" style="margin-top:12px">
+      <button class="btn primary" onclick="steerRun('${esc(run.projectId)}','${esc(run.id)}')">Send the note</button>
       <button class="btn danger" onclick="stopRun('${esc(run.id)}')">Stop this run now</button>
       <button class="btn danger" onclick="abortRun('${esc(run.id)}')">Stop and abort the chain</button>
     </div>
   </div>`;
+}
+
+/**
+ * SR-09: leave a note for the run in flight. The agent reads its inbox between steps, and the
+ * runner hands over anything it missed before the run is allowed to finish, so this is not a
+ * message in a bottle — but it is not instant either, and the button says so.
+ */
+async function steerRun(projectId, runId) {
+  const box = $(`steer-${runId}`);
+  const note = box && box.value.trim();
+  if (!note) { store.error = "say what should change"; return paint(); }
+  await act("POST", `/api/projects/${encodeURIComponent(projectId)}/steer`, { note });
 }
 
 /**

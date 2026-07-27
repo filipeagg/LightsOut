@@ -129,6 +129,8 @@ export class ProjectsRepo {
       "DELETE FROM project_areas WHERE project_id = ?",
       "DELETE FROM toolchain_grants WHERE project_id = ?",
       "DELETE FROM previews WHERE project_id = ?",
+      // Migration 14 (SR-09): notes point at both the run and the project, so they go before runs.
+      "DELETE FROM run_notes WHERE project_id = ?",
       `DELETE FROM runs WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`,
       "DELETE FROM tasks WHERE project_id = ?",
       "DELETE FROM chains WHERE project_id = ?",

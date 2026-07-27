@@ -66,7 +66,49 @@ function seedFullProject(id: string): { taskId: string; runId: string } {
     kind: "technical",
     writable: false,
   });
+  // The three that migrations 5, 9 and 10 added and nobody added to the cascade. Seeded here so
+  // "one of everything that points at it" is true again, not just true when it was written.
+  repos.areas.add({ projectId: id, path: "sources/legacy-core", addedBy: "panel" });
+  db.prepare(
+    `INSERT INTO toolchain_grants (id, project_id, manager, granted_by, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(`tg-${id}`, id, "npm", "panel", new Date().toISOString());
+  db.prepare(
+    `INSERT INTO previews
+       (id, project_id, port, command, normalised, cwd, log_path, status, started_by, started_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'stopped', 'panel', ?)`,
+  ).run(
+    `pv-${id}`,
+    id,
+    id === "doomed" ? 5170 : 5171,
+    "npm run dev",
+    "npm run dev",
+    `/workspace/projects/${id}`,
+    `/workspace/projects/${id}/.lightsout/tmp/preview.log`,
+    new Date().toISOString(),
+  );
   return { taskId: task.id, runId: run.id };
+}
+
+/**
+ * Every table that holds rows belonging to a project, read from the schema rather than listed.
+ *
+ * The point of doing it this way: `remove()` is a cascade typed out by hand, three migrations
+ * added tables without touching it, and the failure surfaced as `FOREIGN KEY constraint failed`
+ * on a delete the user could not explain. A list written here would have gone stale exactly as
+ * the one in the repository did.
+ */
+function tablesOwnedByAProject(): string[] {
+  const tables = (
+    db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+      .all() as { name: string }[]
+  ).map((r) => r.name);
+  return tables.filter((table) =>
+    (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some(
+      (c) => c.name === "project_id",
+    ),
+  );
 }
 
 beforeEach(() => {
@@ -91,6 +133,33 @@ describe("archiving a project (PM-08)", () => {
 });
 
 describe("deleting a project for good (PM-08)", () => {
+  it("empties every table that holds rows for it, whatever a migration added", () => {
+    // Read from the schema, so a table added later cannot quietly stay out of the cascade.
+    const owned = tablesOwnedByAProject();
+    seedFullProject("doomed");
+    seedFullProject("survivor");
+
+    // The seed has to be honest about what it covers, or the assertion below proves nothing.
+    const seeded = owned.filter(
+      (t) =>
+        (db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE project_id = ?`).get("doomed") as {
+          n: number;
+        }).n > 0,
+    );
+    expect(seeded.sort(), "seedFullProject does not cover every project-owned table").toEqual(
+      owned.sort(),
+    );
+
+    expect(() => repos.projects.remove("doomed")).not.toThrow();
+
+    for (const table of owned) {
+      const row = db.prepare(`SELECT COUNT(*) n FROM ${table} WHERE project_id = ?`).get("doomed");
+      expect((row as { n: number }).n, `${table} still holds rows for the deleted project`).toBe(0);
+      const kept = db.prepare(`SELECT COUNT(*) n FROM ${table} WHERE project_id = ?`).get("survivor");
+      expect((kept as { n: number }).n, `${table} lost the other project's rows`).toBeGreaterThan(0);
+    }
+  });
+
   it("removes the project and everything hanging off it", () => {
     const { taskId, runId } = seedFullProject("doomed");
     const count = (sql: string, ...args: unknown[]): number =>

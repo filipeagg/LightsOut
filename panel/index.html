@@ -383,18 +383,55 @@ async function archiveProject(id, archived) {
  * Deleting a project is the one action that destroys work, so it is not a yes/no box: the id has
  * to be typed back, which is the same `confirm` the API demands (WP-11, PM-08).
  */
-async function deleteProject(id) {
-  const typed = window.prompt(
-    `This deletes ${id} for good: its whole history and its folder in the workspace.\n\n` +
-      `Type the project id to confirm:`,
-  );
-  if (typed === null) return;
-  if (typed.trim() !== id) {
-    store.error = `"${typed}" is not ${id}; nothing was deleted`;
+/**
+ * Open the inline confirmation. Not `window.prompt`: a browser that has been told to block
+ * dialogs returns null from it without showing anything, the code read that as "cancelled" and
+ * said nothing, and the button looked broken. A destructive action must never fail silently.
+ */
+function deleteProject(id) {
+  editing = `delete:${id}`;
+  paint();
+}
+
+/** The card the button opens: type the id, and choose what happens to the folder (PM-08). */
+function deleteProjectCard(p) {
+  return `<div class="card pad" style="margin-bottom:24px;border-color:var(--red-line)">
+    <div><b>Delete ${esc(p.id)}</b>
+      <div class="tiny muted">This removes its history, its chains and its doubts. It cannot be
+        undone. Archiving instead hides it and keeps everything.</div></div>
+    <label class="tiny" style="display:block;margin-top:12px">Type <code>${esc(p.id)}</code> to confirm<br>
+      <input id="del-confirm" style="width:100%;max-width:360px" autocomplete="off"></label>
+    <label class="row tiny" style="gap:6px;margin-top:10px;cursor:pointer">
+      <input type="checkbox" id="del-keep" checked>
+      keep the folder in the workspace (<code class="tiny">${esc(p.path)}</code>)</label>
+    <div class="row" style="gap:8px;margin-top:12px">
+      <button class="btn danger" onclick="confirmDeleteProject('${esc(p.id)}')">Delete for good</button>
+      <button class="btn" onclick="editing=null;paint()">Cancel</button>
+    </div>
+  </div>`;
+}
+
+async function confirmDeleteProject(id) {
+  const typed = field("del-confirm");
+  if (typed !== id) {
+    store.error = typed
+      ? `"${typed}" is not ${id}; nothing was deleted`
+      : `type ${id} to confirm; nothing was deleted`;
     return paint();
   }
-  await act("DELETE", `/api/projects/${encodeURIComponent(id)}`, { confirm: id });
-  location.hash = "#/projects";
+  const keepFiles = checked("del-keep");
+  editing = null;
+  const result = await act("DELETE", `/api/projects/${encodeURIComponent(id)}`, {
+    confirm: id,
+    keepFiles,
+  });
+  // Only leave the page when the server actually did it; an error belongs where it can be read.
+  if (result && result.ok !== false) {
+    store.notice = keepFiles
+      ? `${id} deleted; its folder was left in the workspace`
+      : `${id} and its folder were deleted`;
+    location.hash = "#/projects";
+  }
 }
 
 const field = (id) => {
@@ -1309,8 +1346,9 @@ function viewProject() {
         ${p.archived ? "Unarchive" : "Archive"}</button>
       <button class="btn sm danger" onclick="deleteProject('${esc(p.id)}')">Delete this project</button>
       <span class="tiny muted">Archiving hides it and keeps everything. Deleting removes its
-        history and its folder in the workspace, for good (PM-08).</span>
+        history, and its folder too unless you say otherwise (PM-08).</span>
     </div>
+    ${editing === `delete:${p.id}` ? deleteProjectCard(p) : ""}
     ${s.run ? runCard(s.run) : stoppedCard(s)}
     ${s.doubts.length ? `<h2>Open doubts <em>${s.doubts.length}</em></h2>${s.doubts.map(doubtCard).join("")}` : ""}
     <h2>Phases</h2>

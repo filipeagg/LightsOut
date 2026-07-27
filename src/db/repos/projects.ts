@@ -119,6 +119,13 @@ export class ProjectsRepo {
       "DELETE FROM doubts WHERE project_id = ?",
       "DELETE FROM project_phases WHERE project_id = ?",
       "DELETE FROM project_knowledge WHERE project_id = ?",
+      // Added by migrations 5, 9 and 10, and missing from this list until a delete failed with
+      // `FOREIGN KEY constraint failed` and no other explanation. A cascade typed out by hand
+      // does not notice a new table; `test/project-delete.test.ts` now reads the schema and
+      // fails when one is missing, so migration 13 cannot do this again.
+      "DELETE FROM project_areas WHERE project_id = ?",
+      "DELETE FROM toolchain_grants WHERE project_id = ?",
+      "DELETE FROM previews WHERE project_id = ?",
       `DELETE FROM runs WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`,
       "DELETE FROM tasks WHERE project_id = ?",
       "DELETE FROM chains WHERE project_id = ?",

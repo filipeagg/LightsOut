@@ -30,6 +30,8 @@ export type RuleSource = "project" | "agent" | "default";
 
 export type EventType =
   | "run.state"
+  /** A person corrected a run in flight (SR-09, §6.8). */
+  | "run.steered"
   | "task.state"
   | "chain.state"
   | "agent.message"

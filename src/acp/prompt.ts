@@ -10,13 +10,17 @@ import { SCRATCH_REL } from "../policy/classify.js";
 import { HUMAN_MARKER } from "../projects/deliverable.js";
 
 /**
+ * 7: the inbox — the user can correct this run without killing it (SR-09, §6.8).
  * 6: there is no browser in this container, and none can be installed (MC-11). A qa run spent
  * three permission gates hunting for chromium and playwright before working that out.
  * 5: where files go, how credentials are used, and how to publish something (PM-11, MC-11).
  * 4: where to install a library, and what never to try (ST-03b). 3: machine-first documents
  * (BA-07). 2: the tooling licence and the scratch directory (PE-07, PE-08).
  */
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
+
+/** Where a note left for this run lands, project-relative (SR-09, §6.8). */
+export const INBOX_REL = ".lightsout/inbox.md";
 
 /** Constant, versioned protocol block (DESIGN §6.2 block 2). */
 export const PROTOCOL_BLOCK = `# LightsOut protocol v${PROTOCOL_VERSION}
@@ -26,6 +30,16 @@ You are running unattended inside LightsOut. No human is watching this turn.
 Permissions are mediated by policy, not by a person. A denial is not a failure and not a
 reason to retry the same action: adapt, or finish by raising a doubt that explains what you
 needed. Never work outside the project directory.
+
+## Your inbox
+
+The person who launched this run can correct it while it runs. Their notes land in
+\`${INBOX_REL}\`. Read that file before each significant step — before you start building, before
+you commit, before you write your report. It usually does not exist, and that costs you nothing.
+
+A note there outranks the task spec on the point it makes, and nothing else changes. Say in your
+report which notes you acted on. You will be handed anything you missed before this run is allowed
+to finish, so ignoring the file only makes the correction arrive later.
 
 ## Where things go
 
@@ -219,6 +233,28 @@ export async function readDocContext(projectPath: string): Promise<DocContext> {
   if (plan !== undefined) context.plan = plan;
   if (decisions !== undefined) context.decisions = decisions;
   return context;
+}
+
+/**
+ * The prompt of a steering turn (SR-09, §6.8): what the person said, handed to an agent that has
+ * just finished a turn and is about to be allowed to stop.
+ *
+ * Deliberately short and without ceremony. The agent still has everything it read; repeating the
+ * task here would invite it to start again, which is the opposite of the point.
+ */
+export function composeSteering(notes: { note: string; created_at: string }[]): string {
+  const lines = notes.map((n, i) => `note.${i + 1} (${n.created_at.slice(0, 19)}Z): ${n.note.trim()}`);
+  return [
+    "# Correction from the person who launched this run",
+    "",
+    "You are not finished. This arrived while you were working, and it outranks the task spec on",
+    "the point it makes. Nothing else about the task changes.",
+    "",
+    ...lines,
+    "",
+    "Act on it now, then finish as usual with the sentinel block, saying in your summary what you",
+    "changed because of this.",
+  ].join("\n");
 }
 
 export function composePrompt(input: ComposeInput, docs: DocContext): string {

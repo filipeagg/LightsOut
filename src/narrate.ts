@@ -58,6 +58,14 @@ export function describeEvent(type: string, payload: Payload): Omit<NarratedLine
         tone: status === "aborted" || status === "interrupted" ? "decision" : "problem",
       };
     }
+    // SR-09: a correction is a decision someone made, and it belongs in the timeline next to the
+    // work it changed — otherwise the run reads as if it changed its mind on its own.
+    case "run.steered": {
+      const note = shorten(read(payload, "note"), 110);
+      const delivery = read(payload, "delivery");
+      if (delivery === "turn") return { text: `handed the correction: ${note}`, tone: "decision" };
+      return { text: `${read(payload, "actor") || "someone"} says: ${note}`, tone: "decision" };
+    }
     case "agent.thought":
       return { text: `thinking: ${shorten(read(payload, "textExcerpt"), 110)}`, tone: "work" };
     case "agent.message":

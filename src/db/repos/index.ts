@@ -19,6 +19,7 @@ import { AreasRepo } from "./areas.js";
 import { LearnedRepo } from "./learned.js";
 import { ToolchainGrantsRepo } from "./toolchain-grants.js";
 import { PreviewsRepo } from "./previews.js";
+import { RunNotesRepo } from "./run-notes.js";
 
 export type Repos = {
   db: Db;
@@ -42,6 +43,8 @@ export type Repos = {
   toolchainGrants: ToolchainGrantsRepo;
   /** Development servers LightsOut is running for a person to look at (PV-01). */
   previews: PreviewsRepo;
+  /** Corrections left for a run that is already going (SR-09). */
+  runNotes: RunNotesRepo;
 };
 
 export function createRepos(db: Db): Repos {
@@ -63,6 +66,7 @@ export function createRepos(db: Db): Repos {
     learned: new LearnedRepo(db),
     toolchainGrants: new ToolchainGrantsRepo(db),
     previews: new PreviewsRepo(db),
+    runNotes: new RunNotesRepo(db),
   };
 }
 
@@ -83,4 +87,5 @@ export {
   LearnedRepo,
   ToolchainGrantsRepo,
   PreviewsRepo,
+  RunNotesRepo,
 };

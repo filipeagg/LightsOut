@@ -439,6 +439,16 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
     }),
   );
 
+  // SR-09 (§6.8): correct the run in flight instead of killing it. By project, because that is
+  // what the panel is looking at when the person decides to say something.
+  app.post("/api/projects/:id/steer", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = idParam.parse(request.params);
+      const input = body(z.object({ note: z.string().min(1) }), request.body);
+      return actions.steerRun("panel", { projectId: id, note: input.note });
+    }),
+  );
+
   app.post("/api/doubts/:id/answer", async (request, reply) =>
     envelope(reply, async () => {
       const { id } = idParam.parse(request.params);

@@ -6,7 +6,7 @@
  * one is the only place its rule lives — a route handler or a tool module that reaches into a
  * repo directly is a review failure, because that is exactly how two surfaces drift apart.
  */
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Config } from "../config.js";
 import type { Repos } from "../db/repos/index.js";
@@ -71,6 +71,7 @@ import {
   snapshotFile,
 } from "../projects/doc-history.js";
 import { applyEdits, type DocEdit } from "../projects/doc-patch.js";
+import { INBOX_REL } from "../acp/prompt.js";
 
 export type Actor = "mcp" | "panel" | "system";
 
@@ -660,6 +661,79 @@ export class Actions {
    * to abort: this one does not touch the queue, so the same task can be launched again, or a
    * different one, once whatever the agent was doing has been looked at.
    */
+  /**
+   * Leave a note for a run that is already going (SR-09, §6.8).
+   *
+   * Two deliveries, one row. The note is appended to `.lightsout/inbox.md` for an agent that
+   * reads it mid-turn, and it stays pending until something takes it — the runner hands over
+   * whatever is left at the end of the turn, so the run cannot finish without it.
+   *
+   * It is not an answer to a doubt and it grants nothing: a run waiting on a person is waiting on
+   * `answer_doubt`, and the note is delivered when it is running again.
+   */
+  async steerRun(
+    actor: Actor,
+    input: { runId?: string; projectId?: string; note: string },
+  ): Promise<{ runId: string; noteId: string; pending: number; inbox: string }> {
+    const { repos, orchestrator } = this.deps;
+    if (!input.note.trim()) throw new Error("a note cannot be empty: say what should change");
+
+    const runId = input.runId ?? this.liveRunFor(input.projectId);
+    const run = repos.runs.get(runId);
+    if (!run) throw new Error(`run not found: ${runId}`);
+    const task = repos.tasks.get(run.task_id);
+    if (!task) throw new Error(`run ${runId} has no task`);
+    if (run.status === "ok" || run.ended_at) {
+      throw new Error(`run ${runId} has already finished; launch again with the correction in it`);
+    }
+    const project = this.project(task.project_id);
+
+    const row = repos.runNotes.add({
+      runId,
+      projectId: project.id,
+      note: input.note,
+      createdBy: actor,
+    });
+
+    // The file the protocol tells every agent to read (MC-11). Appended, never rewritten: a
+    // second note must not erase the first, and the agent may be reading it right now.
+    const inbox = path.join(project.path, INBOX_REL);
+    await mkdir(path.dirname(inbox), { recursive: true });
+    await appendFile(
+      inbox,
+      `## ${row.created_at.slice(0, 19)}Z (${actor})\n\n${input.note.trim()}\n\n`,
+      "utf8",
+    );
+
+    // The event is what puts it in the timeline and what keeps the run reconstructible from the
+    // record (OB-02, OB-06); the SSE stream follows the event cursor, so the panel sees it.
+    repos.events.append({
+      runId,
+      type: "run.steered",
+      payload: { note: input.note.trim().slice(0, 400), actor, delivery: "inbox" },
+    });
+
+    return {
+      runId,
+      noteId: row.id,
+      pending: repos.runNotes.countPending(runId),
+      inbox,
+    };
+  }
+
+  /** The run in flight for a project, however the caller named it (SR-09, §5.4). */
+  private liveRunFor(projectId?: string): string {
+    const { repos, orchestrator } = this.deps;
+    if (!projectId) throw new Error("give runId or projectId");
+    const live = orchestrator.live.forProject(projectId)[0];
+    if (live) return live.runId;
+    const found = repos.runs
+      .listActive()
+      .find((run) => repos.tasks.get(run.task_id)?.project_id === projectId);
+    if (!found) throw new Error(`no run in flight for project ${projectId}`);
+    return found.id;
+  }
+
   async stopRun(
     actor: Actor,
     input: { runId?: string; projectId?: string },

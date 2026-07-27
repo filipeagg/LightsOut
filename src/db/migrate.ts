@@ -374,6 +374,27 @@ const TEMPLATE_REASON_SQL = `
 ALTER TABLE projects ADD COLUMN template_reason TEXT;
 `;
 
+/**
+ * Version 14 (SR-09, §6.8): notes left for a run that is already going.
+ *
+ * A row rather than a field: a run can be corrected more than once, each note has its own author
+ * and its own moment, and `delivered_at` is what makes "the run cannot finish without having read
+ * it" a query instead of a hope.
+ */
+const RUN_NOTES_SQL = `
+CREATE TABLE run_notes (
+  id           TEXT PRIMARY KEY,
+  run_id       TEXT NOT NULL REFERENCES runs(id),
+  project_id   TEXT NOT NULL REFERENCES projects(id),
+  note         TEXT NOT NULL,
+  created_by   TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  delivered_at TEXT,
+  delivery     TEXT CHECK (delivery IS NULL OR delivery IN ('inbox','turn'))
+);
+CREATE INDEX ix_run_notes_pending ON run_notes(run_id) WHERE delivered_at IS NULL;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial schema", up: applyInitialSchema },
   {
@@ -403,6 +424,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 11, name: "unattended projects", up: UNATTENDED_SQL },
   { version: 12, name: "writable areas", up: AREA_ACCESS_SQL },
   { version: 13, name: "why a project has no template", up: TEMPLATE_REASON_SQL },
+  { version: 14, name: "notes left for a running run", up: RUN_NOTES_SQL },
 ];
 
 /** The marker migration 4 writes, and the panel looks for (PM-09). */

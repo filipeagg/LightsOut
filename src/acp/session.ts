@@ -10,6 +10,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import type {
   PermissionOption,
   PermissionOptionKind,
+  PromptResponse,
   RequestPermissionRequest,
   RequestPermissionResponse,
   SessionNotification,
@@ -28,7 +29,7 @@ import { spawnAdapter, type AdapterProcess } from "./adapter.js";
 import { SCRATCH_REL } from "../policy/classify.js";
 import { toolchainEnv } from "../projects/toolchain.js";
 import { parseResult, type AgentResult, type DoubtPayload } from "./result.js";
-import { composePrompt, readDocContext } from "./prompt.js";
+import { composePrompt, composeSteering, readDocContext } from "./prompt.js";
 
 export type SessionLimits = {
   /** Hard timeout in minutes (SR-04). */
@@ -90,6 +91,12 @@ export type RunSessionDeps = {
   writeAreas?: string[];
   /** Defaults to rejecting with an explanation, which is honest for phase 3. */
   humanGate?: HumanGate;
+  /**
+   * SR-09 (§6.8): notes left for this run that nobody has handed over yet. Called at the end of
+   * every turn; anything it returns becomes one more turn on the same session, so a run cannot
+   * finish with a correction unread. Marking them delivered is the callee's job.
+   */
+  takeSteering?: () => { note: string; created_at: string }[];
   onStderr?: (line: string) => void;
 };
 
@@ -111,6 +118,12 @@ const MESSAGE_FLUSH_MS = 2000;
 /** Below this a chunk is a fragment, not a sentence; it waits for the next one (OB-06). */
 const MESSAGE_MIN_CHARS = 40;
 const CANCEL_GRACE_MS = 10_000;
+/**
+ * How many extra turns a run may be given to absorb corrections (SR-09). Three, so a note that
+ * arrives *during* a steering turn is still honoured, and a person typing faster than the agent
+ * works cannot keep a run alive for ever.
+ */
+const MAX_STEERING_TURNS = 3;
 
 /**
  * Recognise an authentication failure in whatever shape the adapter passed it through (§11.3).
@@ -739,15 +752,39 @@ export class RunSession {
             };
             repos.runs.setAcpSession(run.id, session.sessionId);
 
-            void session.prompt(prompt).catch((err: unknown) => {
-              failure = err instanceof Error ? err.message : String(err);
-            });
+            /** One prompt, drained to its stop. The turn is the unit; the run may have several. */
+            const turn = async (text: string): Promise<PromptResponse> => {
+              void session.prompt(text).catch((err: unknown) => {
+                failure = err instanceof Error ? err.message : String(err);
+              });
+              for (;;) {
+                const message = await session.nextUpdate();
+                if (message.kind === "stop") return message.response;
+                this.handleUpdate(message.notification);
+              }
+            };
 
-            for (;;) {
-              const message = await session.nextUpdate();
-              if (message.kind === "stop") return message.response;
-              this.handleUpdate(message.notification);
+            let response = await turn(prompt);
+
+            // SR-09 (§6.8): the run does not get to finish while a correction is undelivered.
+            // The agent keeps its whole context; it is answering, not starting again.
+            for (let extra = 0; extra < MAX_STEERING_TURNS; extra += 1) {
+              if (failure || this.aborted || this.expiry) break;
+              const notes = this.deps.takeSteering?.() ?? [];
+              if (notes.length === 0) break;
+              this.event("run.steered", {
+                notes: notes.length,
+                delivery: "turn",
+                first: notes[0]?.note.slice(0, 200),
+              });
+              // The previous turn's last message is not this turn's answer.
+              this.flushMessage(true);
+              this.finalMessage = "";
+              this.armInactivity();
+              response = await turn(composeSteering(notes));
             }
+
+            return response;
           });
         });
 

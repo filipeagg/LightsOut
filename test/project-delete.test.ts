@@ -87,6 +87,13 @@ function seedFullProject(id: string): { taskId: string; runId: string } {
     `/workspace/projects/${id}/.lightsout/tmp/preview.log`,
     new Date().toISOString(),
   );
+  // SR-09, migration 14: a correction left for a run of this project.
+  repos.runNotes.add({
+    runId: run.id,
+    projectId: id,
+    note: "use the other endpoint",
+    createdBy: "panel",
+  });
   return { taskId: task.id, runId: run.id };
 }
 

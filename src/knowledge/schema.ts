@@ -34,6 +34,12 @@ export const knowledgeManifestSchema = z
     kind: knowledgeKindSchema,
     /** Advisory unless said otherwise: a base becomes binding deliberately, never by default. */
     enforcement: enforcementSchema.default("advisory"),
+    /**
+     * Attach this base to every new project (KB-12). For the standing context nobody should have
+     * to remember: the API contract of the system every project talks to, the house conventions.
+     * It decides the default and never the outcome — a project detaches it like any other.
+     */
+    default_attach: z.boolean().default(false),
     description: z.string().default(""),
     tags: z.array(z.string().min(1)).default([]),
     owner: z.string().optional(),

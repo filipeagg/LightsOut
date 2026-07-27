@@ -44,6 +44,9 @@ const READ_ONLY = new Set([
   "phase",
   "knowledgeFolders",
   "adoptableFolders",
+  // KB-12: the ids that exist, so a caller can derive one that is free. `list_knowledge` already
+  // serves the bases themselves; this is the same read, narrower.
+  "knowledgeIds",
   // AP-09: the engines and models a launch may name. `list_agents` serves the same catalog and
   // `GET /api/agents/models` serves it to the panel, but it is a read either way.
   "modelCatalog",

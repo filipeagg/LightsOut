@@ -1039,6 +1039,45 @@ A `config.toml` without the managed marker belongs to a person and is **never** 
 logs what it found, and warns when the file confines the engine below what LightsOut expects, so
 the next hour is not spent in the classifier again.
 
+### 7.1f `process.env` is not `.env`
+
+The fifth spelling, and the widest of them. The doubt the user was shown:
+
+```
+timeout 180 node .lightsout/tmp/probe.js 2>&1
+  → credentials: script .lightsout/tmp/probe.js reads or carries credentials (.env)
+```
+
+The script opens no such file. It reads `process.env.LO_VAULT_EFEMIS_USUARIO`, and the pattern
+was `\.env\b` — where `\b` sits happily between the `v` of `process.env` and the dot after it.
+
+**Every Node script that read an environment variable was a credential read.** On the hard floor:
+no judge, no learned allow, no grant. Reading `process.env` is how a program uses the vault the
+system handed it (§7.1d) — the normal case, matched as the dangerous one, in the single place
+where being wrong costs the whole run.
+
+A file name is not preceded by an identifier character and not followed by one:
+
+```
+(?<![A-Za-z0-9_])\.env(?:\.[A-Za-z0-9_-]+)?(?![A-Za-z0-9_.])
+```
+
+`.env` and `.env.local` match; `process.env.X` and `os.environ` do not. Used in both places the
+old pattern lived: the script-body families, and the reading-tools matcher where `cat .env` is
+caught.
+
+**And the ownership question is now asked of the body too.** PE-13 gave `credentials` an
+`evidence` field so the judge could rescue a run's own vault entry, but only on the command-line
+path — `classifyScript()` returned a bare `credentials`, so a secret detected inside code could
+never be rescued. That is the same gap one layer down, and it is why the fourth and fifth
+spellings both got through after PE-13 was supposedly the general fix.
+
+What still stops, and should: `console.log(process.env.LO_VAULT_EFEMIS_PASSWORD)`. Owning the key
+does not make printing it safe — the value lands in the transcript — so the subtractive test does
+not clear it, and it stays a person's decision. Verified against the deployed classifier by
+`scripts/verify-dotenv-7-1f.mjs`, 6/6: the doubt's own command is `network → allow`, while
+printing the secret, reading `.env` from code, and `cat .env` are all still `credentials`.
+
 ### 7.7 Unattended mode (OR-12)
 
 LightsOut exists to run agents **unattended**. A permission gate that parks a session until a

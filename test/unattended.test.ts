@@ -176,6 +176,79 @@ describe("PE-13: whose secret is it", () => {
   });
 });
 
+describe("§7.1f: the file .env, not the expression process.env", () => {
+  // The doubt the user was shown: "script .lightsout/tmp/probe.js reads or carries credentials
+  // (.env)" — about a script that reads no such file. `\.env\b` matched `process.env`, so every
+  // Node script that read an environment variable was on the hard floor.
+  const body = (text: string) =>
+    classifier.classify({
+      projectPath: PROJECT,
+      command: "node .lightsout/tmp/probe.js",
+      commands: [`node -e ${JSON.stringify(text)}`],
+      vaultVars: VAULT_VARS,
+      vaultHosts: VAULT_HOSTS,
+    });
+
+  it("does not call reading an environment variable a credential read", () => {
+    const result = body("const u = process.env.LO_VAULT_EFEMIS_USUARIO; console.log(u.length);");
+    expect(result.class).not.toBe("credentials");
+  });
+
+  it("leaves the ordinary shapes of it alone too", () => {
+    for (const text of [
+      "const { PORT } = process.env;",
+      "if (process.env.NODE_ENV === 'test') {}",
+      "import os; os.environ.get('HOME')",
+    ]) {
+      expect(body(text).class, text).not.toBe("credentials");
+    }
+  });
+
+  it("still catches the actual file, in every spelling that is one", () => {
+    for (const text of [
+      "const s = require('fs').readFileSync('.env', 'utf8');",
+      "readFileSync('./.env.local')",
+      "open('/app/.env')",
+    ]) {
+      expect(body(text).class, text).toBe("credentials");
+    }
+  });
+
+  it("still catches a secret printed, and a key by name", () => {
+    expect(body("console.log(process.env.LO_VAULT_EFEMIS_PASSWORD)").class).toBe("credentials");
+    expect(body("const k = ANTHROPIC_API_KEY;").class).toBe("credentials");
+  });
+
+  it("printing the value stays a person's call, even when the secret is this run's own", () => {
+    // PE-13 asks whose secret it is; this asks what is being done with it, and the answer is
+    // "put in the transcript". Owning the key does not make that safe, so the ownership test
+    // does not clear it: something still matches once the variable name is blanked out.
+    const result = body("console.log(process.env.LO_VAULT_EFEMIS_PASSWORD)");
+    expect(result.class).toBe("credentials");
+    expect(result.evidence).not.toBe("vault_own");
+  });
+
+  it("using the value against the entry's own host is not a credential read at all", () => {
+    // The shape a probe actually has. After §7.1f nothing in it matches: it is a network call,
+    // which the pack decides, and never a hard-floor gate.
+    const result = body(
+      "const t = process.env.LO_VAULT_EFEMIS_PASSWORD;" +
+        "fetch('https://efemis-back.hispatec.com/user/authorization', { headers: { a: t } })",
+    );
+    expect(result.class).not.toBe("credentials");
+  });
+
+  it("carries the evidence through the body path, so PE-13 can reach it (§7.1d)", () => {
+    // The plumbing itself: a credentials verdict from the body now answers "whose secret", which
+    // it did not before — that gap is how the same false positive came back one layer down.
+    const result = body("const s = require('fs').readFileSync('.env', 'utf8');");
+    expect(result.class).toBe("credentials");
+    expect(result.evidence).toBeDefined();
+    expect(result.evidence).not.toBe("vault_own");
+    expect(judgeable({ actionClass: "credentials", projectPath: PROJECT })).toBe(false);
+  });
+});
+
 describe("a confined pack and the paths a command plainly names", () => {
   // `contract-prober`'s pack: writes confined to probes/ and doc/.
   const probe = policyPackSchema.parse({

@@ -1,0 +1,33 @@
+# Line endings (2026-07-27).
+#
+# Why this file exists: without it git on Windows converted the working tree to CRLF while the
+# index held LF, so `git status` reported sixteen files as modified when nothing in them had
+# changed — a 3305-insertion, 3305-deletion diff that `--ignore-cr-at-eol` showed to be empty.
+# Every commit then carried a page of "LF will be replaced by CRLF" warnings, and a real change
+# was impossible to tell apart from the noise.
+#
+# LF everywhere, including in the working tree. This is not a preference: `scripts/verify/*.sh`
+# run in Git Bash and inside the container, and a shell script with CRLF fails there with
+# `bad interpreter: /bin/bash^M`. The Dockerfile, the compose file and everything under src/ end
+# up in a Linux container too.
+* text=auto eol=lf
+
+# The exceptions, and the reason for each.
+# PowerShell and batch files are run by Windows tooling, which wants CRLF.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary: never touched, never diffed as text.
+*.mcpb binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.woff binary
+*.woff2 binary
+*.db binary
+*.sqlite binary

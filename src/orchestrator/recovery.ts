@@ -14,6 +14,17 @@ export type RecoveryReport = {
 };
 
 /**
+ * Task states in which the phase is still that phase's work: not finished, and going to continue.
+ *
+ * `doubt` belongs here and its absence was a bug. A task waiting on a decision is waiting, not
+ * dead — the orchestrator says so where it closes phases (§16.2: "a doubt is not terminal") — but
+ * a restart while a doubt was open demoted the phase to `pending`, and answering the doubt
+ * requeues the task without ever putting it back. The panel then showed a phase `pending` with a
+ * run visibly in flight underneath it, and offered a Launch button for work already running.
+ */
+const TASK_STILL_LIVE = new Set(["running", "queued", "doubt"]);
+
+/**
  * Enforce the invariant the panel depends on: a phase is `running` only while its task is.
  *
  * Doing this only for the runs a single recovery pass interrupts is not enough — a row left
@@ -27,7 +38,7 @@ function reconcilePhases(repos: Repos, reason: string): string[] {
     for (const phase of repos.phases.list(project.id)) {
       if (phase.status !== "running") continue;
       const task = phase.task_id ? repos.tasks.get(phase.task_id) : undefined;
-      if (task && (task.status === "running" || task.status === "queued")) continue;
+      if (task && TASK_STILL_LIVE.has(task.status)) continue;
       repos.phases.setStatus(phase.id, "pending");
       repos.events.append({
         type: "phase.state",

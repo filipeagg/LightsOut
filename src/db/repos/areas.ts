@@ -8,11 +8,15 @@
 import type { Db } from "../db.js";
 import { nowIso, ulid } from "../../ids.js";
 
+export type AreaAccess = "read" | "write";
+
 export type ProjectAreaRow = {
   id: string;
   project_id: string;
   /** Workspace-relative, forward slashes, no trailing separator. */
   path: string;
+  /** `read` or `write` (PE-09 amended). Defaults to read: the narrower grant. */
+  access: AreaAccess;
   note: string | null;
   added_by: string;
   created_at: string;
@@ -24,18 +28,29 @@ export class AreasRepo {
   add(input: {
     projectId: string;
     path: string;
+    access?: AreaAccess;
     note?: string | null;
     addedBy: string;
   }): ProjectAreaRow {
+    const access: AreaAccess = input.access ?? "read";
     const existing = this.get(input.projectId, input.path);
-    if (existing) return existing;
+    if (existing) {
+      // Declaring the same path again is how a read area is promoted to a writable one. The
+      // reverse narrows it, which is equally a decision someone made; both are recorded by the
+      // caller as a config change.
+      if (existing.access === access) return existing;
+      this.db
+        .prepare("UPDATE project_areas SET access = ?, added_by = ? WHERE id = ?")
+        .run(access, input.addedBy, existing.id);
+      return this.getOrThrow(existing.id);
+    }
     const id = ulid();
     this.db
       .prepare(
-        `INSERT INTO project_areas (id, project_id, path, note, added_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO project_areas (id, project_id, path, access, note, added_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(id, input.projectId, input.path, input.note ?? null, input.addedBy, nowIso());
+      .run(id, input.projectId, input.path, access, input.note ?? null, input.addedBy, nowIso());
     return this.getOrThrow(id);
   }
 

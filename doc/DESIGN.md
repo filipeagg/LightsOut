@@ -976,16 +976,23 @@ writes, when the file is absent or is an out-of-date copy of its own:
 
 ```toml
 # managed by LightsOut (ST-09)
-sandbox_mode = "workspace-write"
-
-[sandbox_workspace_write]
-network_access = true
+sandbox_mode = "danger-full-access"
 ```
 
-`workspace-write` rather than `danger-full-access` on purpose: the engine still refuses to write
-outside its working directory, which is defence in depth behind PE-02, while everything inside is
-announced over ACP where the policy engine decides. Network on, because a prober that cannot call
-the API it was launched to probe is the same class of contradiction as VT-07 (§7.5).
+**`workspace-write` was tried first and is wrong here, for a reason worth recording.** It looked
+like the careful choice: the engine would still refuse to write outside its working directory,
+defence in depth behind PE-02. What it actually does is make the engine *start* its sandbox — and
+that sandbox is bubblewrap, which needs unprivileged user namespaces. A Docker Desktop container
+does not grant them. The engine then fails with *"the sandbox cannot start because unprivileged
+namespaces are unavailable"*, the agent reports a denied write, and we are back where we started
+with a different error string. The middle option is the one that cannot work.
+
+So the name of the setting is alarming and the reasoning is not: `danger-full-access` means
+"full access **to the container**", and the container holds one workspace and nothing else
+(RT-01). Everything the engine does inside it is still announced over ACP, still classified, still
+gated by the policy engine, still audited (PE-04) — the confinement is ours, where it is visible.
+An engine sandbox we cannot configure, cannot see and cannot audit is not defence in depth; it is
+a second veto that produced four hours of debugging and one deleted project.
 
 A `config.toml` without the managed marker belongs to a person and is **never** overwritten. Boot
 logs what it found, and warns when the file confines the engine below what LightsOut expects, so
@@ -1355,10 +1362,30 @@ migration 5: project_areas(id, project_id, path, note, added_by, created_at)
 | another project's directory under `projects/` | one project is not a source of truth for another |
 | a path that does not exist | a typo is refused at declaration, not silently at run time |
 
-**Read only, always.** The area grants `project_read`, never a write: an agent copies *from* an area
-*into* its own project, which is a write it already has. Making areas writable would put one
-project's agent inside another project's files, and there is no case for it that attaching a
-knowledge base or declaring an area on the target project does not cover better.
+**Read, or write — declared, and defaulting to read (migration 12).** The original design said
+read only, always, and gave a reason that is still half true: making *every* area writable would
+put one project's agent inside another project's files. But the conclusion drawn from it was too
+wide. The user's case is a shared output directory — somewhere a project puts what it produces so
+the next one can pick it up — and refusing that does not make the workspace safer; it makes people
+put the folder inside the project and copy it out by hand.
+
+So `project_areas.access` is `read` or `write`, and the difference the classifier makes is small
+and exact:
+
+| where | reading | writing |
+|---|---|---|
+| a `read` area | `project_read` | `outside_workspace` — denied by the hard floor, as before |
+| a `write` area | `project_read` | `project_write`, decided by the pack like any other write |
+
+**What may never be an area at all did not change, and is what makes this safe.** The refusal
+table above is checked in `validateArea()` before access is looked at, and the two absolute
+prohibitions — `agents/`, `templates/`, `vault.yaml` → `credentials`; another project → refused —
+are enforced *again* in `classifyEscape()` ahead of the area loop. A row cannot widen them however
+it was written, which is the property worth having when a new column can now say "write".
+
+Existing rows keep `read`: widening a boundary already granted, by migration, would be the system
+making a decision that belongs to a person. Declaring the same path again is how access changes,
+and it records a `config.changed` event either way — narrowing is a decision too.
 
 The runner resolves the project's areas before the session starts and passes them to the classifier
 with the workspace root; the prompt lists them under the project context, because an area the agent

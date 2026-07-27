@@ -12,6 +12,7 @@ import {
   commandShape,
   pathsInCommand,
   scratchRoot,
+  writeTargets,
   type ClassifyInput,
 } from "./classify.js";
 import {
@@ -166,7 +167,23 @@ export class PolicyEngine {
           ...(input.paths ?? []),
           ...[input.command, ...(input.commands ?? [])]
             .filter((c): c is string => Boolean(c))
-            .flatMap((c) => pathsInCommand(c)),
+            .flatMap((c) => [
+              ...pathsInCommand(c),
+              // The question this function asks is "which path does this command write to", and
+              // `writeTargets` is the function that answers it — `mkdir -p probes` writes to
+              // `probes`, whether or not the token looks like a path in isolation.
+              //
+              // Without it, `pathsInCommand` alone was the whole answer, and it only recognises
+              // redirect targets and absolute or `../` paths — deliberately, since §7.1c tightened
+              // it so that `# GET /plantation` in a comment stops being read as a filesystem path.
+              // The cost of that tightening landed here: `mkdir -p probes .lightsout/tmp` declared
+              // "no path", and a confined pack must refuse a write whose target it cannot see. So
+              // `contract-prober`, whose scopes are exactly `probes/` and `doc/`, could not create
+              // `probes/`. It could not even touch its own scratch directory, which PE-08 says is
+              // writable under every pack — because the exemption is checked per target, and there
+              // were no targets to check.
+              ...writeTargets(c),
+            ]),
         ];
     // A confined pack cannot approve a write whose target it cannot see. A script is the
     // exception: its body has been inspected and confined to the project (PE-07), and a body

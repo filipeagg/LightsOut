@@ -27,6 +27,14 @@ const schema = z.object({
   timeoutFullMin: intFromEnv(90),
   inactivityMin: intFromEnv(8),
   permissionWaitHours: intFromEnv(24),
+  /**
+   * How long an **unattended** run waits on a hard-floor gate before giving up (OR-12, §7.7).
+   *
+   * 24 hours is the right answer when somebody is going to look. When nobody is, it is the whole
+   * failure: one run sat 5 h 29 min on a single gate and produced nothing, where the same run
+   * refused at thirty minutes would have recorded the gap and delivered the rest.
+   */
+  unattendedWaitMin: intFromEnv(30, 1),
   advisorConfidence: z.coerce.number().min(0).max(1).default(0.7),
   /** How much curated knowledge one prompt may carry (KB-06, DESIGN §17.2). */
   knowledgeBudgetChars: intFromEnv(120000, 0),
@@ -69,6 +77,7 @@ function raw(env: NodeJS.ProcessEnv) {
     timeoutFullMin: env.LO_TIMEOUT_FULL_MIN,
     inactivityMin: env.LO_INACTIVITY_MIN,
     permissionWaitHours: env.LO_PERMISSION_WAIT_HOURS,
+    unattendedWaitMin: env.LO_UNATTENDED_WAIT_MIN,
     advisorConfidence: env.LO_ADVISOR_CONFIDENCE,
     knowledgeBudgetChars: env.LO_KNOWLEDGE_BUDGET_CHARS,
     scriptScanBytes: env.LO_SCRIPT_SCAN_BYTES,

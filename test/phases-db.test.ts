@@ -122,6 +122,7 @@ describe("migration 2", () => {
       "9:toolchain grants and the toolchain doubt kind",
       "10:preview servers",
       "11:unattended projects",
+      "12:writable areas",
     ]);
     // Migration 4 gives the legacy project a brief it can be told apart from a real one (PM-09).
     expect(

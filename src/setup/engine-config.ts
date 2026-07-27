@@ -25,13 +25,16 @@ export const MANAGED_MARKER = "# managed by LightsOut (ST-09)";
 
 export const MANAGED_CODEX_CONFIG = [
   MANAGED_MARKER,
-  "# LightsOut mediates every action over ACP and the container is the boundary, so the engine's",
-  "# own sandbox is set to allow the work and left to report it, not to refuse it silently.",
-  "# Delete this file to go back to the engine's defaults; it is rewritten only when absent.",
-  'sandbox_mode = "workspace-write"',
-  "",
-  "[sandbox_workspace_write]",
-  "network_access = true",
+  "# The container is the boundary (RT-01) and LightsOut mediates every action over ACP",
+  "# (PE-01..05), so the engine must not run a second sandbox of its own inside the first.",
+  "#",
+  "# This is not only a design preference. The engine's sandbox is bubblewrap, which needs",
+  "# unprivileged user namespaces; a Docker Desktop container does not grant them, so any mode",
+  "# that starts it fails with 'unprivileged namespaces are unavailable' and the agent reports it",
+  "# as a denied write. workspace-write was tried first and does exactly that.",
+  "#",
+  "# Delete this file to go back to the engine's defaults.",
+  'sandbox_mode = "danger-full-access"',
   "",
 ].join("\n");
 

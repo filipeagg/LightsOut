@@ -26,14 +26,16 @@ const writeTemplate = async (name: string, body: string) => {
 };
 
 describe("templates loader", () => {
-  it("loads the four builtin templates (TP-02)", async () => {
+  it("loads the six builtin templates (TP-02)", async () => {
     const loader = new TemplatesLoader(workspace, everyAgent);
     const report = await loader.load();
-    expect(report.loaded).toBe(4);
+    expect(report.loaded).toBe(6);
     expect(report.rejected).toEqual([]);
     expect(loader.list().map((t) => t.id)).toEqual([
+      "api-prototype",
       "full-development",
       "knowledge-curation",
+      "legacy-intake",
       "quick-answers",
       "quick-prototype",
     ]);
@@ -90,7 +92,7 @@ describe("templates loader", () => {
     );
     const loader = new TemplatesLoader(workspace, everyAgent);
     const report = await loader.load();
-    expect(report.loaded).toBe(4);
+    expect(report.loaded).toBe(6);
     expect(report.fromWorkspace).toBe(1);
     expect(loader.getOrThrow("quick-answers").name).toBe("Mine");
   });

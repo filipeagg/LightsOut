@@ -1,0 +1,78 @@
+# Builtin template (TP-02, DESIGN §16.3). The sibling of quick-prototype, for the case where the
+# idea has to work against a real service: probe first, build from what the service actually
+# returns, smoke-test it live. There is no shaping phase on purpose — against a real API the
+# expensive ambiguity is the contract, not the request, and the probe is what settles it.
+#
+# No human gates: every phase runs into the next (OR-12).
+id: api-prototype
+name: API prototype
+description: >
+  Proving an idea against a real API, fast. Probe the live service first, build from what it
+  actually returns, smoke-test it. No human gates: every phase runs into the next.
+phases:
+  - id: probe
+    title: Find out how the API really behaves
+    agent: contract-prober
+    repeatable: true
+    deliverable: doc/CONTRACTS.md
+    instructions: |
+      Call the live service named in the project brief with the vault's test credentials and
+      record what it actually returns, not what its documentation claims.
+
+      Read first, in this order: the project brief, the attached knowledge bases, then the
+      service itself. Where the documentation and the live API disagree, the live API wins and
+      you record the discrepancy.
+
+      For every endpoint the build will need, document: the exact method and path, the request
+      shape, the authentication header, the pagination, the full field list of the real
+      response, and one trimmed sample with tokens redacted as <redacted>. Say explicitly
+      whether the service sends CORS headers that let a browser page call it directly, because
+      that decides whether the prototype needs a proxy.
+
+      Work in probes/ and doc/. Leave your probe scripts in probes/ as evidence; they are how
+      anyone repeats what you did.
+
+      Use the standard library — python3 with urllib.request and json, or node with node:https.
+      Do not install dependencies.
+
+      Every claim must be backed by a call you actually made. Anything you could not verify goes
+      under `unverified:` with the reason and what would settle it. An honest, incomplete
+      CONTRACTS.md delivered without stopping is worth more than a complete one that needed a
+      person: do not raise a doubt for anything you can record instead.
+
+      Machine-first (BA-07): one endpoint per id, key: value, payloads in fenced blocks. Never
+      invent a URL, a field or a token.
+  - id: build
+    title: Build the prototype
+    agent: builder
+    repeatable: true
+    instructions: |
+      Build what the project brief asks for, against doc/CONTRACTS.md and nothing else. A field
+      that CONTRACTS.md does not document does not exist: if you need one, probe for it or
+      degrade gracefully and say so — do not guess a field name.
+
+      Honour the stack the brief names. If the brief's stack cannot work for a reason
+      CONTRACTS.md establishes — CORS is the usual one — apply the fallback the brief allows,
+      and write one line in doc/DECISIONS.md saying what you did and why. Never switch stacks
+      silently.
+
+      When you are done, write doc/README.md: how to run it, what it does, what is not
+      implemented, and every assumption you had to make.
+
+      Work alone. A choice between two implementations that both satisfy the brief is yours to
+      make: take the simpler one and record it. Only a decision that changes what is being built
+      belongs to a person.
+  - id: qa-smoke
+    title: Smoke-test the prototype
+    agent: qa-engineer
+    optional: true
+    deliverable: doc/QA-REPORT.md
+    instructions: |
+      Check the prototype does what the brief's definition of done says, end to end, against the
+      live service.
+
+      Cover at least: authentication with the vault's test credentials, the main list the
+      interface renders, and one detail view. Report what you actually ran and what came back.
+
+      Machine-first: one check per id, with its verdict and the evidence. A failure caused by the
+      product is a finding to report, not something to fix here.

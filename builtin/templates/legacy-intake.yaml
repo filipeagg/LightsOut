@@ -1,0 +1,149 @@
+# Builtin template (TP-02, DESIGN §16.3). Taking in code that arrived as an archive and turning
+# it into a project this system can work on — then working on it.
+#
+# The shape of the problem: somebody hands over a .zip. Nobody who is still here wrote it, there
+# is no brief, and the first instinct — start changing things — is the expensive one. So the
+# first three phases buy understanding and write it down, and only the fourth touches the code.
+#
+# Phases 1..3 run once. Phase 4 is the project's working life: launch it again for every
+# improvement or bug, each with its own request. That is why the template does not end.
+#
+# No human gates: every phase runs into the next (OR-12). What phase 3 proposes for the brief is
+# a proposal — `set_project_context` is how a person makes it real, and the phase says so.
+id: legacy-intake
+name: Take in an existing codebase
+description: >
+  Code that arrived as a zip. Unpack and inventory it, read it until it is understood, write the
+  documents that make it a managed project, then improve it one change at a time.
+phases:
+  - id: unpack
+    title: Unpack the archive and inventory what arrived
+    agent: builder
+    deliverable: doc/INVENTORY.md
+    instructions: |
+      The archive is named in this launch's request. It normally sits in the workspace outside
+      this project, which means the project needs a read area over it: if you cannot read it,
+      say exactly which path you tried and that `add_area` is what grants it — do not hunt
+      around the filesystem for something with a similar name.
+
+      Extract it into `sources/` inside the project, with the standard library and nothing else:
+      `python3 -m zipfile -e <archive> sources/`. Do not install a tool to do this. If the
+      archive has a single top-level directory, keep it; a flattened tree loses information
+      about how the project was laid out.
+
+      Then write doc/INVENTORY.md, and keep it to what you can see without reading the code
+      properly yet:
+
+        source: the archive path and its size
+        layout: the top-level directories, one line each, with what is in them
+        languages: each language with its file count and total lines
+        entry_points: every main, index, server, cli or equivalent, with its path
+        build: the build and dependency files found (package.json, pom.xml, requirements.txt, …)
+        tests: where the tests are, and how many
+        config: configuration and environment files, without their values
+        vcs: whether the archive carried its own .git, and what the last commit says
+        excluded: what you did not count and why (node_modules, vendor, build output, binaries)
+
+      Never open a file that looks like a credential — `.env`, `id_rsa`, `credentials`, `.pem`.
+      List that it exists and move on. If one is there, say so under `warning:`, because an
+      archive carrying a secret is a fact the person needs on day one.
+
+      Machine-first (BA-07): key: value and tables, one fact per line, no prose.
+  - id: analyse
+    title: Read the code until you understand it
+    agent: codebase-analyst
+    repeatable: true
+    deliverable: doc/ANALYSIS.md
+    instructions: |
+      Read the code in `sources/` and write down how it actually works. Repeatable on purpose:
+      launch it again per subsystem, and each launch says which one it is taking.
+
+      Order of trust, and it matters: the code, then the schema, then the configuration, then
+      the comments and the README. A comment describing behaviour the code does not have is a
+      finding, not a source.
+
+      Extend doc/ANALYSIS.md rather than rewriting it, and supersede in place instead of
+      appending another pass:
+
+        entity: one section per entity or module, with the operations it supports
+        flow: the paths through the system that matter, start to finish
+        data: the persistent shape — tables, collections, files — and who writes each one
+        external: every service, queue or API it talks to, and what happens when one is down
+        auth: who may do what, and where that is enforced
+        risk: what will break first, and what it costs
+
+      Every claim carries its source as `code:<path>:<line>`. A gap without a source is not an
+      answer: list what you could not determine under `unverified:`, with what would settle it —
+      a question for a person, a file that is missing, a service you cannot reach.
+
+      Do not fix anything, do not tidy anything, do not rename anything. Understanding is the
+      deliverable here, and a diff in this phase is noise in the next one.
+  - id: adopt
+    title: Make it a project this system can work on
+    agent: codebase-analyst
+    deliverable: doc/OVERVIEW.md
+    instructions: |
+      Turn what the first two phases learned into the documents the system and the next person
+      read. Three things, and nothing else.
+
+      **doc/OVERVIEW.md** — what this system is, in the terms someone joining would need:
+      purpose, the parts and how they fit, how to run it, how to test it, and the three things
+      that would surprise a newcomer. Machine-first, and short enough to be read in one sitting.
+
+      **doc/BACKLOG.md** — everything worth doing, found while reading and not before:
+
+        id: one per item, stable, so a later launch can name it
+        kind: bug | improvement | risk | unknown
+        where: code:<path>:<line>
+        evidence: why you believe it, from the code
+        effect: what it costs to leave alone
+        effort: rough, and say when you cannot tell
+
+      Order it by effect, not by how easy it is. Never invent an item to fill a section: an
+      empty `bug:` list is a finding.
+
+      **A project brief**, at the end of doc/OVERVIEW.md under `proposed_context:` — goal,
+      systems involved, constraints, definition of done, what is out of scope. You cannot set it
+      yourself; write it so a person can paste it into `set_project_context`, and say that is
+      what it is for.
+
+      One line in doc/DECISIONS.md for every choice you made that the code did not force.
+  - id: improve
+    title: Improve it, one change at a time
+    agent: builder
+    repeatable: true
+    instructions: |
+      This is the project's working life: one launch, one change, named in the request — usually
+      a doc/BACKLOG.md id.
+
+      Read doc/OVERVIEW.md and the ANALYSIS section covering what you are touching before you
+      start. Follow the conventions the code already has, even where you would not have chosen
+      them: consistency with the surrounding code is worth more than your preference, and a
+      codebase nobody here wrote is not the place to introduce a second style.
+
+      Stay inside the change you were asked for. Something else that is wrong goes into
+      doc/BACKLOG.md as a new item; it does not get fixed on the way past. A change the request
+      does not name is how a small fix becomes a review nobody can do.
+
+      If the change turns out to be bigger than the backlog item said, or the item rests on
+      something ANALYSIS.md got wrong, stop and say so in your summary with what you found — and
+      update the item. Do not carry on into a rewrite nobody approved.
+
+      When you are done: what changed, which files, how you know it works, and what you did not
+      touch that a reviewer should look at anyway. Mark the backlog item `done:` with the date.
+  - id: verify
+    title: Check the change, and what it might have broken
+    agent: qa-engineer
+    optional: true
+    repeatable: true
+    deliverable: doc/QA-REPORT.md
+    instructions: |
+      Check the change the previous phase made, and the paths around it that doc/ANALYSIS.md
+      says depend on the same code.
+
+      Run whatever the project already has for tests first, and report what it says — including
+      that it was already failing before the change, which is a finding and not your problem to
+      hide. Add a test for the change only where the project has somewhere obvious to put one.
+
+      Machine-first: one check per id, with its verdict and the evidence. A failure caused by the
+      product is a finding to report, not something to fix here.

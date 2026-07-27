@@ -2301,8 +2301,8 @@ function vaultForm(entry, isNew) {
   const auths = ["none", "basic", "bearer", "api_key", "oauth2_client_credentials"];
   return `<div class="card pad" style="margin-bottom:16px">
     <div class="row wrap" style="gap:16px">
-      ${isNew ? `<label class="tiny">Id<br><input id="vt-id" placeholder="sandbox-api"></label>` : ""}
-      <label class="tiny">Label<br><input id="vt-label" value="${esc(entry.label || "")}"></label>
+      <label class="tiny">Label<br><input id="vt-label" value="${esc(entry.label || "")}"
+        placeholder="Sandbox API">${isNew ? `<div class="tiny muted">The id is derived from this (VT-08).</div>` : ""}</label>
       <label class="tiny">Base URL<br><input id="vt-url" value="${esc(entry.base_url || "")}"></label>
       <label class="tiny">Auth<br><select id="vt-auth">${auths
         .map((a) => `<option ${a === entry.auth ? "selected" : ""}>${a}</option>`)
@@ -2325,8 +2325,8 @@ function vaultForm(entry, isNew) {
 }
 
 async function saveEntry(existingId) {
-  const id = existingId || field("vt-id");
-  if (!id) { store.error = "an id is required"; return paint(); }
+  const label = field("vt-label");
+  if (!label) { store.error = "a label is required"; return paint(); }
   const fields = {};
   for (const line of $("vt-fields").value.split("\n")) {
     const trimmed = line.trim();
@@ -2338,15 +2338,18 @@ async function saveEntry(existingId) {
     // usable at all: it never sees what is already there.
     if (name && value) fields[name] = value;
   }
-  await act("PUT", `/api/vault/${encodeURIComponent(id)}`, {
-    label: field("vt-label") || id,
+  // VT-08: creating posts a label and the server derives the id; editing never renames it.
+  const body = {
+    label,
     base_url: field("vt-url"),
     auth: field("vt-auth"),
     test_only: checked("vt-test"),
     scope: csv("vt-scope").length ? csv("vt-scope") : ["*"],
     notes: field("vt-notes"),
     fields,
-  });
+  };
+  if (existingId) await act("PUT", `/api/vault/${encodeURIComponent(existingId)}`, body);
+  else await act("POST", "/api/vault", body);
 }
 
 async function deleteEntry(id) {

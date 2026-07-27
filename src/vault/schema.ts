@@ -32,6 +32,58 @@ export const vaultFileSchema = z
   .object({ entries: z.array(vaultEntrySchema).default([]) })
   .strict();
 
+/**
+ * The same file, read the forgiving way (VT-08).
+ *
+ * A single entry stored with an uppercase id failed the strict schema, which failed `list_vault`,
+ * which failed *every run* before it started — a zod error about a regex, nowhere near the
+ * credential that caused it. A file this system wrote in an older shape is a migration, not a
+ * fault. The id is repaired by `normaliseEntries`; everything else still has to be right.
+ */
+export const vaultFileLenientSchema = z
+  .object({
+    entries: z
+      .array(vaultEntrySchema.extend({ id: z.string().min(1) }))
+      .default([]),
+  })
+  .strict();
+
+export type LenientVaultEntry = z.infer<typeof vaultFileLenientSchema>["entries"][number];
+
+/**
+ * Bring stored ids into the canonical shape: `slugify(id)`, or `slugify(label)` when the id has
+ * nothing usable left, and `-2`, `-3`… on a collision the normalising itself created. Order is
+ * preserved, so the file the user reads is the file they wrote.
+ */
+export function normaliseEntries(
+  entries: LenientVaultEntry[],
+  slugify: (value: string) => string,
+): VaultEntry[] {
+  const taken = new Set<string>();
+  const canonical = (value: string): string | undefined => {
+    try {
+      const slug = slugify(value);
+      return /^[a-z0-9][a-z0-9-]*$/.test(slug) ? slug : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  return entries.map((entry) => {
+    let id = canonical(entry.id) ?? canonical(entry.label) ?? "entry";
+    if (taken.has(id)) {
+      for (let n = 2; ; n += 1) {
+        if (!taken.has(`${id}-${n}`)) {
+          id = `${id}-${n}`;
+          break;
+        }
+      }
+    }
+    taken.add(id);
+    return { ...entry, id };
+  });
+}
+
 export type VaultAuth = z.infer<typeof vaultAuthSchema>;
 export type VaultEntry = z.infer<typeof vaultEntrySchema>;
 export type VaultFile = z.infer<typeof vaultFileSchema>;

@@ -1391,6 +1391,25 @@ export class Actions {
   }
 
   /** Values are write-only: this returns the view, never what was stored (VT-03). */
+  /**
+   * A new entry, identified by its label; the id is derived and returned (VT-08). Separate from
+   * `writeVaultEntry` because creating and editing differ in exactly this: an edit must never
+   * rename the id, which is already inside an environment variable someone's script reads.
+   */
+  async createVaultEntry(
+    actor: Actor,
+    input: Partial<Omit<VaultEntry, "id" | "fields">> & {
+      label: string;
+      fields?: Record<string, string | null>;
+    },
+  ): Promise<VaultEntryView> {
+    const vault = this.need(this.deps.vault, "vault");
+    const entryId = await vault.idForLabel(input.label);
+    const view = await vault.put(entryId, input);
+    this.changed("vault", entryId, actor);
+    return view;
+  }
+
   async writeVaultEntry(
     actor: Actor,
     entryId: string,

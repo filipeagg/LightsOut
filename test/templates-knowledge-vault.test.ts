@@ -238,6 +238,42 @@ describe("vault", () => {
     expect(after[0]?.label).toBe("Sandbox API");
   });
 
+  it("derives the id from the label, and makes it unique (VT-08)", async () => {
+    const vault = new Vault(workspace);
+    expect(await vault.idForLabel("EFEMIS back")).toBe("efemis-back");
+    await vault.put(await vault.idForLabel("EFEMIS back"), { label: "EFEMIS back" });
+    // A second entry with the same label does not silently overwrite the first.
+    expect(await vault.idForLabel("EFEMIS back")).toBe("efemis-back-2");
+  });
+
+  it("repairs a stored id instead of failing every run (VT-08)", async () => {
+    // The 2026-07-27 incident: one uppercase id made the whole file invalid, which made
+    // list_vault fail, which made every run fail before it started.
+    await writeFile(
+      path.join(workspace, "vault.yaml"),
+      [
+        "entries:",
+        "  - id: DEVEXTREME",
+        "    label: DevExtreme",
+        "    fields:",
+        "      licence: abc",
+        "  - id: 'jira!'",
+        "    label: Jira",
+        "    fields: {}",
+      ].join("\n"),
+      "utf8",
+    );
+    const vault = new Vault(workspace);
+    const entries = await vault.readAll();
+    expect(entries.map((e) => e.id)).toEqual(["devextreme", "jira"]);
+    // The values survive the repair: this is a rename of the key, not a reset.
+    expect(entries[0]?.fields).toEqual({ licence: "abc" });
+  });
+
+  it("keeps the environment variable name derivable from the repaired id (VT-08, §18)", () => {
+    expect(envVarName("devextreme", "licence")).toBe("LO_VAULT_DEVEXTREME_LICENCE");
+  });
+
   it("writes the file 600 and keeps it parseable", async () => {
     const vault = new Vault(workspace);
     await vault.put("one", { label: "One", fields: { key: "v" } });

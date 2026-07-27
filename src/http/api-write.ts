@@ -241,6 +241,27 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
 
   // --- Vault (VT-01..03). Values go in, never out. -------------------------
 
+  // VT-08: creating takes a label; the id is derived and comes back in the answer.
+  app.post("/api/vault", async (request, reply) =>
+    envelope(reply, async () => {
+      const input = body(
+        z.object({
+          label: z.string().min(1),
+          base_url: z.string().optional(),
+          auth: z
+            .enum(["none", "basic", "bearer", "api_key", "oauth2_client_credentials"])
+            .optional(),
+          test_only: z.boolean().optional(),
+          scope: z.array(z.string().min(1)).optional(),
+          notes: z.string().optional(),
+          fields: z.record(z.string(), z.string().nullable()).optional(),
+        }),
+        request.body,
+      );
+      return { entry: await actions.createVaultEntry("panel", input) };
+    }),
+  );
+
   app.put("/api/vault/:entryId", async (request, reply) =>
     envelope(reply, async () => {
       const { entryId } = z.object({ entryId: z.string().min(1) }).parse(request.params);

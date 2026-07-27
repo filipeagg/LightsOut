@@ -80,6 +80,7 @@ const INTERNAL = new Set([
 
 /** The one exception, with its reason (VT-02, MC-07). Adding to this list is a design decision. */
 const PANEL_ONLY = new Map([
+  ["createVaultEntry", "same reason as writing one: it carries the values (VT-02)"],
   ["writeVaultEntry", "a credential value must not travel through the conversation (VT-02)"],
   ["deleteVaultEntry", "the vault is edited on loopback or not at all (VT-02)"],
 ]);

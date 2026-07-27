@@ -270,7 +270,8 @@ export const DEFAULT_MATCHERS: Record<string, string[]> = {
     "^(printenv|env)\\b[^|]*\\b(PASSWORD|SECRET|TOKEN|API_KEY)",
     // Every reading tool, not just the obvious three: `project_read` now allows the whole
     // family, so a secret file must be sensitive whichever tool opens it.
-    "(^|\\s)(cat|less|more|head|tail|grep|rg|egrep|fgrep|awk|sed|nl|cut|sort|uniq|xxd|od|strings|jq|yq|diff|cmp|base64)\\b.*(\\.env|\\.npmrc|\\.netrc|id_rsa|id_ed25519|credentials|\\.pem|\\.pfx|\\.p12)\\b",
+    // Same distinction as the script body (§7.1f): the file `.env`, never `process.env`.
+    "(^|\\s)(cat|less|more|head|tail|grep|rg|egrep|fgrep|awk|sed|nl|cut|sort|uniq|xxd|od|strings|jq|yq|diff|cmp|base64)\\b.*((?<![A-Za-z0-9_])\\.env(?:\\.[A-Za-z0-9_-]+)?(?![A-Za-z0-9_.])|\\.npmrc|\\.netrc|id_rsa|id_ed25519|credentials|\\.pem|\\.pfx|\\.p12)\\b",
     "^(ssh-keygen|gpg|openssl)\\b",
     "^git\\s+push\\b.*(--force|-f)(\\s|$)",
   ],
@@ -301,6 +302,20 @@ const SCRIPT_HEREDOC_RE = new RegExp(`^${SCRIPT_INTERPRETERS}\\b[^\\n]*<<-?\\s*[
  * what the request gets instead, so the pack's own rule for that class decides — a body that
  * fetches over the network is judged exactly as `curl` would be.
  */
+/**
+ * The **file** `.env`, and not the expression `process.env` (§7.1f).
+ *
+ * `\.env\b` was the pattern, and `\b` sits happily between the `v` of `process.env` and the dot
+ * after it. So every Node script that read an environment variable classified as `credentials` —
+ * the hard floor, no judge, no learned allow — and the doubt said "reads or carries credentials
+ * (.env)" about a script that reads no such file. Reading `process.env` is how a program uses the
+ * vault the system handed it (§7.1d); it is the normal case, not the dangerous one.
+ *
+ * A file name is not preceded by an identifier character and not followed by one: `.env` and
+ * `.env.local` match, `process.env.X` and `os.environ` do not.
+ */
+const DOTENV_FILE = String.raw`(?<![A-Za-z0-9_])\.env(?:\.[A-Za-z0-9_-]+)?(?![A-Za-z0-9_.])`;
+
 const SCRIPT_BODY_FAMILIES: [ActionClass, RegExp, string][] = [
   // A secret *file* opened, or a secret *value* printed — not the word "credentials" appearing as
   // a label, and not a variable name that happens to contain PASSWORD. `os.environ.get('LO_VAULT_
@@ -309,7 +324,19 @@ const SCRIPT_BODY_FAMILIES: [ActionClass, RegExp, string][] = [
   // that matters, and that still matches.
   [
     "credentials",
-    /\.env\b|\.npmrc|\.netrc|id_rsa|id_ed25519|\.pem\b|\.pfx\b|\.p12\b|['"][^'"]*credentials[^'"]*['"]\s*[,)]?\s*(?:,\s*)?['"]?r?b?['"]?\s*\)|open\s*\([^)]*credentials|print\s*\(\s*(?:os\.environ|os\.getenv)|console\.log\s*\(\s*process\.env\.[A-Za-z_]|(?:ANTHROPIC_API_KEY|OPENAI_API_KEY|GIT_TOKEN|GITHUB_TOKEN|AWS_SECRET)\b/i,
+    // `DOTENV_FILE` is the whole of §7.1f: `\.env\b` matched `process.env`, so every Node script
+    // that read an environment variable was a credential read, on the hard floor, with no way
+    // back. It has to look like a *file name*: not preceded by an identifier character, and not
+    // followed by one — `.env` and `.env.local` yes, `process.env.X` and `os.environ` no.
+    new RegExp(
+      `${DOTENV_FILE}|\\.npmrc|\\.netrc|id_rsa|id_ed25519|\\.pem\\b|\\.pfx\\b|\\.p12\\b` +
+        `|['"][^'"]*credentials[^'"]*['"]\\s*[,)]?\\s*(?:,\\s*)?['"]?r?b?['"]?\\s*\\)` +
+        `|open\\s*\\([^)]*credentials` +
+        `|print\\s*\\(\\s*(?:os\\.environ|os\\.getenv)` +
+        `|console\\.log\\s*\\(\\s*process\\.env\\.[A-Za-z_]` +
+        `|(?:ANTHROPIC_API_KEY|OPENAI_API_KEY|GIT_TOKEN|GITHUB_TOKEN|AWS_SECRET)\\b`,
+      "i",
+    ),
     "reads or carries credentials",
   ],
   // Dependencies before network: `pip install requests` is a dependency, and the package name
@@ -897,9 +924,27 @@ export class Classifier {
 
     for (const [cls, re, why] of SCRIPT_BODY_FAMILIES) {
       const hit = re.exec(body.text);
-      if (hit) {
+      if (!hit) continue;
+      if (cls !== "credentials") {
         return { class: cls, reason: `${where} ${why} (${hit[0].slice(0, 40)})` };
       }
+      // PE-13 applies to a script body exactly as it does to a command line (§7.1d). Without
+      // this the ownership question was asked only of the shell, so a probe that reads its own
+      // vault entry from inside the code it runs died on the hard floor with no judge — the
+      // same false positive, one layer down, which is how the fourth spelling got in.
+      const evidence = credentialEvidence(
+        body.text,
+        [re],
+        input.vaultVars,
+        input.vaultHosts,
+      );
+      return {
+        class: cls,
+        reason:
+          `${where} ${why} (${hit[0].slice(0, 40)})` +
+          (evidence === "vault_own" ? "; the only secret here is this run's own vault entry" : ""),
+        evidence,
+      };
     }
 
     return {

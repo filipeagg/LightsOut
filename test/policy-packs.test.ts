@@ -153,14 +153,13 @@ describe("the builtin library uses the new shape", () => {
     expect(scopes("builder")).toEqual([]);
   });
 
-  it("keeps the two capabilities that were packs", () => {
+  it("keeps the capability that was a pack", () => {
     expect(agents.profileOrThrow("codebase-analyst").capabilities).toEqual(["knowledge_write"]);
-    expect(agents.profileOrThrow("web-prototyper").capabilities).toEqual(["serve"]);
-    expect(
-      agents
-        .packFor(agents.profileOrThrow("web-prototyper"))!
-        .rules.find((r) => r.class === "serve")?.verdict,
-    ).toBe("allow");
+    // `serve` was web-prototyper's whole reason to exist and it is retired (BA-01): serving is
+    // preview_start's job now (PV-07), owned by LightsOut rather than granted to an agent.
+    for (const p of agents.current().profiles.values()) {
+      expect(p.capabilities ?? [], p.id).not.toContain("serve");
+    }
   });
 
   it("keeps the network exactly where it was", () => {

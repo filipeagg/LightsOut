@@ -371,6 +371,9 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
           kind: base.manifest.kind,
           /** Whether the base binds the agent or merely informs it (KB-11). */
           enforcement: base.manifest.enforcement,
+          // KB-12. Missing here is why the checkbox saved its value and then always rendered
+          // unchecked: the manifest had it, the view did not, so the editor read undefined.
+          default_attach: base.manifest.default_attach,
           description: base.manifest.description,
           tags: base.manifest.tags,
           owner: base.manifest.owner ?? null,

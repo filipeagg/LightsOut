@@ -977,6 +977,8 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
           kind: base.manifest.kind,
           /** `hard` means the agent may not decide against it (KB-11); `advisory` is context. */
           enforcement: base.manifest.enforcement,
+          /** KB-12: whether every new project starts with this base attached. */
+          defaultAttach: base.manifest.default_attach,
           description: base.manifest.description,
           tags: base.manifest.tags,
           updated: base.manifest.updated ?? null,

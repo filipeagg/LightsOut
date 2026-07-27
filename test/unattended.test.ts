@@ -7,7 +7,7 @@
  * does not need a fourth fix.
  */
 import { describe, expect, it } from "vitest";
-import { Classifier, credentialEvidence } from "../src/policy/classify.js";
+import { Classifier, credentialEvidence, writeTargets } from "../src/policy/classify.js";
 import { PolicyEngine } from "../src/policy/engine.js";
 import { judgeable, JUDGEABLE, JUDGEABLE_UNATTENDED } from "../src/orchestrator/judge.js";
 import { pathCandidates, pathsInPatch } from "../src/acp/session.js";
@@ -246,6 +246,73 @@ describe("§7.1f: the file .env, not the expression process.env", () => {
     expect(result.evidence).toBeDefined();
     expect(result.evidence).not.toBe("vault_own");
     expect(judgeable({ actionClass: "credentials", projectPath: PROJECT })).toBe(false);
+  });
+});
+
+describe("a sentence is not a file name, and an install target is a path", () => {
+  const qa = policyPackSchema.parse({
+    id: "qa",
+    rules: [
+      { class: "project_read", verdict: "allow" },
+      { class: "project_write", verdict: "allow" },
+      { class: "script_exec", verdict: "allow" },
+      { class: "deps_install", verdict: "require_human" },
+      { class: "credentials", verdict: "require_human" },
+      { class: "other", verdict: "require_human" },
+    ],
+    write_scopes: ["tests", "doc"],
+  });
+
+  const bodyOf = (text: string) =>
+    classifier.classify({
+      projectPath: PROJECT,
+      command: "python3 tests/test_api.py api.1",
+      commands: [`python3 -c ${JSON.stringify(text)}`],
+    });
+
+  it("does not make a whole script a credential read because prose mentions credentials", () => {
+    // Line 109 of the user's own test file, which cost six permission gates in one run.
+    const result = bodyOf(
+      '@case("api.1", "POST /user/authorization with vault credentials returns a token")',
+    );
+    expect(result.class).not.toBe("credentials");
+  });
+
+  it("still catches a credentials file, which has no spaces in its name", () => {
+    expect(bodyOf('open("credentials.json")').class).toBe("credentials");
+    expect(bodyOf('load("app/credentials")').class).toBe("credentials");
+    // An absolute one is caught even earlier, by the path escape (PE-02), which is stricter still.
+    expect(bodyOf('load("/etc/app/credentials")').class).toBe("outside_workspace");
+  });
+
+  it("lets the one install command the protocol block prescribes through a confined pack", () => {
+    // pip into the scratch is a project_write (PE-08, ST-03b), and a pack with write_scopes was
+    // denying it because the engine could see no path to check.
+    const engine = new PolicyEngine({ agent: qa, default: defaultPack });
+    const decision = engine.evaluate({
+      projectPath: PROJECT,
+      command: "pip install --target .lightsout/tmp/deps playwright 2>&1 | tail -5",
+    });
+    expect(decision.class).toBe("project_write");
+    expect(decision.verdict).toBe("allow");
+  });
+
+  it("reads an install target as the path it is", () => {
+    expect(writeTargets("pip install --target .lightsout/tmp/deps openpyxl")).toContain(
+      ".lightsout/tmp/deps",
+    );
+    expect(writeTargets("npm install --prefix vendor left-pad")).toContain("vendor");
+  });
+
+  it("an install anywhere but the scratch is still a dependency, and still a person's call", () => {
+    // The exemption is the scratch and nothing else: outside it, `pip install` is `deps_install`
+    // because a library that outlives the run changes the build for every later one (ST-03).
+    const engine = new PolicyEngine({ agent: qa, default: defaultPack });
+    for (const command of ["pip install --target src/vendor x", "pip install openpyxl"]) {
+      const decision = engine.evaluate({ projectPath: PROJECT, command });
+      expect(decision.class, command).toBe("deps_install");
+      expect(decision.verdict, command).toBe("require_human");
+    }
   });
 });
 

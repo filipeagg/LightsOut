@@ -125,6 +125,21 @@ export class DoubtService {
   /** Permission doubts waiting on a human: doubt id → resolver of the held ACP response. */
   private readonly pending = new Map<string, (choice: string) => void>();
 
+  /**
+   * Command shapes a person allowed **during this run** (DO-08), by run id.
+   *
+   * In memory and never persisted, which is the point: `credentials` and `publish_external` must
+   * not be remembered across runs (PE-10), and this does not remember them across runs. It
+   * remembers them for the twenty minutes in which the same agent runs the same script four more
+   * times. `forgetRun` clears the entry when the run ends.
+   */
+  private readonly allowedThisRun = new Map<string, Set<string>>();
+
+  /** Drop a finished run's per-run allows (DO-08). Called by the runner in its `finally`. */
+  forgetRun(runId: string): void {
+    this.allowedThisRun.delete(runId);
+  }
+
   constructor(
     private readonly config: Config,
     private readonly repos: Repos,
@@ -531,6 +546,25 @@ export class DoubtService {
       (o) => o.kind === "allow_once" || o.kind === "allow_always",
     );
 
+    // A person already answered this, in this run (DO-08). `credentials` and `publish_external`
+    // are never learned across runs (PE-10) and that stays: a wrong memory there leaks a secret
+    // or publishes something, for ever. But asking six times for the same script inside one run
+    // is not safety, it is noise — which is exactly what `efemis-mapa-cultivos` did, once per
+    // batch of test ids, for one file. This memory is per run and dies with it.
+    const runShape = commandShape(input.title);
+    if (allowOption && runShape && this.allowedThisRun.get(input.runId)?.has(runShape)) {
+      this.repos.events.append({
+        runId: input.runId,
+        type: "perm.verdict",
+        payload: {
+          class: input.actionClass,
+          allowed: true,
+          reason: "a person allowed this same command earlier in this run (DO-08)",
+        },
+      });
+      return { optionId: allowOption.optionId };
+    }
+
     // PE-11: one cheap closed question before a person is woken. It can only shorten the path to
     // allow — every failure, doubt or high risk falls through to the doubt below.
     if (allowOption) {
@@ -670,7 +704,16 @@ export class DoubtService {
       };
     }
 
-    if (answer === "A" && allowOption) return { optionId: allowOption.optionId };
+    if (answer === "A" && allowOption) {
+      // Remember it for the rest of this run only (DO-08). Not a learned shape: those are
+      // system-wide and permanent, and this class of gate must never become either.
+      if (runShape) {
+        const seen = this.allowedThisRun.get(input.runId) ?? new Set<string>();
+        seen.add(runShape);
+        this.allowedThisRun.set(input.runId, seen);
+      }
+      return { optionId: allowOption.optionId };
+    }
     return {
       reject: true,
       explanation: "A human refused this action. Adapt, or finish with a doubt explaining why you cannot.",

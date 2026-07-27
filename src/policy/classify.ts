@@ -316,6 +316,20 @@ const SCRIPT_HEREDOC_RE = new RegExp(`^${SCRIPT_INTERPRETERS}\\b[^\\n]*<<-?\\s*[
  */
 const DOTENV_FILE = String.raw`(?<![A-Za-z0-9_])\.env(?:\.[A-Za-z0-9_-]+)?(?![A-Za-z0-9_.])`;
 
+/**
+ * A quoted **file name** containing "credentials", and not a sentence containing the word.
+ *
+ * The pattern this replaces was written for `open("credentials.json")` and matched any quoted
+ * string with the word in it. What it actually caught, on `efemis-mapa-cultivos`:
+ *
+ *     @case("api.1", "POST /user/authorization with vault credentials returns a token")
+ *
+ * — the human-readable description of a test. The whole script became `credentials`, on the hard
+ * floor, and the run asked a person six times for the same file because `credentials` is never
+ * learned (PE-10). A file name has no spaces in it; a sentence does. That is the whole rule.
+ */
+const CREDENTIAL_FILE = String.raw`['"][^'"\s]*credentials[^'"\s]*['"]`;
+
 const SCRIPT_BODY_FAMILIES: [ActionClass, RegExp, string][] = [
   // A secret *file* opened, or a secret *value* printed — not the word "credentials" appearing as
   // a label, and not a variable name that happens to contain PASSWORD. `os.environ.get('LO_VAULT_
@@ -330,8 +344,8 @@ const SCRIPT_BODY_FAMILIES: [ActionClass, RegExp, string][] = [
     // followed by one — `.env` and `.env.local` yes, `process.env.X` and `os.environ` no.
     new RegExp(
       `${DOTENV_FILE}|\\.npmrc|\\.netrc|id_rsa|id_ed25519|\\.pem\\b|\\.pfx\\b|\\.p12\\b` +
-        `|['"][^'"]*credentials[^'"]*['"]\\s*[,)]?\\s*(?:,\\s*)?['"]?r?b?['"]?\\s*\\)` +
-        `|open\\s*\\([^)]*credentials` +
+        `|${CREDENTIAL_FILE}` +
+        `|open\\s*\\(\\s*['"][^'"\\s]*credentials` +
         `|print\\s*\\(\\s*(?:os\\.environ|os\\.getenv)` +
         `|console\\.log\\s*\\(\\s*process\\.env\\.[A-Za-z_]` +
         `|(?:ANTHROPIC_API_KEY|OPENAI_API_KEY|GIT_TOKEN|GITHUB_TOKEN|AWS_SECRET)\\b`,
@@ -588,11 +602,26 @@ const COPY_LIKE = /^(cp|mv|rsync|install|ln|scp)\b/i;
 /** Commands whose every path argument is a thing they change: removals and in-place edits. */
 const CHANGES_EVERY_ARG = /^(rm|rmdir|unlink|shred|truncate|mkdir|touch|chmod|chown|tee|sed\s+-i)\b/i;
 
+/**
+ * Where an installer is told to put things: `--target`, `--prefix`, `--install-dir`, `-t`.
+ *
+ * This is a write target, and not reading it cost the one command the protocol block tells every
+ * agent to use. `pip install --target .lightsout/tmp/deps X` classifies as `project_write`
+ * confined to the scratch (PE-08, ST-03b) — and then a pack with `write_scopes` refused it,
+ * because the engine asks "which path does this write to", found none, and a confined pack cannot
+ * approve a write whose destination it cannot see. The system contradicting its own instructions.
+ */
+const INSTALL_TARGET = /(?:--target|--prefix|--install-dir|-t)[=\s]+("[^"]+"|'[^']+'|\S+)/gi;
+
 export function writeTargets(command: string): string[] {
   const targets: string[] = [];
   for (const segment of splitSegments(command)) {
     for (const match of segment.matchAll(/>>?\s*("([^"]+)"|'([^']+)'|([^\s;|&]+))/g)) {
       const target = match[2] ?? match[3] ?? match[4];
+      if (target) targets.push(target);
+    }
+    for (const match of segment.matchAll(INSTALL_TARGET)) {
+      const target = match[1]?.replace(/^['"]|['"]$/g, "");
       if (target) targets.push(target);
     }
     const args = argPaths(segment);

@@ -10,11 +10,13 @@ import { SCRATCH_REL } from "../policy/classify.js";
 import { HUMAN_MARKER } from "../projects/deliverable.js";
 
 /**
+ * 6: there is no browser in this container, and none can be installed (MC-11). A qa run spent
+ * three permission gates hunting for chromium and playwright before working that out.
  * 5: where files go, how credentials are used, and how to publish something (PM-11, MC-11).
  * 4: where to install a library, and what never to try (ST-03b). 3: machine-first documents
  * (BA-07). 2: the tooling licence and the scratch directory (PE-07, PE-08).
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /** Constant, versioned protocol block (DESIGN §6.2 block 2). */
 export const PROTOCOL_BLOCK = `# LightsOut protocol v${PROTOCOL_VERSION}
@@ -61,6 +63,12 @@ To let a person look at what you built, call \`preview_start\`. It publishes a U
 machine and keeps serving after this run ends. Do not start a server in your own terminal —
 \`npm run dev\`, \`vite\`, \`python -m http.server\` never return, so they hold this run open until
 the watchdog kills it, and the policy refuses them for exactly that reason.
+
+**There is no browser in this container**, and none can be installed: no chromium, no firefox,
+no playwright, no puppeteer. Do not go looking for one. A front end is checked here by parsing
+what you wrote — \`node --check\` over the extracted script, a DOM library if you installed one —
+and by calling the API the page calls, with the same requests in the same order. Say plainly in
+your report that the rendered page was not opened, and leave that to the person who can.
 
 You may build and run your own tooling without asking: write a helper script and run it with
 python3, node or bash. Two conditions, both checked, not trusted: the script must live inside

@@ -4,7 +4,8 @@ name: Contract prober
 engine: codex
 model: gpt-5-codex
 reasoning: medium
-policy: probe
+policy: build-network
+writeScopes: [probes, doc]
 tags: [integration, api, research]
 instructions: |
   You find out how an external API actually behaves, before anything is built on top

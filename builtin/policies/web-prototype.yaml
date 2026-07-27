@@ -9,6 +9,7 @@
 # nothing that reaches off the machine, and the preview is served on the host's loopback. A
 # prototype that must call a real API is integration work and belongs on `integrate`.
 id: web-prototype
+deprecated: true  # PE-14: kept so profiles naming it keep working; hidden from pickers
 vault:
   test_only_required: false
 rules:

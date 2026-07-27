@@ -3,6 +3,7 @@
 # session cannot start implementing what it was only supposed to describe (BA-05).
 # Only test credentials are resolvable (VT-06).
 id: probe
+deprecated: true  # PE-14: kept so profiles naming it keep working; hidden from pickers
 write_scopes: [probes, doc]
 vault:
   test_only_required: true

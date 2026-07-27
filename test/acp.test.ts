@@ -194,9 +194,11 @@ describe("agents loader", () => {
     const loader = new AgentsLoader(workspace);
     const report = await loader.load();
     // 10 builtin profiles and 7 builtin packs, with builder and default shadowed (§2).
-    expect(report).toMatchObject({ loaded: 13, packs: 9, fromWorkspace: 1, rejected: [] });
+    expect(report).toMatchObject({ loaded: 13, packs: 12, fromWorkspace: 1, rejected: [] });
     expect(loader.profileOrThrow("builder").engine).toBe("claude");
-    expect(loader.profile("builder")?.policy).toBe("default");
+    // PE-14: `builder` names `build` now. `default` still resolves for a profile that names it.
+    expect(loader.profile("builder")?.policy).toBe("build");
+    expect(loader.pack("build")?.rules[0]?.verdict).toBe("allow");
     expect(loader.pack("default")?.rules[0]?.verdict).toBe("allow");
   });
 
@@ -243,7 +245,7 @@ describe("agents loader", () => {
     const report = await loader.load();
     expect(report.loaded).toBe(13);
     expect(report.fromWorkspace).toBe(0);
-    expect(report.packs).toBe(9);
+    expect(report.packs).toBe(12);
     expect(report.rejected).toEqual([]);
     for (const id of ["prompt-architect", "planner", "builder", "answerer"]) {
       expect(loader.profile(id)).toBeDefined();

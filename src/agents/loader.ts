@@ -115,6 +115,33 @@ export class AgentsLoader {
     return this.snapshot.packs.get(id);
   }
 
+  /** The packs a person may choose from: the three of PE-14, without the retired ids. */
+  choosablePacks(): PolicyPack[] {
+    return [...this.snapshot.packs.values()].filter((p) => !p.deprecated);
+  }
+
+  /**
+   * The pack a profile actually runs under (PE-14, §7.2b): its pack, with the profile's own
+   * `writeScopes` and `capabilities` laid over it.
+   *
+   * One function, because the alternative is the engine and the prompt disagreeing about what an
+   * agent may do. A capability is prepended, since the engine takes the first matching rule; it
+   * can only ever *allow* something the pack denied, never the reverse, and never anything on the
+   * hard floor of PE-03 — `capabilities` is a two-value enum for exactly that reason.
+   */
+  packFor(profile: AgentProfile): PolicyPack | undefined {
+    const base = this.pack(profile.policy);
+    if (!base) return undefined;
+    const scopes = profile.writeScopes?.length ? profile.writeScopes : base.write_scopes;
+    const granted = (profile.capabilities ?? []).map((cls) => ({
+      class: cls,
+      verdict: "allow" as const,
+      reason: `granted to ${profile.id} by its profile (PE-14)`,
+    }));
+    if (granted.length === 0 && scopes === base.write_scopes) return base;
+    return { ...base, write_scopes: scopes, rules: [...granted, ...base.rules] };
+  }
+
   async load(): Promise<LoadReport> {
     await mkdir(this.policiesDir, { recursive: true });
 

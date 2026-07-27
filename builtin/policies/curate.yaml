@@ -2,6 +2,7 @@
 # allow. The runner narrows the grant to the single base recorded writable=1 for the project;
 # writes into any other base classify as outside_workspace and are denied (§7.1).
 id: curate
+deprecated: true  # PE-14: kept so profiles naming it keep working; hidden from pickers
 write_scopes: [doc]
 rules:
   - { class: project_read, verdict: allow }

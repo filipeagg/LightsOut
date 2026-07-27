@@ -1383,9 +1383,7 @@ function agentEditor(p, packs) {
         <label class="tiny">Reasoning<br><select id="ag-reasoning">${reasonings
           .map((r) => `<option ${r === (p.reasoning || "") ? "selected" : ""}>${r}</option>`)
           .join("")}</select></label>
-        <label class="tiny">Policy pack<br><select id="ag-policy">${packs
-          .map((k) => `<option ${k === p.policy ? "selected" : ""}>${esc(k)}</option>`)
-          .join("")}</select></label>
+        <label class="tiny">How far it is trusted<br>${packSelect("ag-policy", packs, p.policy)}</label>
         <label class="tiny">Tags<br><input id="ag-tags" value="${esc((p.tags || []).join(", "))}"></label>
       </div>
       <label class="tiny">Instructions<br>
@@ -1438,7 +1436,41 @@ function viewAgents() {
         })
         .join("")}</tbody>
     </table></div>
-    <p class="tiny muted" style="margin-top:16px">Policy packs: ${a.packs.map((k) => `<code>${esc(k)}</code>`).join(" ") || "—"}</p>`;
+    <p class="tiny muted" style="margin-top:16px">Trust levels: ${
+      a.packs.map((k) => `<code>${esc(packId(k))}</code>`).join(" ") || "—"
+    }. An agent that names a retired pack keeps working; it is not offered here (PE-14).</p>`;
+}
+
+/** The API sends {id,name,description} since PE-14; older callers sent a bare string. */
+function packId(p) {
+  return typeof p === "string" ? p : p.id;
+}
+
+/**
+ * The trust picker (PE-14). Three options with a sentence each, because the old list of ten
+ * asked whoever was choosing to already know what `curate` meant as against `probe`. A profile
+ * still naming a retired pack keeps its value in the list, so opening the editor cannot silently
+ * change what an agent may do.
+ */
+function packSelect(id, packs, current) {
+  const known = packs.map(packId);
+  const retired =
+    current && !known.includes(current)
+      ? `<option value="${esc(current)}" selected>${esc(current)} — retired, kept as it is</option>`
+      : "";
+  const options = packs
+    .map((p) => {
+      const value = packId(p);
+      const label = typeof p === "string" ? p : `${p.name || p.id}`;
+      return `<option value="${esc(value)}" ${value === current ? "selected" : ""}>${esc(label)}</option>`;
+    })
+    .join("");
+  const chosen = packs.find((p) => packId(p) === current);
+  const hint =
+    chosen && typeof chosen !== "string" && chosen.description
+      ? `<div class="tiny muted" style="max-width:320px;margin-top:4px">${esc(chosen.description)}</div>`
+      : "";
+  return `<select id="${id}" onchange="paint()">${retired}${options}</select>${hint}`;
 }
 
 function newAgentForm(packs) {
@@ -1451,9 +1483,7 @@ function newAgentForm(packs) {
           <option>claude</option><option>codex</option></select></label>
       <label class="tiny">Model<br>
         <select id="ag-new-model">${modelOptions("claude", "")}</select></label>
-      <label class="tiny">Policy pack<br><select id="ag-new-policy">${packs
-        .map((k) => `<option>${esc(k)}</option>`)
-        .join("")}</select></label>
+      <label class="tiny">How far it is trusted<br>${packSelect("ag-new-policy", packs, "build")}</label>
     </div>
     <label class="tiny">Instructions<br>
       <textarea id="ag-new-instructions" rows="6" style="width:100%"></textarea></label>

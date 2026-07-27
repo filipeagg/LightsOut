@@ -5,7 +5,7 @@ name: Permission judge
 engine: claude
 model: haiku
 reasoning: low
-policy: advisor
+policy: read
 tags: [policy, internal]
 advisor: true
 instructions: |

@@ -1,6 +1,7 @@
 # no-write: the answerer (§16.3). It reads and replies; it has nothing to commit, which is
 # why the consolidate step of §5.2 is a no-op for it rather than a special case.
 id: no-write
+deprecated: true  # PE-14: kept so profiles naming it keep working; hidden from pickers
 rules:
   - { class: project_read, verdict: allow }
   - { class: project_write, verdict: deny, reason: "this agent answers, it does not change anything" }

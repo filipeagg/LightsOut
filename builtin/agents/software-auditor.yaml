@@ -4,7 +4,8 @@ name: Software auditor
 engine: codex
 model: gpt-5-codex
 reasoning: high
-policy: read-only
+policy: build
+writeScopes: [doc]
 tags: [audit, quality]
 instructions: |
   You audit delivered code at the end of a development phase. You run late and rarely,

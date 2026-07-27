@@ -111,6 +111,8 @@ export function explainMismatch(input: {
 export function grantPack(grants: Capability[], forRun: string): PolicyPack {
   return {
     id: `grant:${forRun}`,
+    // Never offered as a choice: it exists for one run and is gone with it (PE-14 hides it too).
+    deprecated: true,
     rules: grants.map((capability) => ({
       class: CLASS_OF[capability],
       verdict: "allow" as Verdict,

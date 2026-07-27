@@ -883,6 +883,47 @@ The lesson recorded in DECISIONS.md: a fix aimed at one *spelling* of an idea is
 question to ask of a matcher is what the command does with the value, not which characters it
 contains.
 
+### 7.2b Three packs, and the rest belongs to the agent (PE-14)
+
+The pack picker offered ten names. Laid out as a matrix, the ten encode four independent decisions:
+
+| pack | writes in | network | git | extra |
+|---|---|---|---|---|
+| `advisor`, `no-write` | — | no | no | — |
+| `read-only`, `curate` | `doc/` | no | no | curate: knowledge |
+| `probe` | `probes/`, `doc/` | yes | no | — |
+| `test` | test directories, `doc/` | yes | yes | — |
+| `default`, `web-prototype` | the project | no | yes | web-prototype: serve |
+| `integrate` | the project | yes | yes | — |
+
+Three things fall out of writing it down. `advisor` and `no-write` have **byte-identical rules** —
+two names for one pack. `read-only` **is not read-only**: it writes into `doc/` and runs scripts.
+And `default` differs from `integrate` by one line, as `default` does from `web-prototype`.
+
+So a pack now answers one question — *how far is this agent trusted?* — with three answers:
+
+| pack | what it is for |
+|---|---|
+| `read` | reads and reports. Runs nothing, writes nothing. |
+| `build` | works inside its project: writes, runs checks and its own scripts, local git. |
+| `build-network` | the same, and may reach the network. |
+
+Everything the other seven added is a property of the **profile**, where it belongs, because it
+describes *this agent*, not how far anyone trusts it:
+
+- `writeScopes: [probes, doc]` — where this agent may write. Previously on the pack, which is why
+  confining an agent meant inventing a pack for it.
+- `capabilities: [knowledge_write]`, `[serve]` — the one-off permissions, named for what they are.
+
+Network stays a pack rather than a capability, deliberately. It is the one of the four whose
+consequence leaves the machine and cannot be undone (§7.5 makes the same argument about `grants`),
+so it belongs where a person sees it while choosing, not in a checkbox below the fold.
+
+**The retired ids keep loading.** `advisor`, `no-write`, `read-only`, `curate`, `probe`, `test`,
+`integrate` and `web-prototype` are marked `deprecated: true`: they still resolve, so a profile
+someone wrote in their own workspace does not stop working, and they are hidden from every picker
+and from `list_agents.packs`. Breaking somebody's configuration is not a simplification.
+
 ### 7.1d Whose secret is it? (PE-13)
 
 The same false positive has now stopped a real run **four times**, in four spellings:

@@ -4,7 +4,7 @@ name: Reviewer
 engine: codex
 model: gpt-5-codex
 reasoning: low
-policy: advisor
+policy: read
 tags: [review, advisor]
 advisor: true
 instructions: |

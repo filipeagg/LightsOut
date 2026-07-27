@@ -266,7 +266,11 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
           error: r.error,
         })),
       ],
-      packs: [...snapshot.packs.keys()],
+      // PE-14: the three a profile should name. Retired ids still resolve and are deliberately
+      // not listed — offering them is how ten packs happened.
+      packs: [...snapshot.packs.values()]
+        .filter((p) => !p.deprecated)
+        .map((p) => ({ id: p.id, name: p.name ?? p.id, description: p.description ?? "" })),
     };
     },
   );

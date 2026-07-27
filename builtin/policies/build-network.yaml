@@ -1,0 +1,34 @@
+# build-network: `build`, and may reach the network (PE-14, §7.2b).
+#
+# Its own pack rather than a capability on the profile, deliberately. Of the four decisions the old
+# ten packs encoded, this is the one whose consequence leaves the machine and cannot be undone —
+# §7.5 makes the same argument about `grants` — so it belongs where a person sees it while
+# choosing, not in a checkbox below the fold.
+#
+# For probing an API, calling one, and writing the code that calls it. A vault entry with a
+# base_url grants the network for its host anyway (VT-07); this is for the rest.
+id: build-network
+name: Build and reach the network
+description: >
+  Everything build does, and may call external services. For probing and integrating with a
+  real API.
+vault:
+  test_only_required: false
+rules:
+  - { class: project_read, verdict: allow }
+  - { class: project_write, verdict: allow }
+  - { class: exec_check, verdict: allow }
+  - { class: script_exec, verdict: allow, reason: "own tooling; the body was inspected (PE-07)" }
+  - { class: network, verdict: allow, reason: "the point of this pack; egress is allowlisted (RT-05)" }
+  - { class: git_local, verdict: allow }
+  - { class: serve, verdict: deny, reason: "a server started here never ends; use preview_start (PV-02)" }
+  - { class: deps_install, verdict: require_human, reason: "a dependency changes the build for every later run (ST-03); install into .lightsout/tmp/deps instead" }
+  - { class: toolchain_install, verdict: require_human, reason: "a durable toolchain is authorised once per project and manager (ST-07)" }
+  - { class: delete, verdict: require_human, reason: "deletions are hard to undo" }
+  - { class: git_push, verdict: deny, reason: "pushing is the orchestrator's job (PM-05)" }
+  - { class: knowledge_write, verdict: deny, reason: "only a curation project writes knowledge (KB-05)" }
+  - { class: outside_workspace, verdict: deny }
+  - { class: credentials, verdict: require_human }
+  - { class: publish_external, verdict: deny }
+  - { class: other, verdict: require_human }
+matchers: {}

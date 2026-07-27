@@ -225,7 +225,7 @@ export class TaskRunner {
     // in the classifier, so "may read" and "may write" can never drift apart.
     const writeAreas = readAreas.filter((a) => a.access === "write").map((a) => a.absolute);
 
-    const agentPack = this.agents.pack(profile.policy);
+    const agentPack = this.agents.packFor(profile);
     const context = await this.runContext(project, task, input.projectPack ?? agentPack);
 
     // PE-12: what this launch was granted, as the most specific policy layer. VT-07 adds the
@@ -249,8 +249,8 @@ export class TaskRunner {
       {
         ...(granted.length ? { grant: grantPack(granted, task.id) } : {}),
         project: input.projectPack,
-        agent: this.agents.pack(profile.policy),
-        default: this.agents.pack("default"),
+        agent: this.agents.packFor(profile),
+        default: this.agents.pack("build") ?? this.agents.pack("default"),
       },
       {
         scriptScanBytes: this.config.scriptScanBytes,

@@ -3,7 +3,8 @@ name: QA engineer
 engine: claude
 model: claude-sonnet-4-5
 reasoning: medium
-policy: test
+policy: build-network
+writeScopes: [test, tests, e2e, spec, __tests__, doc]
 tags: [qa, testing]
 instructions: |
   You write and run regression and integration tests, and you report what actually

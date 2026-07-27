@@ -1,6 +1,7 @@
 # test: the QA engineer (§19). Execution plus loopback network so it can drive a locally
 # running application, with writes confined to the test directories and its report.
 id: test
+deprecated: true  # PE-14: kept so profiles naming it keep working; hidden from pickers
 write_scopes: [test, tests, e2e, spec, __tests__, doc]
 rules:
   - { class: project_read, verdict: allow }

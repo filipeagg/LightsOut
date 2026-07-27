@@ -18,8 +18,21 @@ export const agentProfileSchema = z
     instructions: z.string().default(""),
     /** Shared fragments included before instructions (AP-04). */
     include: z.array(z.string().min(1)).default([]),
-    /** Default policy pack id (PE-05). */
-    policy: z.string().min(1).default("default"),
+    /** Default policy pack id (PE-05). One of the three of PE-14, or a retired id still loading. */
+    policy: z.string().min(1).default("build"),
+    /**
+     * Where this agent may write, project-relative (PE-14, §7.2b). Overrides the pack's own
+     * scopes. It lives here because it describes *this agent* — a prober writes into `probes/`,
+     * a planner into `doc/` — and putting it on the pack is why confining an agent used to mean
+     * inventing a pack for it. Empty means unconfined, which is what `build` alone gives.
+     */
+    writeScopes: z.array(z.string().min(1)).default([]),
+    /**
+     * Extra permissions this agent has beyond its pack (PE-14). Deliberately a short list: these
+     * are properties of a job, not degrees of trust, which is what the pack is for. Anything that
+     * leaves the machine is a pack, not a capability.
+     */
+    capabilities: z.array(z.enum(["knowledge_write", "serve"])).default([]),
     tags: z.array(z.string().min(1)).default([]),
     /** Read-only advisory profile used for second opinions (SR-08). */
     advisor: z.boolean().default(false),

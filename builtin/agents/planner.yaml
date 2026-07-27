@@ -3,7 +3,8 @@ name: Planner
 engine: claude
 model: claude-sonnet-4-5
 reasoning: high
-policy: read-only
+policy: build
+writeScopes: [doc]
 tags: [planning, design]
 instructions: |
   You write the plan the builder will execute. Ambiguity is the defect you exist to

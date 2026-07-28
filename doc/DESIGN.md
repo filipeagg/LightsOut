@@ -2266,6 +2266,56 @@ The cause is not ignorance, it is shape. Three fixes, all about shape:
 The server instructions (§10.0) carry one more line for the same reason — they are the only text
 guaranteed to be in the client's context — and `guide{topic:"templates"}` remains the detail.
 
+## 16b. Triggers (TR-01..07)
+
+**What a trigger is, and what it is not.** It is a launch with a clock on it. It is deliberately
+not a fifth noun beside project, phase, chain and agent: at the moment it fires it calls the same
+`launchPhase` or `launchTask` the two surfaces call, and everything downstream — the chain, the
+deliverable check, the gate, the doubt, the commit — happens exactly as it does when a person
+presses the button. A scheduler that knew how to run work would be a second orchestrator.
+
+```yaml
+# a row in `triggers` (migration 15), shown here as the panel's form fills it
+project: sector-news
+cron: "0 7 * * 1-5"          # container timezone, five fields
+phase: collect               # the repeatable phase this fires…
+request: >                   # …and what is being asked, this time and every time
+  Read yesterday's items from the sources in the brief and consolidate them.
+expects: >
+  knowledge/sector-news/index.md updated, with one line per item and its source.
+enabled: true
+```
+
+**Why a phase and not a prompt.** A daily digest is a loop, and a template is an arc, so it would be
+a category error to force the whole project through a template every morning. But the *work* is the
+same every morning, and that is exactly what a `repeatable` phase already is (TP-07): frozen
+instructions, a deliverable checked on disk, a gate if the work deserves one. So a trigger points at
+a phase and passes the request; the free-task form exists for the one-off recurring thing that has
+no plan around it, and it carries `request` and `expects` like every other launch (OR-10).
+
+**Three ways a firing does not happen**, all recorded rather than silent (TR-03, TR-05):
+
+| situation | what happens |
+|---|---|
+| a run of that project is in flight | skipped, `reason: busy`. Two runs of one project is not a thing (SR-07), and a queue of stale digests is worse than a missing one |
+| the chain is paused | skipped, `reason: chain paused`. Something is waiting for a person; adding work on top of it buries the thing that needs attention |
+| the phase is not pending, or is not repeatable | skipped, `reason: nothing to launch` |
+
+**The missed firing (TR-04).** The scheduler ticks every 30 s and compares the previous scheduled
+time with `last_fired_at`. That single rule covers both cases: a container that was off at 07:00 and
+comes back at 09:00 sees that the 07:00 slot has passed and nothing ran in it, and runs once — not
+five times for five missed days, because only the most recent slot is considered. A trigger created
+after today's slot does not fire for it: `created_at` is the floor.
+
+**Unattended (TR-07).** Creating a trigger on a project that is not unattended turns unattended on
+and says so. The alternative — a digest that stops at 03:00 on a permission gate — is the failure
+OR-12 exists to prevent, and a trigger is the strongest possible statement that nobody is watching.
+
+**Cron.** Five fields, standard, no seconds and no `@daily` aliases: the parser is thirty lines and
+lives in `src/triggers/cron.ts`, because a dependency for this would be a dependency to audit
+forever. Times are the container's, which is UTC unless the compose file says otherwise, and the
+panel says which timezone it is showing rather than pretending to know the user's.
+
 ## 17. Curated knowledge (KB-01..07, phase 9)
 
 ### 17.1 Base format

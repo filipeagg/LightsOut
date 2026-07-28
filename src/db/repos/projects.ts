@@ -131,6 +131,8 @@ export class ProjectsRepo {
       "DELETE FROM previews WHERE project_id = ?",
       // Migration 14 (SR-09): notes point at both the run and the project, so they go before runs.
       "DELETE FROM run_notes WHERE project_id = ?",
+      // Migration 15 (TR-01): a trigger for a project that no longer exists would fire for ever.
+      "DELETE FROM triggers WHERE project_id = ?",
       `DELETE FROM runs WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`,
       "DELETE FROM tasks WHERE project_id = ?",
       "DELETE FROM chains WHERE project_id = ?",

@@ -456,6 +456,98 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
   );
 
   tool(
+    "list_triggers",
+    "Scheduled launches, with the next time each one fires and what happened last time (TR-06).",
+    { projectId: z.string().min(1).optional() },
+    async ({ projectId }) => ({
+      triggers: actions.listTriggers(projectId).map((t) => ({
+        id: t.id,
+        name: t.name,
+        projectId: t.project_id,
+        cron: t.cron,
+        cronReads: t.cronReads,
+        fires: t.phase_ref ? { phase: t.phase_ref } : { agent: t.agent_id, title: t.title },
+        request: t.request,
+        expects: t.expects,
+        enabled: t.enabled === 1,
+        nextFireAt: t.nextFireAt,
+        lastFiredAt: t.last_fired_at,
+        lastResult: t.last_result,
+      })),
+    }),
+  );
+
+  tool(
+    "create_trigger",
+    "Run something on a schedule (TR-01). It launches exactly what you would launch by hand, at " +
+      "the time you name: normally a repeatable phase of the project, so the plan, the deliverable " +
+      "check and the gate all still apply. A missed firing runs once at boot; a firing that lands " +
+      "on a busy or paused project is skipped and says so, never queued.",
+    {
+      projectId: z.string().min(1),
+      name: z.string().min(1).describe("What this trigger is for, in a few words."),
+      cron: z
+        .string()
+        .min(1)
+        .describe(
+          "Five fields, container timezone: minute hour day-of-month month day-of-week. " +
+            '"0 7 * * 1-5" is 07:00 on weekdays.',
+        ),
+      phase: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("The repeatable phase to launch. The normal case; needs no agent."),
+      agentId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Or the agent for a free task, when no phase fits the work."),
+      title: z.string().min(1).optional().describe("Title of that free task."),
+      request: z.string().min(1).describe("What is being asked, every time it fires (OR-10)."),
+      expects: z.string().min(1).describe("What must come back, and how anyone knows (OR-10)."),
+      enabled: z.boolean().optional(),
+    },
+    async (args) => ({
+      trigger: actions.createTrigger("mcp", {
+        projectId: args.projectId,
+        name: args.name,
+        cron: args.cron,
+        ...(args.phase ? { phase: args.phase } : {}),
+        ...(args.agentId ? { agentId: args.agentId } : {}),
+        ...(args.title ? { title: args.title } : {}),
+        request: args.request,
+        expects: args.expects,
+        ...(args.enabled === undefined ? {} : { enabled: args.enabled }),
+      }),
+    }),
+  );
+
+  tool(
+    "write_trigger",
+    "Edit a trigger, or turn it off without losing it (TR-01, TR-06).",
+    {
+      triggerId: z.string().min(1),
+      name: z.string().min(1).optional(),
+      cron: z.string().min(1).optional(),
+      title: z.string().min(1).optional(),
+      request: z.string().min(1).optional(),
+      expects: z.string().min(1).optional(),
+      enabled: z.boolean().optional(),
+    },
+    async ({ triggerId, ...patch }) => ({
+      trigger: actions.updateTrigger("mcp", triggerId, stripUndefined(patch)),
+    }),
+  );
+
+  tool(
+    "delete_trigger",
+    "Delete a trigger for good. To stop it for now, set enabled false instead.",
+    { triggerId: z.string().min(1) },
+    async ({ triggerId }) => actions.deleteTrigger("mcp", triggerId),
+  );
+
+  tool(
     "steer_run",
     "Correct a run that is already going, without killing it (SR-09). The note lands in the " +
       "agent's inbox, which the protocol tells it to read between steps, and whatever it has not " +

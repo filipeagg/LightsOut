@@ -32,6 +32,8 @@ export type EventType =
   | "run.state"
   /** A person corrected a run in flight (SR-09, §6.8). */
   | "run.steered"
+  /** A trigger's moment arrived: it launched, or it says why it did not (TR-05, §16b). */
+  | "trigger.fired"
   | "task.state"
   | "chain.state"
   | "agent.message"

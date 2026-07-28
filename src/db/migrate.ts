@@ -395,6 +395,35 @@ CREATE TABLE run_notes (
 CREATE INDEX ix_run_notes_pending ON run_notes(run_id) WHERE delivered_at IS NULL;
 `;
 
+/**
+ * Version 15 (TR-01..07, §16b): launches that happen at a time instead of when someone asks.
+ *
+ * `last_fired_at` and `last_result` are on the row rather than derived from the event log, because
+ * the two questions a person asks about a trigger — did it run, and did it work — should not need
+ * a scan. The check on the target is the TR-02 rule in the schema: a phase or a free task, never
+ * neither and never both.
+ */
+const TRIGGERS_SQL = `
+CREATE TABLE triggers (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES projects(id),
+  name          TEXT NOT NULL,
+  cron          TEXT NOT NULL,
+  phase_ref     TEXT,
+  agent_id      TEXT,
+  title         TEXT,
+  request       TEXT NOT NULL,
+  expects       TEXT NOT NULL,
+  enabled       INTEGER NOT NULL DEFAULT 1,
+  created_by    TEXT NOT NULL,
+  created_at    TEXT NOT NULL,
+  last_fired_at TEXT,
+  last_result   TEXT,
+  CHECK ((phase_ref IS NOT NULL AND agent_id IS NULL) OR (phase_ref IS NULL AND agent_id IS NOT NULL))
+);
+CREATE INDEX ix_triggers_project ON triggers(project_id);
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial schema", up: applyInitialSchema },
   {
@@ -425,6 +454,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 12, name: "writable areas", up: AREA_ACCESS_SQL },
   { version: 13, name: "why a project has no template", up: TEMPLATE_REASON_SQL },
   { version: 14, name: "notes left for a running run", up: RUN_NOTES_SQL },
+  { version: 15, name: "triggers, launches with a clock on them", up: TRIGGERS_SQL },
 ];
 
 /** The marker migration 4 writes, and the panel looks for (PM-09). */

@@ -183,6 +183,19 @@ agent profile, with its own prompt, deliverable, verify command and gate.
 - TP-10 MUST. A template carries its own selection criteria — when to use it and what it is not for — separately from its description, and they are the first thing the listing shows. The caller of `list_templates` is choosing between templates, not reading about one.
 - TP-08 SHOULD. A project can add an ad-hoc phase not present in its template, bound to any enabled agent, appended or inserted at a position.
 
+## 13b. TR — Triggers (scheduled launches)
+
+A trigger is not a new kind of work: it is a launch that happens at a time instead of when a person
+asks. Everything it starts is an ordinary task in an ordinary chain.
+
+- TR-01 MUST. A trigger belongs to a project and says when it fires (cron, in the container's timezone), what it launches, and whether it is enabled. Disabling it is not deleting it.
+- TR-02 MUST. What it launches is either a repeatable phase of the project — the normal case, so the plan, the deliverable check and the gate all still apply — or a free task, which states its request and what it expects back like any other launch (OR-10).
+- TR-03 MUST. A trigger never queues work on top of itself: if the project's chain is paused or a run of that project is in flight when it fires, the firing is skipped and recorded with the reason, not deferred into a pile.
+- TR-04 MUST. A firing missed because the container was off runs once at boot if its window has passed and it has not run since. A machine that was asleep is not a reason for the daily digest to be missing.
+- TR-05 MUST. Every firing is recorded — when, what it launched, or why it did not — and the trigger carries its last result so a person can see at a glance that it is still working.
+- TR-06 MUST. Triggers are created, edited, disabled and deleted from both surfaces (MC-07), and the panel shows the next fire time.
+- TR-07 MUST. A project with a trigger runs unattended (OR-12): work that starts at 07:00 with nobody there must not stop at 07:01 waiting for a permission a person would have given.
+
 ## 14. KB — Curated knowledge
 
 Knowledge is what previous work produced and later work should not have to rediscover: how an

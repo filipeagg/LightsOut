@@ -72,6 +72,8 @@ import {
 } from "../projects/doc-history.js";
 import { applyEdits, type DocEdit } from "../projects/doc-patch.js";
 import { INBOX_REL } from "../acp/prompt.js";
+import { describeCron, nextFire, parseCron } from "../triggers/cron.js";
+import type { TriggerRow } from "../db/repos/triggers.js";
 
 export type Actor = "mcp" | "panel" | "system";
 
@@ -732,6 +734,129 @@ export class Actions {
       .find((run) => repos.tasks.get(run.task_id)?.project_id === projectId);
     if (!found) throw new Error(`no run in flight for project ${projectId}`);
     return found.id;
+  }
+
+  // --- Triggers: launches with a clock on them (TR-01..07, §16b) -------------
+
+  /**
+   * Create a trigger. Everything that can be wrong is wrong now rather than at 07:00 on a Sunday:
+   * the cron parses, the target exists and is repeatable, the agent is launchable.
+   *
+   * A project with a trigger is unattended (TR-07). Work that starts when nobody is there must not
+   * stop a minute later waiting for a permission someone would have granted.
+   */
+  createTrigger(
+    actor: Actor,
+    input: {
+      projectId: string;
+      name: string;
+      cron: string;
+      phase?: string;
+      agentId?: string;
+      title?: string;
+      request: string;
+      expects: string;
+      enabled?: boolean;
+    },
+  ): TriggerRow & { nextFireAt: string | null; unattendedTurnedOn: boolean } {
+    const project = this.project(input.projectId);
+    this.requireNotArchived(project.id);
+    const fields = parseCron(input.cron); // throws with the field that is wrong
+    if (!input.request.trim() || !input.expects.trim()) {
+      throw new Error("a trigger states its request and what it expects back, like any launch (OR-10)");
+    }
+    if ((input.phase ? 1 : 0) + (input.agentId ? 1 : 0) !== 1) {
+      throw new Error("a trigger fires either a phase or a task with an agent, not both and not neither");
+    }
+
+    if (input.phase) {
+      const phases = this.need(this.deps.phases, "phases");
+      const row = phases.list(project.id).find((p) => p.phase_id === input.phase || p.id === input.phase);
+      if (!row) throw new Error(`unknown phase: ${input.phase}`);
+      if (!row.repeatable) {
+        throw new Error(
+          `phase ${row.phase_id} is not repeatable, so it can only run once: a trigger needs a ` +
+            "phase that may run again (TP-07)",
+        );
+      }
+    } else {
+      this.requireLaunchable(input.agentId!);
+    }
+
+    let unattendedTurnedOn = false;
+    if (!project.unattended) {
+      this.deps.repos.projects.update(project.id, { unattended: true });
+      unattendedTurnedOn = true;
+    }
+
+    const row = this.deps.repos.triggers.create({
+      projectId: project.id,
+      name: input.name,
+      cron: fields.expression,
+      ...(input.phase ? { phaseRef: input.phase } : { agentId: input.agentId }),
+      ...(input.title ? { title: input.title } : {}),
+      request: input.request,
+      expects: input.expects,
+      ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+      createdBy: actor,
+    });
+    this.changed("trigger", row.id, actor);
+    return { ...row, nextFireAt: nextFire(fields, new Date())?.toISOString() ?? null, unattendedTurnedOn };
+  }
+
+  updateTrigger(
+    actor: Actor,
+    triggerId: string,
+    patch: {
+      name?: string;
+      cron?: string;
+      request?: string;
+      expects?: string;
+      title?: string;
+      enabled?: boolean;
+    },
+  ): TriggerRow & { nextFireAt: string | null } {
+    const current = this.deps.repos.triggers.getOrThrow(triggerId);
+    if (patch.cron !== undefined) parseCron(patch.cron);
+    const row = this.deps.repos.triggers.update(current.id, patch);
+    this.changed("trigger", row.id, actor);
+    return {
+      ...row,
+      nextFireAt: (() => {
+        try {
+          return nextFire(parseCron(row.cron), new Date())?.toISOString() ?? null;
+        } catch {
+          return null;
+        }
+      })(),
+    };
+  }
+
+  deleteTrigger(actor: Actor, triggerId: string): { deleted: boolean } {
+    const row = this.deps.repos.triggers.getOrThrow(triggerId);
+    const deleted = this.deps.repos.triggers.remove(row.id);
+    this.changed("trigger", row.id, actor, "delete");
+    return { deleted };
+  }
+
+  /** Every trigger with the next time it would fire, and what happened last time (TR-05, TR-06). */
+  listTriggers(projectId?: string): (TriggerRow & { nextFireAt: string | null; cronReads: string })[] {
+    return this.deps.repos.triggers.list(projectId).map((row) => {
+      try {
+        const fields = parseCron(row.cron);
+        return {
+          ...row,
+          nextFireAt: row.enabled ? (nextFire(fields, new Date())?.toISOString() ?? null) : null,
+          cronReads: describeCron(row.cron),
+        };
+      } catch (err) {
+        return {
+          ...row,
+          nextFireAt: null,
+          cronReads: `invalid: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    });
   }
 
   async stopRun(

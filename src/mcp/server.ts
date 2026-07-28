@@ -28,15 +28,16 @@ Rules that are expensive to get wrong:
   required, including intermediate phases and relaunches; a launch without them is refused.
 - Launches return immediately. Poll project_status, or status_card for a compact view.
 - A doubt is a decision the agent cannot make alone — not an error. list_doubts, answer_doubt.
-- A policy denial is an answer, mediated by the engine. If an agent needs to read something outside
-  its project, declare a read-only area (add_area) rather than weakening anything.
-- The workspace is the user's own folder: call resolve_path before telling anyone where a file is.
+- A policy denial is an answer. An agent that must read outside its project gets an area (add_area),
+  not a weaker rule.
+- The workspace is the user's own folder: call resolve_path before naming a file to anyone.
 - Documents the system reads back are machine-first: key: value, no prose. write_doc REPLACES;
   append_doc adds; patch_doc edits part.
 - list_templates before create_project: a template brings phases, gates and frozen instructions,
   and "none" is an answer that carries its reason.
-- A profile's engine and model are defaults; any launch may override them (list_agents.models).
+- A profile's engine and model are defaults; any launch may override them.
 - Nothing that serves runs in an agent's terminal: it never returns. preview_start gives a URL.
+- Correct a run in flight with steer_run rather than killing it. Recurring work is a trigger.
 
 Call guide{} for the list of sections and guide{topic:"overview"} to learn the system. The live
 view for a person is the panel at http://127.0.0.1:8484.`;

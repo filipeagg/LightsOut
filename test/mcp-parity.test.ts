@@ -56,6 +56,8 @@ const READ_ONLY = new Set([
   // PV-03: what is being served, and why it is not. Both have tools; both are reads.
   "listPreviews",
   "previewLog",
+  // TR-06: the schedule, with the next fire time. `list_triggers` and the panel serve the same read.
+  "listTriggers",
 ]);
 
 /**
@@ -101,6 +103,9 @@ const TOOL_FOR: Record<string, string> = {
   abortRun: "abort_run",
   stopRun: "stop_run",
   steerRun: "steer_run",
+  createTrigger: "create_trigger",
+  updateTrigger: "write_trigger",
+  deleteTrigger: "delete_trigger",
   setProjectContext: "set_project_context",
   setProjectUnattended: "set_project_unattended",
   addArea: "add_area",

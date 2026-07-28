@@ -81,6 +81,8 @@ export async function createHttpServer(deps: ServerDeps): Promise<FastifyInstanc
     ...(deps.mcp?.templates ? { templates: deps.mcp.templates } : {}),
     ...(deps.mcp?.knowledge ? { knowledge: deps.mcp.knowledge } : {}),
     ...(deps.mcp?.vault ? { vault: deps.mcp.vault } : {}),
+    // TR-06: reading the schedule goes through the same actions the writes do.
+    ...(deps.mcp?.actions ? { actions: deps.mcp.actions } : {}),
   });
   // The write surface of §12.1b, behind the same actions the MCP tools use (§12.0).
   if (deps.mcp?.actions) registerWriteRoutes(app, { actions: deps.mcp.actions });

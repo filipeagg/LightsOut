@@ -9,6 +9,14 @@ definition: a launch with a clock on it. At the time it names it calls the same 
 not_a_new_noun: no scheduler runs the work. The chain, the deliverable check, the gate and the doubt all behave exactly as they do for a launch a person made.
 timezone: the container's clock. `list_triggers` and the panel say which one that is.
 
+## one_trigger_runs_the_whole_plan
+
+rule: point it at the **first** phase. A phase that closes ok launches the next pending one, so the sequence continues without a second trigger.
+cycles: relaunching a repeatable phase puts the repeatable phases after it back to `pending`, which is what lets a nightly plan come round again (TP-07).
+request_and_expects: they belong to the phase the trigger names. The phases after it get theirs derived from the plan (§16.2).
+human_gate: a phase whose gate is `human` stops the sequence there until somebody answers. Unattended mode answers permissions, not questions — do not put a gate in the middle of a nightly plan.
+two_triggers: only for work that has nothing to do with the first. Two triggers on the same project at nearby times is how you get one of them skipped as busy.
+
 ## what_it_launches
 
 normal_case: a repeatable phase of the project (`phase`). The plan already says how the work is done; the trigger says when.

@@ -17,6 +17,7 @@ export const TOPIC_ORDER = [
   "agents",
   "templates",
   "phases",
+  "triggers",
   "knowledge",
   "areas",
   "previews",

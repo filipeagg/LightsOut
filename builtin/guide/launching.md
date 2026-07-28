@@ -77,6 +77,13 @@ level.full: LO_TIMEOUT_FULL_MIN (90 min default). Real work.
 watchdogs: a hard timer and an inactivity timer; expiry cancels the session and pauses the chain (SR-04).
 cost: every run spends the user's subscription. Small specs, quick level while exploring.
 
+## correcting_one_that_is_running
+
+steer_run: `{projectId | runId, note}`. The note lands in the agent's inbox (`.lightsout/inbox.md`), which the protocol tells it to read between steps.
+guarantee: whatever it has not read is handed to it as one more turn on the same session before the run may finish (SR-09). It keeps its context; it is answering, not starting again.
+when: the work so far is worth keeping and one thing has to change. Reach for this before abort_run.
+not: an answer to a doubt, a permission, or a way to add a second task. A run waiting on a person is waiting on answer_doubt.
+
 ## stopping
 
 stop_run: cancels the ACP turn and ends the adapter now; the chain is left paused (OR-09).

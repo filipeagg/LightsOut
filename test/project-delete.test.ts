@@ -87,6 +87,16 @@ function seedFullProject(id: string): { taskId: string; runId: string } {
     `/workspace/projects/${id}/.lightsout/tmp/preview.log`,
     new Date().toISOString(),
   );
+  // TR-01, migration 15: a trigger belonging to this project.
+  repos.triggers.create({
+    projectId: id,
+    name: "daily",
+    cron: "0 7 * * *",
+    agentId: "builder",
+    request: "do the daily thing",
+    expects: "the daily thing done",
+    createdBy: "panel",
+  });
   // SR-09, migration 14: a correction left for a run of this project.
   repos.runNotes.add({
     runId: run.id,

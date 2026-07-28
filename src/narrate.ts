@@ -66,6 +66,14 @@ export function describeEvent(type: string, payload: Payload): Omit<NarratedLine
       if (delivery === "turn") return { text: `handed the correction: ${note}`, tone: "decision" };
       return { text: `${read(payload, "actor") || "someone"} says: ${note}`, tone: "decision" };
     }
+    case "trigger.fired": {
+      const name = read(payload, "name");
+      const result = shorten(read(payload, "result"), 90);
+      return {
+        text: `trigger ${name}: ${result}`,
+        tone: read(payload, "fired") === "true" ? "work" : "decision",
+      };
+    }
     case "agent.thought":
       return { text: `thinking: ${shorten(read(payload, "textExcerpt"), 110)}`, tone: "work" };
     case "agent.message":

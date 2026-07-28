@@ -25,6 +25,7 @@ import { ENGINE_MODELS } from "../agents/models.js";
 import { listWorkspaceFolders } from "../knowledge/writer.js";
 import { hostPathFor, listProjectDocs, readProjectDoc } from "../projects/docs-index.js";
 import { narrate } from "../narrate.js";
+import type { Actions } from "../control/actions.js";
 
 export type ApiDeps = {
   config: Config;
@@ -35,6 +36,8 @@ export type ApiDeps = {
   templates?: TemplatesLoader;
   knowledge?: KnowledgeLoader;
   vault?: Vault;
+  /** TR-06: the schedule is a read over the same action layer both surfaces write through. */
+  actions?: Actions;
 };
 
 async function envelope(
@@ -356,6 +359,36 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
           })),
         })),
         rejected: deps.templates.current().rejected,
+      };
+    }),
+  );
+
+  // TR-06: the schedule, with the next fire time and what happened last time.
+  app.get("/api/triggers", async (request, reply) =>
+    envelope(reply, async () => {
+      if (!deps.actions) return { triggers: [], available: false };
+      const query = request.query as { projectId?: string };
+      return {
+        available: true,
+        // The container's clock is what the cron is read against; the panel says so rather than
+        // guessing at the browser's (§16b).
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC",
+        triggers: deps.actions.listTriggers(query.projectId).map((t) => ({
+          id: t.id,
+          projectId: t.project_id,
+          name: t.name,
+          cron: t.cron,
+          cronReads: t.cronReads,
+          phase: t.phase_ref,
+          agentId: t.agent_id,
+          title: t.title,
+          request: t.request,
+          expects: t.expects,
+          enabled: t.enabled === 1,
+          nextFireAt: t.nextFireAt,
+          lastFiredAt: t.last_fired_at,
+          lastResult: t.last_result,
+        })),
       };
     }),
   );

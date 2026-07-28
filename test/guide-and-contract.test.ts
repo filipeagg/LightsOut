@@ -53,6 +53,9 @@ describe("the manual served over MCP (MC-09)", () => {
       "write_template",
       "add_area",
       "attach_knowledge",
+      // TR-01 and SR-09: the two verbs a client would otherwise never reach for.
+      "create_trigger",
+      "steer_run",
       "answer_doubt",
       "resolve_path",
       "machine-first",

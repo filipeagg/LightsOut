@@ -439,6 +439,53 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
     }),
   );
 
+  // --- Triggers (TR-01..07, §16b) ------------------------------------------
+
+  app.post("/api/projects/:id/triggers", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = idParam.parse(request.params);
+      const input = body(
+        z.object({
+          name: z.string().min(1),
+          cron: z.string().min(1),
+          phase: z.string().min(1).optional(),
+          agentId: z.string().min(1).optional(),
+          title: z.string().min(1).optional(),
+          request: z.string().min(1),
+          expects: z.string().min(1),
+          enabled: z.boolean().optional(),
+        }),
+        request.body,
+      );
+      return { trigger: actions.createTrigger("panel", { projectId: id, ...input }) };
+    }),
+  );
+
+  app.put("/api/triggers/:id", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = idParam.parse(request.params);
+      const input = body(
+        z.object({
+          name: z.string().min(1).optional(),
+          cron: z.string().min(1).optional(),
+          title: z.string().min(1).optional(),
+          request: z.string().min(1).optional(),
+          expects: z.string().min(1).optional(),
+          enabled: z.boolean().optional(),
+        }),
+        request.body,
+      );
+      return { trigger: actions.updateTrigger("panel", id, input) };
+    }),
+  );
+
+  app.delete("/api/triggers/:id", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = idParam.parse(request.params);
+      return actions.deleteTrigger("panel", id);
+    }),
+  );
+
   // SR-09 (§6.8): correct the run in flight instead of killing it. By project, because that is
   // what the panel is looking at when the person decides to say something.
   app.post("/api/projects/:id/steer", async (request, reply) =>

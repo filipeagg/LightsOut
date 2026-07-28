@@ -20,6 +20,7 @@ import { LearnedRepo } from "./learned.js";
 import { ToolchainGrantsRepo } from "./toolchain-grants.js";
 import { PreviewsRepo } from "./previews.js";
 import { RunNotesRepo } from "./run-notes.js";
+import { TriggersRepo } from "./triggers.js";
 
 export type Repos = {
   db: Db;
@@ -45,6 +46,8 @@ export type Repos = {
   previews: PreviewsRepo;
   /** Corrections left for a run that is already going (SR-09). */
   runNotes: RunNotesRepo;
+  /** Launches with a clock on them (TR-01). */
+  triggers: TriggersRepo;
 };
 
 export function createRepos(db: Db): Repos {
@@ -67,6 +70,7 @@ export function createRepos(db: Db): Repos {
     toolchainGrants: new ToolchainGrantsRepo(db),
     previews: new PreviewsRepo(db),
     runNotes: new RunNotesRepo(db),
+    triggers: new TriggersRepo(db),
   };
 }
 
@@ -88,4 +92,5 @@ export {
   ToolchainGrantsRepo,
   PreviewsRepo,
   RunNotesRepo,
+  TriggersRepo,
 };

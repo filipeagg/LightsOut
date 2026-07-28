@@ -199,6 +199,7 @@ tbody tr:hover{background:var(--surface-2)}
     <a href="#/templates" data-r="/templates">Templates</a>
     <a href="#/knowledge" data-r="/knowledge">Knowledge</a>
     <a href="#/vault" data-r="/vault">Vault</a>
+    <a href="#/triggers" data-r="/triggers">Triggers</a>
     <div class="navsec">System</div>
     <a href="#/health" data-r="/health">Health <span id="nav-health"></span></a>
     <a href="/setup.html">Setup</a>
@@ -2392,6 +2393,112 @@ async function deleteEntry(id) {
   await act("DELETE", `/api/vault/${encodeURIComponent(id)}`);
 }
 
+/* ---------- triggers (TR-01..07) ---------- */
+
+function viewTriggers() {
+  const t = store.triggers;
+  if (!t) return `<div class="empty">Loading…</div>`;
+  const projects = (store.overview && store.overview.projects) || [];
+  const agents = (store.agents && store.agents.agents) || [];
+  return `<h1>Triggers <em>${t.triggers.length}</em></h1>
+    <p class="sub">A trigger launches what you would launch by hand, at the time you name. Times are
+      the container's clock (<code>${esc(t.timezone || "UTC")}</code>). A firing that lands while the
+      project is busy or paused is skipped and says so; one missed because the machine was off runs
+      once at the next boot.</p>
+    <div class="row" style="margin-bottom:16px">
+      <button class="btn primary" onclick="editing='new-trigger';paint()">New trigger</button>
+    </div>
+    ${editing === "new-trigger" ? triggerForm(projects, agents) : ""}
+    ${t.triggers.length === 0 ? `<div class="empty">Nothing is scheduled.</div>` : ""}
+    ${t.triggers.map((x) => `<div class="card pad" style="margin-bottom:16px">
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <b>${esc(x.name)}</b> <code class="tiny">${esc(x.cron)}</code>
+          ${x.enabled ? `<span class="pill green"><span class="sdot"></span>on</span>`
+                      : `<span class="pill"><span class="sdot"></span>off</span>`}
+          <div class="tiny muted">${esc(x.projectId)} · ${x.phase
+            ? `phase <code>${esc(x.phase)}</code>` : `task for <code>${esc(x.agentId || "")}</code>`}</div>
+          <div class="tiny muted">${esc(x.cronReads)}</div>
+          <div class="tiny">next: ${x.nextFireAt ? esc(sinceIso(x.nextFireAt)) + ` · <span class="mono">${esc(x.nextFireAt)}</span>` : "<span class='muted'>never</span>"}</div>
+          ${x.lastFiredAt ? `<div class="tiny muted">last: ${esc(x.lastResult || "")} (${esc(x.lastFiredAt)})</div>` : ""}
+        </div>
+        <div class="row" style="gap:6px">
+          <button class="btn sm" onclick="toggleTrigger('${esc(x.id)}',${x.enabled ? "false" : "true"})">
+            ${x.enabled ? "Disable" : "Enable"}</button>
+          <button class="btn sm danger" onclick="deleteTrigger('${esc(x.id)}','${esc(x.name)}')">Delete</button>
+        </div>
+      </div>
+    </div>`).join("")}`;
+}
+
+function triggerForm(projects, agents) {
+  const repeatable = (window.__triggerPhases || []);
+  return `<div class="card pad" style="margin-bottom:16px">
+    <div class="row wrap" style="gap:16px">
+      <label class="tiny">Project<br>
+        <select id="tg-project" onchange="loadTriggerPhases(this.value)">
+          <option value="">(choose one)</option>
+          ${projects.map((p) => `<option value="${esc(p.id)}" ${p.id === window.__triggerProject ? "selected" : ""}>${esc(p.name || p.id)}</option>`).join("")}
+        </select></label>
+      <label class="tiny">Name<br><input id="tg-name" placeholder="Daily sector digest"></label>
+      <label class="tiny">When (cron)<br><input id="tg-cron" placeholder="0 7 * * 1-5" value="0 7 * * 1-5"></label>
+      <label class="tiny">Repeatable phase<br>
+        <select id="tg-phase">
+          <option value="">(a free task instead)</option>
+          ${repeatable.map((p) => `<option value="${esc(p.ref)}">${esc(p.title)}</option>`).join("")}
+        </select></label>
+      <label class="tiny">…or agent, for a free task<br>
+        <select id="tg-agent">
+          <option value="">(none)</option>
+          ${agents.filter((a) => !a.advisor).map((a) => `<option value="${esc(a.id)}">${esc(a.name || a.id)}</option>`).join("")}
+        </select></label>
+    </div>
+    <label class="tiny">Request — what is asked, every time it fires<br>
+      <textarea id="tg-request" rows="3" style="width:100%"></textarea></label>
+    <label class="tiny">Expects — what comes back, and how anyone knows (OR-10)<br>
+      <textarea id="tg-expects" rows="2" style="width:100%"></textarea></label>
+    <div class="row" style="gap:8px;margin-top:12px">
+      <button class="btn primary" onclick="createTrigger()">Create</button>
+      <button class="btn" onclick="editing=null;paint()">Cancel</button>
+    </div>
+  </div>`;
+}
+
+/** The phases a trigger may fire are the repeatable ones (TP-07), so the select shows only those. */
+async function loadTriggerPhases(projectId) {
+  window.__triggerProject = projectId;
+  window.__triggerPhases = [];
+  if (projectId) {
+    const data = await api(`/api/projects/${encodeURIComponent(projectId)}/phases`).catch(() => null);
+    const phases = (data && data.phases) || [];
+    window.__triggerPhases = phases.filter((p) => p.repeatable).map((p) => ({ ref: p.ref, title: p.title }));
+  }
+  paint();
+}
+
+async function createTrigger() {
+  const projectId = field("tg-project");
+  if (!projectId) { store.error = "choose a project"; return paint(); }
+  const payload = {
+    name: field("tg-name"),
+    cron: field("tg-cron"),
+    request: field("tg-request"),
+    expects: field("tg-expects"),
+  };
+  if (field("tg-phase")) payload.phase = field("tg-phase");
+  else if (field("tg-agent")) payload.agentId = field("tg-agent");
+  await act("POST", `/api/projects/${encodeURIComponent(projectId)}/triggers`, payload);
+}
+
+async function toggleTrigger(id, enabled) {
+  await act("PUT", `/api/triggers/${encodeURIComponent(id)}`, { enabled });
+}
+
+async function deleteTrigger(id, name) {
+  if (!confirmed(`the trigger ${name}`)) return;
+  await act("DELETE", `/api/triggers/${encodeURIComponent(id)}`);
+}
+
 function viewHealth() {
   const h = store.health;
   if (!h) return `<div class="empty">Loading…</div>`;
@@ -2448,6 +2555,7 @@ const RENDER = {
   "/templates": viewTemplates,
   "/knowledge": viewKnowledge,
   "/vault": viewVault,
+  "/triggers": viewTriggers,
   "/health": viewHealth,
   // The wizard is its own page (it has to work before the panel has anything to show). The
   // hash route of §12.3 exists so a link to #/setup lands there rather than nowhere.
@@ -2551,6 +2659,11 @@ async function load() {
       }
     } else if (route.name === "/vault") {
       store.vault = await api("/api/vault");
+    } else if (route.name === "/triggers") {
+      store.triggers = await api("/api/triggers");
+      // The form picks a project, and a phase or an agent, from what exists (TR-02).
+      store.overview = await api("/api/overview").catch(() => null);
+      store.agents = await api("/api/agents").catch(() => null);
     } else if (route.name === "/health") {
       store.health = await api("/health");
     } else {

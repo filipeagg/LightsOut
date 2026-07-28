@@ -27,6 +27,7 @@ import { Actions } from "./control/actions.js";
 import { LoginFlows } from "./setup/login-flows.js";
 import { ensureCodexConfig } from "./setup/engine-config.js";
 import { PreviewManager } from "./preview/manager.js";
+import { Scheduler } from "./triggers/scheduler.js";
 
 async function readVersion(): Promise<string> {
   try {
@@ -198,6 +199,17 @@ async function main(): Promise<void> {
     previews,
   });
 
+  // 5f. Triggers (TR-01..07): launches with a clock on them. Catch-up first, so a slot missed
+  // while the machine was off runs once before the clock starts ticking normally (TR-04).
+  const scheduler = new Scheduler(repos, actions, bus);
+  const caughtUp = await scheduler.catchUp();
+  for (const outcome of caughtUp) {
+    console.log(`[boot] trigger ${outcome.triggerId}: ${outcome.result}`);
+  }
+  scheduler.start();
+  const triggerCount = repos.triggers.listEnabled().length;
+  if (triggerCount > 0) console.log(`[boot] triggers: ${triggerCount} enabled`);
+
   // 5c. Interactive engine logins driven from the browser (SU-04).
   const loginFlows = new LoginFlows(health);
 
@@ -235,6 +247,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     console.log(`[shutdown] ${signal} received`);
     agents.stopWatching();
+    scheduler.stop();
     loginFlows.closeAll();
     const active = orchestrator.activeRuns;
     if (active.length > 0) {

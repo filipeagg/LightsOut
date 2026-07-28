@@ -13,11 +13,32 @@
 import { describe, expect, it } from "vitest";
 import { Actions } from "../src/control/actions.js";
 import { registerTools, type McpDeps } from "../src/mcp/tools.js";
+import { registerWriteRoutes } from "../src/http/api-write.js";
 import { agentProfileSchema } from "../src/agents/schema.js";
 
 /** Register against a server that only records names; no handler is ever called. */
 function toolNames(): string[] {
   return [...toolSchemas().keys()];
+}
+
+/**
+ * The panel's write surface, captured the same way (WP-02).
+ *
+ * The parity test used to look one way only — every action needs a tool — and that is how
+ * `launch_task` came to have a tool and no route: a project without a template had nothing to
+ * launch from the browser at all, and no test noticed.
+ */
+function panelRoutes(): string[] {
+  const routes: string[] = [];
+  const record = (method: string) => (path: string) => routes.push(`${method} ${path}`);
+  const app = {
+    post: record("POST"),
+    put: record("PUT"),
+    delete: record("DELETE"),
+    get: record("GET"),
+  };
+  registerWriteRoutes(app as never, { actions: {} as never });
+  return routes;
 }
 
 /** The same registration, keeping each tool's input shape so a dropped field is a failure. */
@@ -102,6 +123,60 @@ const PANEL_ONLY = new Map([
   ["writeVaultEntry", "a credential value must not travel through the conversation (VT-02)"],
   ["deleteVaultEntry", "the vault is edited on loopback or not at all (VT-02)"],
 ]);
+
+/**
+ * action name -> the panel route that reaches it (WP-02). Only the path has to match: which verb
+ * carries it is the route's business, and a `:param` is compared literally because these are the
+ * strings `registerWriteRoutes` declares.
+ */
+const ROUTE_FOR: Record<string, string> = {
+  createProject: "/api/projects",
+  archiveProject: "/api/projects/:id/archived",
+  deleteProject: "/api/projects/:id",
+  launchPhase: "/api/phases/:phaseId/launch",
+  skipPhase: "/api/phases/:phaseId/skip",
+  addPhase: "/api/projects/:id/phases",
+  launchTask: "/api/projects/:id/tasks",
+  launchChain: "/api/projects/:id/tasks",
+  answerDoubt: "/api/doubts/:id/answer",
+  abortRun: "/api/runs/:id/abort",
+  stopRun: "/api/runs/:id/stop",
+  steerRun: "/api/projects/:id/steer",
+  createTrigger: "/api/projects/:id/triggers",
+  updateTrigger: "/api/triggers/:id",
+  deleteTrigger: "/api/triggers/:id",
+  fireTrigger: "/api/triggers/:id/fire",
+  setProjectContext: "/api/projects/:id/context",
+  setProjectUnattended: "/api/projects/:id/unattended",
+  addArea: "/api/projects/:id/areas",
+  removeArea: "/api/projects/:id/areas/:area",
+  forgetLearnedAllow: "/api/learned/:shape",
+  startPreview: "/api/projects/:id/previews",
+  stopPreview: "/api/previews/:previewId",
+  grantToolchain: "/api/projects/:id/toolchain",
+  revokeToolchainGrant: "/api/projects/:id/toolchain/:manager",
+  resumeChain: "/api/projects/:id/resume",
+  writeDoc: "/api/projects/:id/doc",
+  appendDoc: "/api/projects/:id/doc",
+  patchDoc: "/api/projects/:id/doc",
+  writeAgent: "/api/agents",
+  setAgentEnabled: "/api/agents/:id/enabled",
+  deleteAgent: "/api/agents/:id",
+  reloadAgents: "/api/agents/reload",
+  writeTemplate: "/api/templates",
+  deleteTemplate: "/api/templates/:id",
+  writeKnowledge: "/api/knowledge",
+  adoptKnowledge: "/api/knowledge/adopt",
+  writeKnowledgeDoc: "/api/knowledge/:baseId/doc",
+  deleteKnowledgeDoc: "/api/knowledge/:baseId/doc",
+  deleteKnowledge: "/api/knowledge/:baseId",
+  attachKnowledge: "/api/projects/:id/knowledge",
+  detachKnowledge: "/api/projects/:id/knowledge/:baseId",
+  createVaultEntry: "/api/vault",
+  writeVaultEntry: "/api/vault/:entryId",
+  deleteVaultEntry: "/api/vault/:entryId",
+  previewSchedule: "/api/schedule/preview",
+};
 
 /** action name -> the tool that reaches it. */
 const TOOL_FOR: Record<string, string> = {
@@ -199,6 +274,21 @@ describe("MCP and the panel expose the same actions (MC-07)", () => {
     const writable = Object.keys(agentProfileSchema.shape).filter((field) => field !== "id");
     const missing = writable.filter((field) => !(field in tool));
     expect(missing, "write_agent silently drops these profile fields").toEqual([]);
+  });
+
+  /**
+   * WP-02, the other direction: the panel is a complete control surface. A tool with no route is
+   * how `launch_task` ended up unreachable from the browser — a project without a template could
+   * not be given any work at all, and the one-way test passed happily.
+   */
+  it("has a panel route for every mutating action too (WP-02)", () => {
+    const routes = panelRoutes().join(" | ");
+    const missing = mutatingActions().filter((action) => {
+      if (PANEL_ONLY.has(action)) return false;
+      const route = ROUTE_FOR[action];
+      return !route || !routes.includes(route);
+    });
+    expect(missing, "these actions cannot be reached from the panel").toEqual([]);
   });
 
   it("registers every tool exactly once", () => {

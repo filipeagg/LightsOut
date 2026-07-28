@@ -29,11 +29,31 @@ async function envelope(
   try {
     return success(await handler());
   } catch (err) {
-    const body = failure(err);
+    const body = failure(readable(err));
     const code = !body.ok ? body.error.code : "INTERNAL";
     reply.code(code === "NOT_FOUND" ? 404 : code === "INVALID_INPUT" ? 400 : 409);
     return body;
   }
+}
+
+/**
+ * A validation failure as a sentence, not as a JSON dump of the issue array.
+ *
+ * The panel shows the server's message verbatim (that is the point of §12.1b), so a missing
+ * `expects` used to reach the person as thirty lines of zod internals with the field name buried in
+ * the middle. Everything else is passed through untouched.
+ */
+function readable(err: unknown): unknown {
+  if (!(err instanceof z.ZodError)) return err;
+  const said = err.issues.map((issue) => {
+    const where = issue.path.length > 0 ? issue.path.join(".") : "the body";
+    const what =
+      issue.code === "invalid_type" && issue.message.includes("received undefined")
+        ? "is required"
+        : issue.message.replace(/^Invalid input: /, "").toLowerCase();
+    return `${where} ${what}`;
+  });
+  return new Error(said.join("; "));
 }
 
 const idParam = z.object({ id: z.string().min(1) });
@@ -387,6 +407,60 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
         .object({ id: z.string().min(1), baseId: z.string().min(1) })
         .parse(request.params);
       return actions.detachKnowledge("panel", params.id, params.baseId);
+    }),
+  );
+
+  /**
+   * Launch work on a project from the browser (WP-02, OR-10).
+   *
+   * Missing until 2026-07-28, which meant a project without a template — no phases — could not be
+   * given any work at all from the panel: the only launch route was `/api/phases/:id/launch`, and a
+   * project with no phases has none. `launch_task` had a tool and no route, and the parity test only
+   * looked the other way.
+   *
+   * One task or several: several become one chain, in order, which is what `launch_chain` is.
+   */
+  app.post("/api/projects/:id/tasks", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = idParam.parse(request.params);
+      const task = z.object({
+        title: z.string().min(1),
+        // OR-10: both required, on this surface as on the other.
+        spec: z.string().min(1),
+        expects: z.string().min(1),
+        agentId: z.string().min(1),
+        level: z.enum(["quick", "full"]).optional(),
+        verify: z.string().min(1).optional(),
+        needs: z.array(z.string().min(1)).optional(),
+        grants: z.array(z.string().min(1)).optional(),
+        engine: engineSchema.optional(),
+        model: z.string().min(1).optional(),
+        reasoning: reasoningSchema.optional(),
+      });
+      // Branched before parsing rather than by a union: a `z.union` failure reports every branch's
+      // complaint at once, and "expected string at tasks[0].title" is not what a person who forgot
+      // `expects` needs to read.
+      const raw = (request.body ?? {}) as { tasks?: unknown };
+      if (Array.isArray(raw.tasks)) {
+        const input = body(
+          z.object({ title: z.string().min(1), tasks: z.array(task).min(1) }),
+          request.body,
+        );
+        return actions.launchChain("panel", {
+          projectId: id,
+          title: input.title,
+          tasks: input.tasks.map((t) => ({
+            ...t,
+            ...(t.verify !== undefined ? { verifyCmd: t.verify } : {}),
+          })),
+        });
+      }
+      const { verify, ...rest } = body(task, request.body);
+      return actions.launchTask("panel", {
+        projectId: id,
+        ...rest,
+        ...(verify !== undefined ? { verifyCmd: verify } : {}),
+      });
     }),
   );
 

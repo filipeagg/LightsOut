@@ -130,6 +130,7 @@ Priority levels: MUST (pilot fails without it), SHOULD (build if cheap, else bac
 ## 10. WP — Web panel
 
 - WP-01 MUST. Served by the container on a configurable port, with no external runtime dependencies.
+- WP-02b MUST. Work can be launched on any project from the panel, whether or not it has phases: a project without a template is not a project that can only be driven from a conversation. Parity is checked in both directions — every mutating action has a tool *and* a route — so an omission on either surface is a failing test, not a discovery months later.
 - WP-02 MUST. The panel is a full control surface: it configures agents (AP-06), templates (TP), knowledge (KB) and the vault (VT), creates projects, launches and aborts phases, and answers doubts. Every mutating route is enumerated in the design, bound to localhost, and implemented as a thin call into the same orchestrator entry point the MCP tool uses — no second code path, no direct writes to operational tables (SU-05).
 - WP-03 MUST. Real-time updates via SSE or WebSocket, under 2 seconds from event to screen, with automatic reconnection.
 - WP-04 MUST. Global view: active runs across projects, open doubts, engine and auth health.

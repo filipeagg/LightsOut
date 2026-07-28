@@ -115,6 +115,9 @@ const INTERNAL = new Set([
   // TR-09: wiring, not an action. The scheduler launches through these actions, so it is attached
   // after both exist.
   "attachScheduler",
+  // TR-09 amended: shared validation createTrigger and updateTrigger both call, not an action of
+  // its own.
+  "requireTriggerTarget",
 ]);
 
 /** The one exception, with its reason (VT-02, MC-07). Adding to this list is a design decision. */

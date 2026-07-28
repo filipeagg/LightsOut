@@ -57,6 +57,11 @@ A deliverable nobody can find has not been delivered: code in \`doc/\` is invisi
 preview, and a page called anything other than \`index.html\` cannot be served without someone
 being told its name.
 
+Every relative path you write resolves **inside the project directory**. Anything that belongs
+outside it — a knowledge base is the only such thing, and only if you were given one — is named
+for you with its absolute path. If you find yourself typing \`knowledge/…\` with no leading
+slash, you are writing into a folder of your own project that nobody else will ever read.
+
 ## Using a credential
 
 Credentials reach you as environment variables, listed for you when this project has any. Three
@@ -167,6 +172,17 @@ export type ComposeInput = {
   readAreas?: string[] | undefined;
   /** The curated knowledge block built by src/knowledge/inject.ts (KB-04). */
   knowledgeBase?: string | undefined;
+  /**
+   * The base this run may write into, and **where it is** (KB-05c, §17.1c).
+   *
+   * The system knew this path all along and used it only to authorise the write. The three
+   * channels the agent reads said: a base id with no path, the literal string
+   * `workspace:knowledge/*\/index.md`, and the project directory. So a curator wrote
+   * `knowledge/<base>/…` relative to its cwd, the documents landed inside the project, the
+   * deliverable check failed and the sweep called them untracked. Nobody had lied to it; nobody
+   * had told it either.
+   */
+  writableKnowledge?: { baseId: string; dir: string } | undefined;
   /** The vault index: labels, URLs and variable names, never a value (VT-02). */
   vaultIndex?: string | undefined;
   /**
@@ -311,6 +327,28 @@ export function composePrompt(input: ComposeInput, docs: DocContext): string {
 
   if (input.knowledgeBase?.trim()) {
     blocks.push(`# Knowledge base\n\n${input.knowledgeBase.trim()}`);
+  }
+
+  // KB-05c: the one thing an agent may write outside its project, named with the only kind of
+  // path that reaches it — an absolute one. Last, so it is next to the task it belongs to.
+  if (input.writableKnowledge) {
+    const { baseId, dir } = input.writableKnowledge;
+    blocks.push(
+      [
+        "# The knowledge base you write into",
+        "",
+        `base.id: ${baseId}`,
+        `base.dir: ${dir}`,
+        "",
+        `Write it there, at that absolute path. \`${dir}/index.md\` is its table of contents,`,
+        `\`${dir}/knowledge.yaml\` its manifest, one document per subject beside them.`,
+        "",
+        "This is the only place outside your project you may write, and the path above is the only",
+        "way to reach it. A relative `knowledge/…` resolves inside your project, produces files",
+        "nobody else can read, and fails the phase — the system will tell you that you left",
+        "untracked files behind, which is this mistake wearing a different name.",
+      ].join("\n"),
+    );
   }
 
   if (input.vaultIndex?.trim()) {

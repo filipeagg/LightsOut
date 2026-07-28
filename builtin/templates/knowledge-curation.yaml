@@ -47,9 +47,11 @@ phases:
     agent: codebase-analyst
     deliverable: "workspace:knowledge/*/index.md"
     instructions: |
-      Write the base into the knowledge directory this project owns: knowledge.yaml as
-      the manifest (id, name, kind, description, tags, owner, updated), index.md as a
-      table of contents with one line per document saying what is in it, and one
-      Markdown document per coherent subject. Fold in the answers you received. Write
-      for an agent that will read the index and then choose what to open: machine-first
-      throughout, one fact per line with its source, no prose anywhere.
+      Write the base into the directory the prompt names under "The knowledge base you
+      write into". Use that absolute path: a relative knowledge/... would land inside this
+      project and nobody would ever read it. Produce knowledge.yaml as the manifest (id,
+      name, kind, description, tags, owner, updated), index.md as a table of contents with
+      one line per document saying what is in it, and one Markdown document per coherent
+      subject. Fold in the answers you received. Write for an agent that will read the
+      index and then choose what to open: machine-first throughout, one fact per line with
+      its source, no prose anywhere.

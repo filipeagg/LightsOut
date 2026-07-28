@@ -168,8 +168,13 @@ export function describeEvent(type: string, payload: Payload): Omit<NarratedLine
         : { text: `deliverable needs compacting: ${read(payload, "file")}`, tone: "problem" };
     case "scratch.swept":
       return { text: `cleaned ${read(payload, "files")} temporary file(s)`, tone: "result" };
-    case "run.untracked":
+    case "run.untracked": {
+      // KB-05c: when the leftovers are a knowledge base written to a relative path, the count is
+      // the least useful thing that can be said about them.
+      const detail = read(payload, "detail");
+      if (detail) return { text: shorten(detail, 200), tone: "problem" };
       return { text: `left ${read(payload, "count")} untracked file(s)`, tone: "problem" };
+    }
     case "vault.read":
       return { text: `used credentials: ${read(payload, "entryId")}`, tone: "decision" };
     case "system": {

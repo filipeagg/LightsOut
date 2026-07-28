@@ -2396,6 +2396,42 @@ owner: platform@example.com
 updated: 2026-07-25
 ```
 
+### 17.1c Telling the curator where the base is (KB-05c)
+
+**The failure this fixes.** The curator wrote its documents to `knowledge/<base>/…` and they landed
+in `projects/<project>/knowledge/<base>/…`. Every relative path an agent uses resolves against its
+cwd, which is the project. The deliverable check then failed, the hygiene sweep reported "3 untracked
+files", and a person had to move the work by hand with `write_knowledge_doc`.
+
+Nothing lied to it. Nothing told it either. The system knew the absolute directory in three places
+(`runner.ts` → `session.ts` → `classify.ts`) and used it **only to authorise the write**, while the
+three channels the agent actually reads said:
+
+| channel | what it said |
+|---|---|
+| the knowledge block | `knowledge: <baseId> (technical) — index.md` — an id, no path |
+| the phase spec | `Deliverable: workspace:knowledge/*/index.md` — a notation nobody taught it |
+| the prompt | `Project directory: /workspace/projects/<project>` — and nothing else |
+
+Three fixes, one per channel:
+
+1. **The prompt names it.** A run with a writable base gets a block of its own — `base.id`,
+   `base.dir` as an absolute path, where the manifest and the index go, and the trap said out loud:
+   a relative `knowledge/…` is a folder of your own project that nobody else will read. The
+   "Where things go" section of the protocol now also states the general rule, that every relative
+   path resolves inside the project.
+2. **`workspace:` never reaches an agent.** `buildSpec` expands the prefix into the absolute path
+   before it goes into the spec, and so do the derived request and `expects` of an intermediate
+   phase. The system already knew how to expand it — it expanded it for the check and not for the
+   instruction, which is the whole bug in one sentence.
+3. **The sweep names the mistake.** Untracked files under `<project>/knowledge/` are not leftovers,
+   they are this error; the event carries `misplacedKnowledge` and a `detail` that says where the
+   base actually is, and the timeline shows that sentence instead of "left 3 untracked file(s)".
+
+Deliberately *not* done: moving the files. A system that quietly relocates an agent's output is one
+that will one day relocate the wrong thing, and §PE-08 already settled that what is left outside is
+reported and never touched.
+
 ### 17.1b Which base may be written into (KB-05 amended)
 
 **The failure this fixes.** Two rules that were each right made a third thing impossible. A folder

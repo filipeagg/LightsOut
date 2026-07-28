@@ -12,6 +12,7 @@ import path from "node:path";
 import { KnowledgeLoader } from "../src/knowledge/loader.js";
 import { KnowledgeWriter, listWorkspaceFolders } from "../src/knowledge/writer.js";
 import { isDocumentFile, resolveSource } from "../src/knowledge/schema.js";
+import { composePrompt, PROTOCOL_BLOCK } from "../src/acp/prompt.js";
 
 let workspace: string;
 
@@ -120,6 +121,41 @@ describe("which base owns its documents (KB-05b)", () => {
     await write("docs/platform/data-model.md", "# tables");
     const loader = await loaderWith("docs/platform");
     expect(loader.ownsItsDocuments("mercado")).toBe(false);
+  });
+});
+
+/**
+ * KB-05c (§17.1c): the curator is told where the base is, in the only kind of path that reaches it.
+ * The failure this stands for: it wrote `knowledge/<base>/…`, which resolved inside its project.
+ */
+describe("what the curator is told about the base (KB-05c)", () => {
+  const prompt = (writable?: { baseId: string; dir: string }) =>
+    composePrompt(
+      {
+        instructions: "you are an analyst",
+        projectPath: "/workspace/projects/mercado",
+        taskTitle: "write the base",
+        taskSpec: "do it",
+        ...(writable ? { writableKnowledge: writable } : {}),
+      },
+      {},
+    );
+
+  it("names the absolute directory, and the trap", () => {
+    const text = prompt({ baseId: "hispatec-mercado", dir: "/workspace/knowledge/hispatec-mercado" });
+    expect(text).toContain("base.dir: /workspace/knowledge/hispatec-mercado");
+    expect(text).toContain("/workspace/knowledge/hispatec-mercado/index.md");
+    // The mistake said out loud, because the agent's cwd makes it the natural one to make.
+    expect(text).toMatch(/relative `knowledge\/…` resolves inside your project/);
+  });
+
+  it("says nothing about a base when the run has none to write", () => {
+    expect(prompt()).not.toContain("The knowledge base you write into");
+  });
+
+  it("states the general rule wherever paths are explained", () => {
+    // Not only for curators: every relative path an agent writes lands inside the project.
+    expect(PROTOCOL_BLOCK).toMatch(/resolves \*\*inside the project directory\*\*/);
   });
 });
 

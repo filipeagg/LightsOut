@@ -240,10 +240,10 @@ describe("vault", () => {
 
   it("derives the id from the label, and makes it unique (VT-08)", async () => {
     const vault = new Vault(workspace);
-    expect(await vault.idForLabel("EFEMIS back")).toBe("efemis-back");
-    await vault.put(await vault.idForLabel("EFEMIS back"), { label: "EFEMIS back" });
+    expect(await vault.idForLabel("ACME back")).toBe("acme-back");
+    await vault.put(await vault.idForLabel("ACME back"), { label: "ACME back" });
     // A second entry with the same label does not silently overwrite the first.
-    expect(await vault.idForLabel("EFEMIS back")).toBe("efemis-back-2");
+    expect(await vault.idForLabel("ACME back")).toBe("acme-back-2");
   });
 
   it("repairs a stored id instead of failing every run (VT-08)", async () => {

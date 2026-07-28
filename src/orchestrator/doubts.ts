@@ -549,7 +549,7 @@ export class DoubtService {
     // A person already answered this, in this run (DO-08). `credentials` and `publish_external`
     // are never learned across runs (PE-10) and that stays: a wrong memory there leaks a secret
     // or publishes something, for ever. But asking six times for the same script inside one run
-    // is not safety, it is noise — which is exactly what `efemis-mapa-cultivos` did, once per
+    // is not safety, it is noise — which is exactly what `acme-mapa-cultivos` did, once per
     // batch of test ids, for one file. This memory is per run and dies with it.
     const runShape = commandShape(input.title);
     if (allowOption && runShape && this.allowedThisRun.get(input.runId)?.has(runShape)) {

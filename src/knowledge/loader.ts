@@ -154,7 +154,7 @@ export class KnowledgeLoader {
    *
    * The reason a linked base may not be written to is that the folder belongs to something else —
    * the user's own source tree, another project. A folder under `knowledge/` belongs to the
-   * knowledge area, and `knowledge/hispatec/mercado` is as curatable as `knowledge/mercado`.
+   * knowledge area, and `knowledge/acmecorp/mercado` is as curatable as `knowledge/mercado`.
    * Nesting was never the reason for the ban; it only looked like it, because "directly under
    * knowledge/" was how a base in place was recognised.
    */

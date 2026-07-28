@@ -50,7 +50,7 @@ describe("a base that attaches itself to every new project (KB-12)", () => {
 describe("an id derived from a name (KB-12)", () => {
   it("is the slug of the name", () => {
     expect(slugify("Core Platform")).toBe("core-platform");
-    expect(slugify("API EFEMIS — técnico")).toBe("api-efemis-tecnico");
+    expect(slugify("API ACME — técnico")).toBe("api-acme-tecnico");
     expect(slugify("  Spaces   everywhere  ")).toBe("spaces-everywhere");
   });
 

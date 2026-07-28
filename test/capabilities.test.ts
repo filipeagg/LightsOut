@@ -9,7 +9,7 @@ import { policyPackSchema } from "../src/policy/schema.js";
 import { checkCapabilities, explainMismatch, grantPack } from "../src/policy/capabilities.js";
 import { vaultHosts } from "../src/vault/vault.js";
 
-const PROJECT = "/workspace/projects/efemis";
+const PROJECT = "/workspace/projects/acme";
 
 describe("the three commands that stopped a real run", () => {
   const classifier = new Classifier();
@@ -19,10 +19,10 @@ describe("the three commands that stopped a real run", () => {
   it("checking whether a vault variable is set is not reading a secret", () => {
     expect(
       classify(
-        `python3 -c "import os; print('present' if os.environ.get('LO_VAULT_EFEMIS_PASSWORD') else 'missing_or_empty')"`,
+        `python3 -c "import os; print('present' if os.environ.get('LO_VAULT_ACME_PASSWORD') else 'missing_or_empty')"`,
       ),
     ).toBe("script_exec");
-    expect(classify(`python3 -c "import os; print(os.environ.get('LO_VAULT_EFEMIS_USUARIO'))"`)).toBe(
+    expect(classify(`python3 -c "import os; print(os.environ.get('LO_VAULT_ACME_USUARIO'))"`)).toBe(
       "credentials",
     );
   });
@@ -32,16 +32,16 @@ describe("the three commands that stopped a real run", () => {
     // reached a human *after* the first fix, because the first fix only covered Python.
     expect(
       classify(
-        `pwd && rg --files | sort && if [ -n "\${LO_VAULT_EFEMIS_PASSWORD:-}" ]; then echo 'vault.password=present'; else echo 'vault.password=missing'; fi`,
+        `pwd && rg --files | sort && if [ -n "\${LO_VAULT_ACME_PASSWORD:-}" ]; then echo 'vault.password=present'; else echo 'vault.password=missing'; fi`,
       ),
     ).not.toBe("credentials");
     // Better than "not credentials": the whole pipeline is a read, so it is allowed outright.
     expect(
       classify(
-        `pwd && rg --files | sort && if [ -n "\${LO_VAULT_EFEMIS_PASSWORD:-}" ]; then echo 'present'; else echo 'missing'; fi`,
+        `pwd && rg --files | sort && if [ -n "\${LO_VAULT_ACME_PASSWORD:-}" ]; then echo 'present'; else echo 'missing'; fi`,
       ),
     ).toBe("project_read");
-    expect(classify(`[ -z "$LO_VAULT_EFEMIS_USUARIO" ] && echo missing`)).toBe("project_read");
+    expect(classify(`[ -z "$LO_VAULT_ACME_USUARIO" ] && echo missing`)).toBe("project_read");
     expect(classify(`test -n "$API_TOKEN" && echo present`)).not.toBe("credentials");
     expect(classify(`echo "\${DB_PASSWORD:+configured}"`)).not.toBe("credentials");
   });
@@ -168,7 +168,7 @@ describe("a vault entry implies its own host (VT-07)", () => {
     expect(
       vaultHosts({
         index: [
-          { id: "efemis", label: "EFEMIS", base_url: "https://api.efemis.example/v2", auth: "basic", fields: [], test_only: true },
+          { id: "acme", label: "ACME", base_url: "https://api.acme.example/v2", auth: "basic", fields: [], test_only: true },
           { id: "none", label: "No URL", auth: "basic", fields: [], test_only: false },
           { id: "broken", label: "Bad URL", base_url: "not a url", auth: "basic", fields: [], test_only: false },
         ] as never,
@@ -176,6 +176,6 @@ describe("a vault entry implies its own host (VT-07)", () => {
         reads: [],
         refused: [],
       }),
-    ).toEqual(["api.efemis.example"]);
+    ).toEqual(["api.acme.example"]);
   });
 });

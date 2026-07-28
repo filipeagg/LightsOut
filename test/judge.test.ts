@@ -41,7 +41,7 @@ describe("what the judge may decide (PE-11)", () => {
       judgeable({
         actionClass: "delete",
         projectPath: PROJECT,
-        command: "rm -rf /workspace/knowledge/efemis",
+        command: "rm -rf /workspace/knowledge/acme",
       }),
     ).toBe(false);
     // A deletion whose target cannot be seen is a human's call, not a guess.

@@ -157,7 +157,7 @@ export class Actions {
   }
 
   /**
-   * The configuration audit trail. `op` matters: a trail that only says "knowledge/efemis
+   * The configuration audit trail. `op` matters: a trail that only says "knowledge/acme
    * changed" cannot answer "was it deleted, and by whom" — which is exactly the question asked
    * when a base went missing, and the reason the answer took a database query and a guess.
    */

@@ -86,7 +86,7 @@ export function validateArea(
   }
 
   // A directory or a single file: the material a project is pointed at is sometimes one archive
-  // (`sources/efemis_django-master.zip` on this machine), and naming the parent directory to reach
+  // (`sources/acme_django-master.zip` on this machine), and naming the parent directory to reach
   // it would grant more than was meant.
   const exists =
     options.exists ??

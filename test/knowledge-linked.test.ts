@@ -88,7 +88,7 @@ describe("document formats (KB-08)", () => {
 /**
  * KB-05 amended (§17.1b). The rule is about ownership, not depth: a base reading from a subfolder
  * of `knowledge/` is in the knowledge area and may be curated; one reading from the user's own tree
- * may not. `knowledge/hispatec/mercado` being uncurateable was the failure that moved this.
+ * may not. `knowledge/acmecorp/mercado` being uncurateable was the failure that moved this.
  */
 describe("which base owns its documents (KB-05b)", () => {
   const loaderWith = async (source?: string) => {
@@ -109,10 +109,10 @@ describe("which base owns its documents (KB-05b)", () => {
   });
 
   it("owns a base that reads from deeper inside knowledge/", async () => {
-    await write("knowledge/hispatec/mercado/index.md", "# mercado");
-    const loader = await loaderWith("knowledge/hispatec/mercado");
+    await write("knowledge/acmecorp/mercado/index.md", "# mercado");
+    const loader = await loaderWith("knowledge/acmecorp/mercado");
     expect(loader.getOrThrow("mercado").docsDir).toBe(
-      path.resolve(workspace, "knowledge/hispatec/mercado"),
+      path.resolve(workspace, "knowledge/acmecorp/mercado"),
     );
     expect(loader.ownsItsDocuments("mercado")).toBe(true);
   });
@@ -142,9 +142,9 @@ describe("what the curator is told about the base (KB-05c)", () => {
     );
 
   it("names the absolute directory, and the trap", () => {
-    const text = prompt({ baseId: "hispatec-mercado", dir: "/workspace/knowledge/hispatec-mercado" });
-    expect(text).toContain("base.dir: /workspace/knowledge/hispatec-mercado");
-    expect(text).toContain("/workspace/knowledge/hispatec-mercado/index.md");
+    const text = prompt({ baseId: "acmecorp-mercado", dir: "/workspace/knowledge/acmecorp-mercado" });
+    expect(text).toContain("base.dir: /workspace/knowledge/acmecorp-mercado");
+    expect(text).toContain("/workspace/knowledge/acmecorp-mercado/index.md");
     // The mistake said out loud, because the agent's cwd makes it the natural one to make.
     expect(text).toMatch(/relative `knowledge\/…` resolves inside your project/);
   });
@@ -155,7 +155,7 @@ describe("what the curator is told about the base (KB-05c)", () => {
    * use, because an agent that reads the refusal as "read-only" gives up on a write it is allowed.
    */
   it("says the edit tool will refuse it, and what to use instead", () => {
-    const text = prompt({ baseId: "hispatec-mercado", dir: "/workspace/knowledge/hispatec-mercado" });
+    const text = prompt({ baseId: "acmecorp-mercado", dir: "/workspace/knowledge/acmecorp-mercado" });
     expect(text).toMatch(/structured edit tool will refuse/);
     expect(text).toContain("cat > <base.dir>/index.md");
     // And that it is not a policy denial, which is the wrong lesson to draw from it.

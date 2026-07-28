@@ -73,7 +73,7 @@ export type ClassifyInput = {
    */
   writeAreas?: string[] | undefined;
   /**
-   * Environment variable names of the vault entries **this run resolved** — `LO_VAULT_EFEMIS_
+   * Environment variable names of the vault entries **this run resolved** — `LO_VAULT_ACME_
    * PASSWORD` and friends (PE-13, §7.1d). A secret the system handed over on purpose is not the
    * same thing as a secret found lying around, and four separate runs have now been stopped by
    * treating them alike. Absent, the behaviour is exactly what it was: every credential match is
@@ -129,17 +129,17 @@ function hostsIn(segment: string): string[] {
  *
  * The test is subtractive and therefore does not care about spelling: blank out this run's own
  * vault variables and ask the credential patterns again. If nothing matches without them, they
- * were the entire case — `grep -rqF "$LO_VAULT_EFEMIS_PASSWORD" .` and every future spelling of
+ * were the entire case — `grep -rqF "$LO_VAULT_ACME_PASSWORD" .` and every future spelling of
  * the same idea. If something still matches, a real secret is in play and nothing changes.
  *
  * One exception, and it is the reason this is safe: a vault value on its way to somewhere that is
- * not the entry's own host is `vault_foreign` — sending the EFEMIS password anywhere but EFEMIS is
+ * not the entry's own host is `vault_foreign` — sending the ACME password anywhere but ACME is
  * precisely what the class exists to stop.
  *
  * **That exception was written too crudely and cost five and a half hours.** The first version
  * asked "does this segment mention any host the entry does not declare", and a probe script that
  * mentioned `http://localhost:8000` once, in an `Origin` header for the CORS test the phase had
- * explicitly asked for, was ruled exfiltration — while `https://efemis-back.hispatec.com`, the
+ * explicitly asked for, was ruled exfiltration — while `https://acme-back.acmecorp.com`, the
  * entry's own host, sat three lines above it. A script may name any number of URLs in a header, a
  * comment or a docs link without a secret going to any of them.
  *
@@ -269,7 +269,7 @@ export const DEFAULT_MATCHERS: Record<string, string[]> = {
   credentials: [
     // A key named outright, or a secret variable *expanded* — `$PASSWORD`, `${DB_PASSWORD}` —
     // which is a value on its way somewhere. A variable *name* mentioned as text is not:
-    // `os.environ.get('LO_VAULT_EFEMIS_PASSWORD')` is an agent checking its own wiring, and
+    // `os.environ.get('LO_VAULT_ACME_PASSWORD')` is an agent checking its own wiring, and
     // gating that stopped a real run dead (§7.1b). The script body check judges the code itself.
     "\\b(ANTHROPIC_API_KEY|OPENAI_API_KEY|GIT_TOKEN|GITHUB_TOKEN|AWS_SECRET)\\b",
     "[$%]\\{?[A-Za-z_][A-Za-z0-9_]*(PASSWORD|SECRET|TOKEN|API_KEY)",
@@ -326,7 +326,7 @@ const DOTENV_FILE = String.raw`(?<![A-Za-z0-9_])\.env(?:\.[A-Za-z0-9_-]+)?(?![A-
  * A quoted **file name** containing "credentials", and not a sentence containing the word.
  *
  * The pattern this replaces was written for `open("credentials.json")` and matched any quoted
- * string with the word in it. What it actually caught, on `efemis-mapa-cultivos`:
+ * string with the word in it. What it actually caught, on `acme-mapa-cultivos`:
  *
  *     @case("api.1", "POST /user/authorization with vault credentials returns a token")
  *
@@ -339,7 +339,7 @@ const CREDENTIAL_FILE = String.raw`['"][^'"\s]*credentials[^'"\s]*['"]`;
 const SCRIPT_BODY_FAMILIES: [ActionClass, RegExp, string][] = [
   // A secret *file* opened, or a secret *value* printed — not the word "credentials" appearing as
   // a label, and not a variable name that happens to contain PASSWORD. `os.environ.get('LO_VAULT_
-  // EFEMIS_PASSWORD')` followed by "present"/"missing" is how an agent checks its own wiring
+  // ACME_PASSWORD')` followed by "present"/"missing" is how an agent checks its own wiring
   // before starting, and gating it stopped a run dead (§7.1b). Printing the value is the thing
   // that matters, and that still matches.
   [
@@ -476,7 +476,7 @@ export function disqualifiesReadOnly(segment: string): boolean {
  * Remove the places where a variable is *tested* rather than used, before asking whether a command
  * touches a secret (§7.1b).
  *
- * `if [ -n "${LO_VAULT_EFEMIS_PASSWORD:-}" ]; then echo present; else echo missing; fi` expands the
+ * `if [ -n "${LO_VAULT_ACME_PASSWORD:-}" ]; then echo present; else echo missing; fi` expands the
  * variable and cannot leak it: the shell compares it and throws it away. An agent checking its own
  * wiring writes exactly this, and gating it stopped a run — twice, because the first fix only
  * covered the Python spelling of the same idea. What still counts as a credential read is a value

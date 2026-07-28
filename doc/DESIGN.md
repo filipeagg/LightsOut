@@ -891,7 +891,7 @@ All three came from matching words rather than what the code does, and all three
 
 | command | was | is | why it was wrong |
 |---|---|---|---|
-| `python3 -c "…os.environ.get('LO_VAULT_EFEMIS_PASSWORD')… print('present')"` | `credentials` | `script_exec` | `PASSWORD` inside a variable *name*. The agent was checking its own wiring; it printed `present`, never a value. And `credentials` is on the hard floor, so neither the judge nor a learned allow could rescue it — the run stopped dead. |
+| `python3 -c "…os.environ.get('LO_VAULT_ACME_PASSWORD')… print('present')"` | `credentials` | `script_exec` | `PASSWORD` inside a variable *name*. The agent was checking its own wiring; it printed `present`, never a value. And `credentials` is on the hard floor, so neither the judge nor a learned allow could rescue it — the run stopped dead. |
 | `python3 -c "…find_spec('requests')…"` | `network` | `script_exec` | `requests` as a *module name*. Asking whether a library is installed is not using it. |
 | `pip install --target .lightsout/tmp/deps openpyxl` | `deps_install` | `project_write` | An install into the scratch directory is swept when the run ends (PE-08), so the reason the gate exists — a dependency changes the build for every later run (ST-03) — does not apply. |
 
@@ -904,7 +904,7 @@ The rules now: a credential match needs a secret *file* or a value *on its way o
 spelling the agent actually reached for next:
 
 ```
-pwd && rg --files | sort && if [ -n "${LO_VAULT_EFEMIS_PASSWORD:-}" ]; then echo 'present'; else echo 'missing'; fi
+pwd && rg --files | sort && if [ -n "${LO_VAULT_ACME_PASSWORD:-}" ]; then echo 'present'; else echo 'missing'; fi
 ```
 
 Two blind spots, both now closed. **A variable expanded inside a presence test is not a value going
@@ -967,9 +967,9 @@ The same false positive has now stopped a real run **four times**, in four spell
 
 | # | the command | what the fix was |
 |---|---|---|
-| 1 | `python3 -c "…os.environ.get('LO_VAULT_EFEMIS_PASSWORD')… print('present')"` | a variable *name* is not a value (§7.1b) |
-| 2 | `if [ -n "${LO_VAULT_EFEMIS_PASSWORD:-}" ]; then echo present; fi` | `stripPresenceTests()` (§7.1b) |
-| 3 | `grep -rqF "$LO_VAULT_EFEMIS_PASSWORD" .` | — none. This is the one that opened D-1 on `efemis-crop-map-prototype`. |
+| 1 | `python3 -c "…os.environ.get('LO_VAULT_ACME_PASSWORD')… print('present')"` | a variable *name* is not a value (§7.1b) |
+| 2 | `if [ -n "${LO_VAULT_ACME_PASSWORD:-}" ]; then echo present; fi` | `stripPresenceTests()` (§7.1b) |
+| 3 | `grep -rqF "$LO_VAULT_ACME_PASSWORD" .` | — none. This is the one that opened D-1 on `acme-crop-map-prototype`. |
 | 4 | whatever the agent reaches for next | — |
 
 Number three survives every fix so far, and correctly so by the letter of the rule: the value *is*
@@ -996,12 +996,12 @@ Three properties that keep this honest. The judge still fails toward the human, 
 shortening of the path to allow and never a lengthening of the path to deny. `credentials` is still
 in `NEVER_LEARNED` (PE-10), so a rescue is decided fresh every single time and no memory of it can
 be wrong later. And a value on its way to a host **outside** the entry's `scope` re-classifies as
-`vault_foreign` and is unreachable again — sending the EFEMIS password to a host that is not EFEMIS
+`vault_foreign` and is unreachable again — sending the ACME password to a host that is not ACME
 is exactly the thing this class exists to stop.
 
 ### 7.1e A write the classifier cannot see is a write it must deny
 
-`contract-prober` — Codex — could not write a single file on `efemis-crop-map-prototype`. The audit
+`contract-prober` — Codex — could not write a single file on `acme-crop-map-prototype`. The audit
 line is one character short of empty:
 
 ```
@@ -1031,7 +1031,7 @@ confining something it can see.
 
 The most expensive hour of 2026-07-27 was spent in the classifier, and the classifier was innocent.
 
-`contract-prober` could not write a single file on `efemis-crop-map-prototype`. It said so plainly —
+`contract-prober` could not write a single file on `acme-crop-map-prototype`. It said so plainly —
 *"the first file-write was denied before execution"* — and the timeline agreed. But the audit trail
 for the entire run held **one** `permission_audit` row, and it was an `allow`. A refusal that
 leaves no audit row did not come from here. Run by hand in the container, codex says what it is:
@@ -1085,7 +1085,7 @@ timeout 180 node .lightsout/tmp/probe.js 2>&1
   → credentials: script .lightsout/tmp/probe.js reads or carries credentials (.env)
 ```
 
-The script opens no such file. It reads `process.env.LO_VAULT_EFEMIS_USUARIO`, and the pattern
+The script opens no such file. It reads `process.env.LO_VAULT_ACME_USUARIO`, and the pattern
 was `\.env\b` — where `\b` sits happily between the `v` of `process.env` and the dot after it.
 
 **Every Node script that read an environment variable was a credential read.** On the hard floor:
@@ -1109,7 +1109,7 @@ path — `classifyScript()` returned a bare `credentials`, so a secret detected 
 never be rescued. That is the same gap one layer down, and it is why the fourth and fifth
 spellings both got through after PE-13 was supposedly the general fix.
 
-What still stops, and should: `console.log(process.env.LO_VAULT_EFEMIS_PASSWORD)`. Owning the key
+What still stops, and should: `console.log(process.env.LO_VAULT_ACME_PASSWORD)`. Owning the key
 does not make printing it safe — the value lands in the transcript — so the subtractive test does
 not clear it, and it stays a person's decision. Verified against the deployed classifier by
 `scripts/verify-dotenv-7-1f.mjs`, 6/6: the doubt's own command is `network → allow`, while
@@ -1188,7 +1188,7 @@ this section says so rather than implying otherwise.
 
 ### 7.1c A path is a path on *this* filesystem, and nothing else
 
-Running the user's own goal end to end — "download the crops of company 42 from EFEMIS and save
+Running the user's own goal end to end — "download the crops of company 42 from ACME and save
 them to Excel" — found three more, and all three were the same mistake in different clothes: text
 that looks like a path is not a path.
 
@@ -1216,7 +1216,7 @@ header plus 169 rows, 76 columns — then read it back to check it. Three minute
 **The failure.** A chain stopped for eleven minutes on this:
 
 ```
-R=…/src/efemis_django-master; find $R/throttling $R/user -maxdepth 1 -name '*.py' | xargs wc -l
+R=…/src/acme_django-master; find $R/throttling $R/user -maxdepth 1 -name '*.py' | xargs wc -l
 ```
 
 Counting lines. Two blind spots put it in `other`, and `other` is a human gate: nothing knew what
@@ -1493,7 +1493,7 @@ be pasted somewhere.
 ### 9.5 Read-only workspace areas (PE-09)
 
 **The failure this fixes.** A curation project was told, by the user, exactly where the code was:
-`/workspace/sources/efemis_django-master`. Every attempt to reach it — `ls -la /workspace/sources/`,
+`/workspace/sources/acme_django-master`. Every attempt to reach it — `ls -la /workspace/sources/`,
 `cp -r … ./sources/`, even `ls /workspace/`— classified as `outside_workspace` and was denied by the
 hard floor. The agent could not read it, could not copy it, and spent six passes writing a document
 about being blocked. The policy was right in the general case and wrong in this one, and there was
@@ -1552,7 +1552,7 @@ recorded like one.
 
 **The failure.** A run asked for an HTML prototype finished `ok`, committed 2261 lines, and the
 user pressed Preview and got nothing. The page was real and good — 1912 lines — and it was at
-`doc/efemis_prototipo.html`. `detectPreview()` looks where code goes; the agent had put it where
+`doc/acme_prototipo.html`. `detectPreview()` looks where code goes; the agent had put it where
 documents go; nobody had ever said which was which.
 
 Three complaints arrived together — *"why can't I preview, it is an HTML"*, *"shouldn't generated
@@ -2496,7 +2496,7 @@ told. A curator that knows which tool to reach for has no problem here.
 
 **The failure this fixes.** Two rules that were each right made a third thing impossible. A folder
 directly under `knowledge/` becomes a base in place; anywhere else it becomes a base that *links* to
-the folder — and a linked base was never writable. So `knowledge/hispatec/mercado` could not be
+the folder — and a linked base was never writable. So `knowledge/acmecorp/mercado` could not be
 curated by an agent, although it is inside the knowledge area and belongs to nobody else. The
 session that hit this concluded the two existing bases were read-only "because they were written by
 hand", which was the wrong lesson from the right observation.
@@ -2806,7 +2806,7 @@ check skips it:
 ### 20.3 The format
 
 ```
-# ANALYSIS :: curacionapi-efemis
+# ANALYSIS :: curacionapi-acme
 meta.doc: ANALYSIS
 meta.updated: 2026-07-26
 meta.phase: analyse
@@ -2819,15 +2819,15 @@ meta.blocked_on: sources_missing
 | G-1 | endpoint list unknown | sources/ populated | doc/OPEN-QUESTIONS.md#q.4 | high |
 
 ## facts
-f.1.claim: base efemis has 38 undocumented fields
-f.1.source: knowledge:efemis/tecnico/api.md
+f.1.claim: base acme has 38 undocumented fields
+f.1.source: knowledge:acme/tecnico/api.md
 f.1.kind: preference
 f.1.confidence: medium
 ```
 
-`doc/examples/ANALYSIS.machine-first.md` is the canonical example: the 40 KB narrative that caused
-this rule, rewritten to 19 KB with every fact, id and source preserved and the chronicle of passes
-gone. It is also the file that was copied over the live deliverable.
+`doc/examples/ANALYSIS.machine-first.md` is the canonical example (a fictional integration, real
+shape): every fact carries an id and a source, and there is no chronicle of passes — a counter
+(`meta.passes`) is the whole history anyone needs.
 
 Rules, all of them stated in the protocol block so every agent gets them:
 

@@ -105,7 +105,7 @@ describe("script_exec (PE-07)", () => {
       "tools/client.py",
       [
         "import json, urllib.request",
-        "BASE = 'https://efemis-back.hispatec.com'",
+        "BASE = 'https://acme-back.acmecorp.com'",
         "resp = urllib.request.urlopen(BASE + '/plantation/query')",
         "json.dump(json.load(resp), open('output/cultivos.json', 'w'))",
       ].join("\n"),

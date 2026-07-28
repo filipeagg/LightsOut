@@ -77,15 +77,15 @@ describe("what to serve, when nobody said (PV-07)", () => {
   });
 
   it("serves a differently named page when it is the only one, and says to rename it", async () => {
-    // The real case: a working 1912-line prototype at doc/efemis_prototipo.html that nobody
+    // The real case: a working 1912-line prototype at doc/acme_prototipo.html that nobody
     // could open. Refusing over a naming convention helps no one.
     const dir = await project();
     await mkdir(path.join(dir, "doc"));
-    await writeFile(path.join(dir, "doc", "efemis_prototipo.html"), page, "utf8");
+    await writeFile(path.join(dir, "doc", "acme_prototipo.html"), page, "utf8");
 
     const chosen = plan(detectPreview(dir));
     expect(chosen.command).toBe(`${LO_SERVE} --root doc`);
-    expect(chosen.reason).toContain("efemis_prototipo.html");
+    expect(chosen.reason).toContain("acme_prototipo.html");
     expect(chosen.reason).toContain("index.html");
     expect(chosen.reason).toContain("src/");
   });

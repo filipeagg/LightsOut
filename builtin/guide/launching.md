@@ -52,7 +52,7 @@ launch_task {
 
 ```json
 launch_phase {
-  projectId: "efemis-analysis",
+  projectId: "acme-analysis",
   phase: "analyse",
   input: "Start with the authorisation layer: permission classes, get_queryset, visibility_groups.",
   expects: "doc/ANALYSIS.md extended with the authorisation section: one fact per line, each with code:<path>:<line>; every gap you cannot close listed with what would close it"

@@ -96,7 +96,7 @@ export function detectPreview(projectPath: string): PreviewPlan | DetectFailure 
   }
 
   // Last resort, and the reason it exists: a page called something else. An agent that wrote
-  // `efemis_prototipo.html` produced a working prototype nobody could open, and refusing to serve
+  // `acme_prototipo.html` produced a working prototype nobody could open, and refusing to serve
   // it over a naming convention helps no one — as long as there is exactly one candidate and no
   // guessing involved. Said out loud, so the next page gets called index.html.
   for (const dir of ["src", ".", ...BUILD_DIRS, "doc"]) {

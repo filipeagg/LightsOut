@@ -25,9 +25,9 @@ meta.blocked_on: sources_missing
 
 ## facts
 
-f.1.claim: base efemis holds 38 undocumented fields
+f.1.claim: base acme holds 38 undocumented fields
 f.1.kind: preference
-f.1.source: knowledge:efemis/tecnico/api.md
+f.1.source: knowledge:acme/tecnico/api.md
 f.1.confidence: medium
 f.2.claim: the project has no sources directory
 f.2.kind: constraint
@@ -142,8 +142,8 @@ describe("what the check applies to (BA-07, §20.2)", () => {
     expect(deliverablePath(workspace, project, "doc/ANALYSIS.md")).toBe(
       "/workspace/projects/demo/doc/ANALYSIS.md",
     );
-    expect(deliverablePath(workspace, project, "workspace:knowledge/efemis/index.md")).toBe(
-      "/workspace/knowledge/efemis/index.md",
+    expect(deliverablePath(workspace, project, "workspace:knowledge/acme/index.md")).toBe(
+      "/workspace/knowledge/acme/index.md",
     );
   });
 

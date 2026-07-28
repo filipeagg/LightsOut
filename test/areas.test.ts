@@ -2,7 +2,7 @@
  * PE-09: read-only workspace areas, and the classification that makes them useful.
  *
  * The scenario is the real one: a project told where the code is
- * (`/workspace/sources/efemis_django-master`), denied every way of reading it, writing reports
+ * (`/workspace/sources/acme_django-master`), denied every way of reading it, writing reports
  * about being blocked.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -29,9 +29,9 @@ beforeEach(async () => {
   workspace = await mkdtemp(path.join(tmpdir(), "lo-areas-"));
   project = path.join(workspace, "projects", "curation");
   await mkdir(path.join(project, "doc"), { recursive: true });
-  await mkdir(path.join(workspace, "sources", "efemis_django-master"), { recursive: true });
+  await mkdir(path.join(workspace, "sources", "acme_django-master"), { recursive: true });
   await mkdir(path.join(workspace, "projects", "other"), { recursive: true });
-  await mkdir(path.join(workspace, "knowledge", "efemis"), { recursive: true });
+  await mkdir(path.join(workspace, "knowledge", "acme"), { recursive: true });
   await mkdir(path.join(workspace, "agents"), { recursive: true });
 });
 
@@ -41,15 +41,15 @@ afterEach(async () => {
 
 describe("what may be declared an area", () => {
   it("accepts a directory of the workspace, relative or absolute", () => {
-    expect(validateArea(workspace, project, "sources/efemis_django-master").relative).toBe(
-      "sources/efemis_django-master",
+    expect(validateArea(workspace, project, "sources/acme_django-master").relative).toBe(
+      "sources/acme_django-master",
     );
     expect(
       validateArea(workspace, project, path.join(workspace, "sources")).relative,
     ).toBe("sources");
     // Trailing separators and backslashes are the same directory.
-    expect(validateArea(workspace, project, "sources\\efemis_django-master\\").relative).toBe(
-      "sources/efemis_django-master",
+    expect(validateArea(workspace, project, "sources\\acme_django-master\\").relative).toBe(
+      "sources/acme_django-master",
     );
   });
 
@@ -59,7 +59,7 @@ describe("what may be declared an area", () => {
     expect(() => validateArea(workspace, project, "agents")).toThrow(/system that runs it/);
     expect(() => validateArea(workspace, project, "templates")).toThrow(/system that runs it/);
     expect(() => validateArea(workspace, project, "vault.yaml")).toThrow(/credentials vault/);
-    expect(() => validateArea(workspace, project, "knowledge/efemis")).toThrow(/knowledge base/);
+    expect(() => validateArea(workspace, project, "knowledge/acme")).toThrow(/knowledge base/);
     expect(() => validateArea(workspace, project, "projects/other")).toThrow(/another project/);
     expect(() => validateArea(workspace, project, "projects/curation")).toThrow(/already readable/);
     expect(() => validateArea(workspace, project, "sources/nope")).toThrow(/no such file/);
@@ -68,44 +68,44 @@ describe("what may be declared an area", () => {
 
   it("accepts a single file, because the material is sometimes one archive", async () => {
     const { writeFile } = await import("node:fs/promises");
-    await writeFile(path.join(workspace, "sources", "efemis.zip"), "zip", "utf8");
-    expect(validateArea(workspace, project, "sources/efemis.zip").relative).toBe(
-      "sources/efemis.zip",
+    await writeFile(path.join(workspace, "sources", "acme.zip"), "zip", "utf8");
+    expect(validateArea(workspace, project, "sources/acme.zip").relative).toBe(
+      "sources/acme.zip",
     );
   });
 
   it("is stored once per project and path", () => {
     repos.projects.create({ id: "curation", name: "Curation", path: project, context: "goal: x" });
-    repos.areas.add({ projectId: "curation", path: "sources/efemis_django-master", addedBy: "mcp" });
-    repos.areas.add({ projectId: "curation", path: "sources/efemis_django-master", addedBy: "mcp" });
+    repos.areas.add({ projectId: "curation", path: "sources/acme_django-master", addedBy: "mcp" });
+    repos.areas.add({ projectId: "curation", path: "sources/acme_django-master", addedBy: "mcp" });
     expect(repos.areas.list("curation")).toHaveLength(1);
-    expect(repos.areas.remove("curation", "sources/efemis_django-master")?.path).toBe(
-      "sources/efemis_django-master",
+    expect(repos.areas.remove("curation", "sources/acme_django-master")?.path).toBe(
+      "sources/acme_django-master",
     );
     expect(repos.areas.list("curation")).toHaveLength(0);
   });
 });
 
 describe("classification with an area (the case that failed)", () => {
-  const area = () => [path.join(workspace, "sources", "efemis_django-master")];
+  const area = () => [path.join(workspace, "sources", "acme_django-master")];
   const classifier = new Classifier();
   const classify = (command: string, readAreas = area()) =>
     classifier.classify({ projectPath: project, workspacePath: workspace, readAreas, command });
 
   it("turns the denied listing into a read", () => {
-    const target = path.join(workspace, "sources", "efemis_django-master");
+    const target = path.join(workspace, "sources", "acme_django-master");
     expect(classify(`ls -la ${target}/`).class).toBe("project_read");
     expect(classify(`cat ${target}/manage.py`).class).toBe("project_read");
   });
 
   it("allows copying out of the area into the project", () => {
-    const target = path.join(workspace, "sources", "efemis_django-master");
-    const decision = classify(`cp -r ${target} ./sources/efemis_django-master`);
+    const target = path.join(workspace, "sources", "acme_django-master");
+    const decision = classify(`cp -r ${target} ./sources/acme_django-master`);
     expect(decision.class).toBe("project_read");
   });
 
   it("never allows writing into the area", () => {
-    const target = path.join(workspace, "sources", "efemis_django-master");
+    const target = path.join(workspace, "sources", "acme_django-master");
     expect(classify(`cp -r ./doc ${target}/doc`).class).toBe("outside_workspace");
     expect(classify(`rm -rf ${target}`).class).toBe("outside_workspace");
     expect(
@@ -124,7 +124,7 @@ describe("classification with an area (the case that failed)", () => {
     expect(classify(`cat ${workspace}/vault.yaml`).class).toBe("credentials");
     expect(classify(`ls ${workspace}/projects/other`).class).toBe("outside_workspace");
     // And with no area declared at all, the old behaviour stands.
-    expect(classify(`ls -la ${workspace}/sources/efemis_django-master`, []).class).toBe(
+    expect(classify(`ls -la ${workspace}/sources/acme_django-master`, []).class).toBe(
       "outside_workspace",
     );
   });
@@ -138,7 +138,7 @@ describe("classification with an area (the case that failed)", () => {
       ],
     });
     const engine = new PolicyEngine({ default: pack });
-    const target = path.join(workspace, "sources", "efemis_django-master");
+    const target = path.join(workspace, "sources", "acme_django-master");
     const decision = engine.evaluate({
       projectPath: project,
       workspacePath: workspace,
@@ -152,7 +152,7 @@ describe("classification with an area (the case that failed)", () => {
 });
 
 describe("an area may be writable, and only where it was declared so (PE-09 amended)", () => {
-  const shared = () => path.join(workspace, "sources", "efemis_django-master");
+  const shared = () => path.join(workspace, "sources", "acme_django-master");
   const permissive = policyPackSchema.parse({
     id: "default",
     rules: [
@@ -215,14 +215,14 @@ describe("an area may be writable, and only where it was declared so (PE-09 amen
     repos.projects.create({ id: "curation", name: "C", path: project, context: "c" });
     const first = repos.areas.add({
       projectId: "curation",
-      path: "sources/efemis_django-master",
+      path: "sources/acme_django-master",
       addedBy: "panel",
     });
     expect(first.access).toBe("read");
 
     const promoted = repos.areas.add({
       projectId: "curation",
-      path: "sources/efemis_django-master",
+      path: "sources/acme_django-master",
       access: "write",
       addedBy: "mcp",
     });
@@ -234,7 +234,7 @@ describe("an area may be writable, and only where it was declared so (PE-09 amen
     expect(
       repos.areas.add({
         projectId: "curation",
-        path: "sources/efemis_django-master",
+        path: "sources/acme_django-master",
         access: "read",
         addedBy: "panel",
       }).access,

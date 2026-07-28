@@ -76,9 +76,9 @@ describe("workspace-aware classification (§7.1)", () => {
     expect(
       classify({
         kind: "edit",
-        paths: ["/workspace/knowledge/hispatec/mercado/index.md"],
+        paths: ["/workspace/knowledge/acmecorp/mercado/index.md"],
         writableKnowledgeBase: "mercado",
-        writableKnowledgeDir: "/workspace/knowledge/hispatec/mercado",
+        writableKnowledgeDir: "/workspace/knowledge/acmecorp/mercado",
       }),
     ).toBe("knowledge_write");
 
@@ -86,9 +86,9 @@ describe("workspace-aware classification (§7.1)", () => {
     expect(
       classify({
         kind: "edit",
-        paths: ["/workspace/knowledge/hispatec/tecnico/index.md"],
+        paths: ["/workspace/knowledge/acmecorp/tecnico/index.md"],
         writableKnowledgeBase: "mercado",
-        writableKnowledgeDir: "/workspace/knowledge/hispatec/mercado",
+        writableKnowledgeDir: "/workspace/knowledge/acmecorp/mercado",
       }),
     ).toBe("outside_workspace");
   });

@@ -5,7 +5,10 @@ one container, mediates their permission requests against policy, raises doubts 
 guessing, asks a second opinion when a doubt is resolvable, and exposes the whole thing over MCP
 plus a read-only web panel.
 
-Copyright 2026 Filipe Gomes. Licensed under the Apache License, Version 2.0 (see `LICENSE`).
+Copyright 2026 [Filipe Gomes](https://www.linkedin.com/in/filipeagg/). Licensed under the Apache
+License, Version 2.0 with the Commons Clause condition (see `LICENSE`): free to use, modify and
+redistribute, including commercially inside your own organisation; not for sale or resale, as
+itself or as a service, by anyone but the Licensor.
 
 ## Documents
 

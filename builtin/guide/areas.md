@@ -30,7 +30,7 @@ shape: a directory, or a single file when the material is one archive.
 
 ## using_it
 
-add_area { projectId, path: "sources/efemis_django-master.zip", note: "the Django source under analysis" }
+add_area { projectId, path: "sources/acme_django-master.zip", note: "the Django source under analysis" }
 path: workspace-relative or an absolute container path under /workspace. Backslashes and trailing slashes are normalised.
 effect: the areas are listed in every prompt of that project, so the agent knows what it may read.
 remove_area { projectId, path }: withdraws it; the next run is denied again.

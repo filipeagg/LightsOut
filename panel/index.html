@@ -1576,6 +1576,19 @@ function agentEditor(p, packs) {
         <label class="tiny">How far it is trusted<br>${packSelect("ag-policy", packs, p.policy)}</label>
         <label class="tiny">Tags<br><input id="ag-tags" value="${esc((p.tags || []).join(", "))}"></label>
       </div>
+      <div class="row wrap" style="gap:16px;margin-bottom:12px">
+        <label class="tiny">Beyond its pack (PE-14)<br>
+          <span class="tiny"><input type="checkbox" id="ag-cap-knowledge"
+            ${(p.capabilities || []).includes("knowledge_write") ? "checked" : ""}>
+            knowledge_write — may curate the project's writable base</span><br>
+          <span class="tiny"><input type="checkbox" id="ag-cap-serve"
+            ${(p.capabilities || []).includes("serve") ? "checked" : ""}>
+            serve — may run a server itself (preview_start normally does)</span></label>
+        <label class="tiny">Write scopes, comma separated<br>
+          <input id="ag-scopes" placeholder="doc/, probes/"
+            value="${esc((p.writeScopes || []).join(", "))}">
+          <span class="tiny muted">Empty means anywhere in the project.</span></label>
+      </div>
       <label class="tiny">Instructions<br>
         <textarea id="ag-instructions" rows="10" style="width:100%">${esc(p.instructions || "")}</textarea>
       </label>
@@ -1698,12 +1711,19 @@ async function createAgent() {
 }
 
 async function saveAgent(id) {
+  // PE-14: capabilities and write scopes are sent every time, including empty, so unticking one
+  // actually removes it. A patch that omits a field leaves it as it was.
+  const capabilities = [];
+  if (checked("ag-cap-knowledge")) capabilities.push("knowledge_write");
+  if (checked("ag-cap-serve")) capabilities.push("serve");
   const patch = {
     name: field("ag-name"),
     engine: field("ag-engine"),
     policy: field("ag-policy"),
     instructions: $("ag-instructions").value,
     tags: csv("ag-tags"),
+    capabilities,
+    writeScopes: csv("ag-scopes"),
   };
   if (field("ag-model")) patch.model = field("ag-model");
   if (field("ag-reasoning")) patch.reasoning = field("ag-reasoning");

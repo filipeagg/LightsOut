@@ -13,17 +13,23 @@
 import { describe, expect, it } from "vitest";
 import { Actions } from "../src/control/actions.js";
 import { registerTools, type McpDeps } from "../src/mcp/tools.js";
+import { agentProfileSchema } from "../src/agents/schema.js";
 
 /** Register against a server that only records names; no handler is ever called. */
 function toolNames(): string[] {
-  const names: string[] = [];
+  return [...toolSchemas().keys()];
+}
+
+/** The same registration, keeping each tool's input shape so a dropped field is a failure. */
+function toolSchemas(): Map<string, Record<string, unknown>> {
+  const schemas = new Map<string, Record<string, unknown>>();
   const server = {
-    registerTool(name: string) {
-      names.push(name);
+    registerTool(name: string, config: { inputSchema?: Record<string, unknown> }) {
+      schemas.set(name, config?.inputSchema ?? {});
     },
   };
   registerTools(server as never, {} as McpDeps);
-  return names;
+  return schemas;
 }
 
 /**
@@ -176,6 +182,19 @@ describe("MCP and the panel expose the same actions (MC-07)", () => {
     for (const [action, tool] of Object.entries(TOOL_FOR)) {
       expect(tools.has(tool), `${action} -> ${tool}`).toBe(true);
     }
+  });
+
+  /**
+   * AP-06, and the reason this test exists: `capabilities` was on the profile schema and on
+   * neither writing surface, so a caller could set `knowledge_write`, get `ok: true`, and read an
+   * empty list back — the field was stripped before the writer saw it. A silent drop is worse than
+   * a refusal, and only a test over both shapes catches the next one.
+   */
+  it("write_agent accepts every field a profile has (AP-06)", () => {
+    const tool = toolSchemas().get("write_agent") ?? {};
+    const writable = Object.keys(agentProfileSchema.shape).filter((field) => field !== "id");
+    const missing = writable.filter((field) => !(field in tool));
+    expect(missing, "write_agent silently drops these profile fields").toEqual([]);
   });
 
   it("registers every tool exactly once", () => {

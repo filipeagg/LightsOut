@@ -3,6 +3,13 @@ import { z } from "zod";
 
 export const engineSchema = z.enum(["claude", "codex"]);
 
+/**
+ * What an agent may do beyond its pack (PE-14, §7.2b). Named here rather than inline so every
+ * surface that writes a profile offers the same two values: `write_agent` silently dropped
+ * `capabilities` for weeks, and a caller who set `knowledge_write` twice read an empty list back.
+ */
+export const AGENT_CAPABILITIES = ["knowledge_write", "serve"] as const;
+
 export const agentProfileSchema = z
   .object({
     /** Stable id used by tasks; defaults to the file name when omitted. */
@@ -32,7 +39,7 @@ export const agentProfileSchema = z
      * are properties of a job, not degrees of trust, which is what the pack is for. Anything that
      * leaves the machine is a pack, not a capability.
      */
-    capabilities: z.array(z.enum(["knowledge_write", "serve"])).default([]),
+    capabilities: z.array(z.enum(AGENT_CAPABILITIES)).default([]),
     tags: z.array(z.string().min(1)).default([]),
     /** Read-only advisory profile used for second opinions (SR-08). */
     advisor: z.boolean().default(false),

@@ -1,12 +1,22 @@
-# Publish the container image to GHCR (SU-01, SU-08, DESIGN §14.1).
+# Publish the container image to GHCR and, optionally, Docker Hub (SU-01, SU-08, DESIGN §14.1).
 #
 # Tagging `vX.Y.Z` builds linux/amd64 and linux/arm64 and pushes
 # ghcr.io/<owner>/lightsout:X.Y.Z, :X.Y, :X and :latest. Updating an installation is
 # `docker pull` plus a restart: migrations run at boot and every piece of state lives in a
 # volume or the host workspace, so a replaced container keeps credentials, database and projects.
 #
-# The namespace follows the repository owner, so the image name is right whatever account or
-# organisation this ends up under, and no secret beyond the workflow token is needed.
+# The GHCR namespace follows the repository owner, so the image name is right whatever account
+# or organisation this ends up under, and no secret beyond the workflow token is needed for it.
+#
+# Docker Hub is separate and optional: GHCR is the image Start-LightsOut.ps1 and the docs
+# actually pull from, Docker Hub exists only so the image is findable from Docker Desktop's own
+# search (which only indexes Docker Hub, never GHCR). It needs two repository secrets that GHCR
+# does not (Settings -> Secrets and variables -> Actions):
+#   DOCKERHUB_USERNAME  -- your Docker Hub username
+#   DOCKERHUB_TOKEN     -- an access token (Docker Hub -> Account Settings -> Security),
+#                          Read & Write scope
+# Missing either one skips the Docker Hub push rather than failing the whole run: GHCR is the
+# release surface that matters, Docker Hub is a nice-to-have on top of it.
 name: release
 
 on:
@@ -70,11 +80,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Check for Docker Hub credentials
+        id: dockerhub
+        run: |
+          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::DOCKERHUB_USERNAME/DOCKERHUB_TOKEN not set, skipping Docker Hub (GHCR still publishes)."
+          fi
+
+      - name: Log in to Docker Hub
+        if: steps.dockerhub.outputs.enabled == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Tags and labels
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+            ${{ steps.dockerhub.outputs.enabled == 'true' && format('docker.io/{0}/lightsout', secrets.DOCKERHUB_USERNAME) || '' }}
           tags: |
             type=semver,pattern={{version}},value=v${{ steps.version.outputs.value }}
             type=semver,pattern={{major}}.{{minor}},value=v${{ steps.version.outputs.value }}

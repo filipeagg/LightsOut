@@ -2396,6 +2396,32 @@ owner: platform@example.com
 updated: 2026-07-25
 ```
 
+### 17.1b Which base may be written into (KB-05 amended)
+
+**The failure this fixes.** Two rules that were each right made a third thing impossible. A folder
+directly under `knowledge/` becomes a base in place; anywhere else it becomes a base that *links* to
+the folder — and a linked base was never writable. So `knowledge/hispatec/mercado` could not be
+curated by an agent, although it is inside the knowledge area and belongs to nobody else. The
+session that hit this concluded the two existing bases were read-only "because they were written by
+hand", which was the wrong lesson from the right observation.
+
+The ban exists because the folder belongs to **something else** — the user's own source tree,
+another project — and an agent rewriting it would be editing material outside its remit. Nesting
+was never the reason; it only looked like it, because "directly under `knowledge/`" was how a base
+in place was recognised. So the rule is now where the documents *are*:
+
+| the base's documents live | writable |
+|---|---|
+| in its own `knowledge/<id>/` | yes |
+| under `knowledge/` anywhere else, via `source` | **yes** — same area, same owner |
+| outside `knowledge/` | no, and the refusal says to copy the material in |
+| in a base with `enforcement: hard` | no, whatever the path (KB-11c) |
+
+**And the classifier has to agree.** It derived the writable directory as `knowledge/<id>`, which is
+only the default: a nested base would have been attachable and then had every write to it classified
+`outside_workspace` — attachable and unusable, the worst of both. The runner now passes the base's
+real `docsDir` and the classifier uses it, falling back to `knowledge/<id>` when it is absent.
+
 `kind` says what sort of fact the base holds; `enforcement` says what the agent may do about it.
 They are separate on purpose: a design system is `kind: technical` and `enforcement: hard`, while
 an analysis of a legacy system is technical and advisory. Collapsing them into one field would have

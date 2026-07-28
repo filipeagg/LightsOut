@@ -185,7 +185,18 @@ export async function createProject(
   if (attachments.length > 0 && !deps.knowledge) {
     throw new Error("knowledge is not loaded in this process");
   }
-  for (const attachment of attachments) deps.knowledge?.getOrThrow(attachment.baseId);
+  for (const attachment of attachments) {
+    deps.knowledge?.getOrThrow(attachment.baseId);
+    // KB-05 amended (§17.1b): the same rule the panel and MCP apply when attaching later — a base
+    // that reads someone else's folder cannot be the writable one, but a subfolder of knowledge/
+    // is still the knowledge area. Checked here so a curation project is refused before it exists.
+    if (attachment.writable && deps.knowledge && !deps.knowledge.ownsItsDocuments(attachment.baseId)) {
+      throw new Error(
+        `${attachment.baseId} reads its documents from outside knowledge/, so it cannot be the ` +
+          "base this project writes into (KB-05, KB-08)",
+      );
+    }
+  }
 
   const existing = repos.projects.get(id);
   if (existing && (await exists(projectPath))) {

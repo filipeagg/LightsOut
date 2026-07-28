@@ -18,7 +18,7 @@ enforcement: advisory (default) | hard
 description: one line; it is what the injector shows first
 tags: list
 owner: who maintains it
-source: a folder it reads from, when the base lives outside knowledge/
+source: a folder it reads its documents from, instead of its own
 
 ## enforcement
 
@@ -29,8 +29,16 @@ use_hard_for: decisions a person made and owns. Not for facts.
 ## attaching
 
 attach_knowledge { projectId, baseId }: read-only, any number.
-attach_knowledge { projectId, baseId, writable: true }: at most one base per project, and only a curation project needs it (KB-05). A hard-rule base is never writable.
-consequence: writes into the writable base classify as knowledge_write and only the curate pack allows them; writes into any other base are denied outright.
+attach_knowledge { projectId, baseId, writable: true }: at most one base per project, and only a curation project needs it (KB-05).
+consequence: writes into the writable base classify as knowledge_write; writes into any other base are denied outright.
+who_may_write: an agent whose profile has `capabilities: [knowledge_write]` — `codebase-analyst` does. Every pack denies the class; the capability is what grants it. There is no "curate" pack (PE-14).
+
+## which_base_may_be_written_into (KB-05, §17.1b)
+
+may: a base whose documents live anywhere **inside** `knowledge/` — `knowledge/mercado` and `knowledge/hispatec/mercado` alike. Nesting is not a reason to refuse.
+may_not: a base whose `source` points outside `knowledge/` — the user's own source tree, another project. That folder belongs to something else, which is the whole reason for the rule.
+may_not: a base with `enforcement: hard`. An agent that can rewrite the rules binding it is not bound by them (KB-11c).
+to_curate_material_that_lives_elsewhere: copy or move it under `knowledge/`, then adopt it.
 
 ## writing_documents
 

@@ -67,6 +67,32 @@ describe("workspace-aware classification (§7.1)", () => {
     );
   });
 
+  /**
+   * KB-05 amended (§17.1b): a base may read its documents from a subfolder of knowledge/, and
+   * `knowledge/<id>` is only the default location. Deriving the directory from the id made such a
+   * base attachable as writable and then denied every write to it — attachable and unusable.
+   */
+  it("allows the write when the base's documents live deeper inside knowledge/ (§17.1b)", () => {
+    expect(
+      classify({
+        kind: "edit",
+        paths: ["/workspace/knowledge/hispatec/mercado/index.md"],
+        writableKnowledgeBase: "mercado",
+        writableKnowledgeDir: "/workspace/knowledge/hispatec/mercado",
+      }),
+    ).toBe("knowledge_write");
+
+    // Still only that folder: a sibling under the same parent is somebody else's base.
+    expect(
+      classify({
+        kind: "edit",
+        paths: ["/workspace/knowledge/hispatec/tecnico/index.md"],
+        writableKnowledgeBase: "mercado",
+        writableKnowledgeDir: "/workspace/knowledge/hispatec/mercado",
+      }),
+    ).toBe("outside_workspace");
+  });
+
   it("classifies the system's own configuration as credentials, whatever the pack says", () => {
     expect(classify({ kind: "edit", paths: ["/workspace/agents/builder.yaml"] })).toBe(
       "credentials",

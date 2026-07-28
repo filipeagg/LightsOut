@@ -18,7 +18,9 @@ edit_a_builtin: write_agent with its id clones it into the workspace with your c
 | engine | claude \| codex | must be installed and authenticated (health) |
 | model | one of list_agents.models for that engine | never free text (AP-08) |
 | reasoning | minimal \| low \| medium \| high | cost and depth |
-| policy | a pack id: default, read-only, no-write, test, probe, curate, advisor | what it may do (guide{topic:"policies"}) |
+| policy | a pack id: read \| build \| build-network | how far outside itself it may reach (guide{topic:"policies"}) |
+| capabilities | list: knowledge_write, serve | what the pack denies and this profile is granted anyway. Curating knowledge needs `knowledge_write` |
+| write_scopes | list of path prefixes | where inside the project it may write; omitted means anywhere in it |
 | instructions | the agent's standing prompt | what it is for, how it works, what it must not do |
 | deliverable | a path or a description | checked on disk when a phase closes (BA-04) |
 | tags | list | grouping only |
@@ -42,17 +44,20 @@ example.chain: one chain, `model:"haiku"` on the mechanical tasks and nothing on
 
 ## the_builtins
 
-prompt-architect: turns a rough request into doc/PROMPT.md. read-only.
-planner: writes doc/PLAN.md, one task per id. read-only.
-builder: executes one piece of an unambiguous plan. default pack.
-reviewer: reviews a change. codex, read-only.
-software-auditor: audits delivered code into doc/AUDIT.md. codex, read-only, runs late.
-qa-engineer: writes and runs tests, reports doc/QA-REPORT.md. test pack.
-contract-prober: finds out how an external API really behaves, into doc/CONTRACTS.md. probe pack, network.
-integrator: builds and runs an integration — calls the API and writes the client. integrate pack: network, writes anywhere in the project, the vault.
-codebase-analyst: reads a system and writes the knowledge base. curate pack.
-answerer: answers a question from attached knowledge. no-write.
-coordinator: owns a project across phases; usually embodied by you rather than launched.
+count: ten — nine that do work, plus the internal permission-judge (BA-01).
+
+planner: understands the request and writes doc/PLAN.md, one task per id. build.
+builder: executes one piece of an unambiguous plan. build.
+reviewer: reviews a change. codex, read, advisor.
+software-auditor: audits delivered code into doc/AUDIT.md. codex, build, runs late.
+qa-engineer: writes and runs tests, reports doc/QA-REPORT.md. build-network.
+contract-prober: finds out how an external API really behaves, into doc/CONTRACTS.md. codex, build-network.
+integrator: builds and runs an integration — calls the API and writes the client. build-network.
+codebase-analyst: reads a system and writes the knowledge base. build + capabilities [knowledge_write].
+answerer: answers a question from attached knowledge. read.
+permission-judge: internal; one closed question before a gate wakes you. read, advisor (PE-11).
+
+retired: prompt-architect (the planner does both jobs in one pass), coordinator (that is you), web-prototyper. A project of theirs still runs; new templates name the list above.
 
 ## writing_instructions_that_work
 

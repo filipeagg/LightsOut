@@ -2,7 +2,7 @@
 
 meta.topic: policies
 meta.requirement: PE-01..09
-meta.note: packs are files in workspace/agents/policies/*.yaml; the seven builtins ship in the image
+meta.note: packs are files in workspace/agents/policies/*.yaml; three builtins ship in the image
 
 ## how_a_permission_is_answered
 
@@ -31,18 +31,25 @@ outside_workspace: never allow. A declared area changes the *class* to project_r
 credentials, publish_external, force push: never below require_human.
 agents/, templates/, vault.yaml: always credentials, whatever the pack says.
 
-## the_builtin_packs
+## the_builtin_packs (three, since PE-14)
 
 | pack | for | shape |
 |---|---|---|
-| default | builder and most work | reads, writes, tests, own scripts, local git; dependencies and deletions ask a human; push and network denied |
-| read-only | planner, auditor, prompt architect | writes confined to doc/ by write_scopes; no git history |
-| no-write | answerer | reads and replies; writes and execution denied |
-| test | qa-engineer | execution and loopback network; writes confined to the test directories |
-| probe | contract-prober | network and execution; writes confined to probes/ and doc/; only test credentials resolve |
-| curate | codebase-analyst | the only pack whose knowledge_write is allow, narrowed to the project's writable base |
-| integrate | integrator | network + writes anywhere in the project + execution + the vault: the combination probe and default each half-had |
-| advisor | second opinions | everything read-only; the terminal denied |
+| read | answerer, reviewer, permission-judge, advisor sessions | reads and reports. Writes, execution, git and network all denied |
+| build | builder, planner, software-auditor, codebase-analyst | works inside the project: writes, checks, own scripts, local git. Dependencies, deletions and toolchain ask a human. Push and network denied |
+| build-network | contract-prober, integrator, qa-engineer | build, plus the network. For probing an API, calling one, and writing the code that calls it |
+
+pack_answers: one question — how far outside itself may this agent reach. Everything else moved off the pack.
+retired: default, read-only, no-write, test, probe, curate, integrate, advisor, web-prototype. A profile naming one still loads and resolves, marked deprecated; write a new one against the three above.
+
+## what_is_no_longer_a_pack
+
+where_it_may_write: `write_scopes` on the **profile**, not a pack of its own. Confining an agent used to mean inventing a pack.
+knowledge_write: a **capability** on the profile — `capabilities: [knowledge_write]`. Every pack denies the class; the capability is what flips it, and only for the project's one writable base (KB-05).
+serve: the same, `capabilities: [serve]`. Almost nothing needs it: preview_start owns the servers (PV-02).
+test_only credentials: `vault.test_only_required` on the pack, and only `build-network` sets it.
+
+curating_knowledge: agent with `policy: build` **and** `capabilities: [knowledge_write]` — `codebase-analyst` is exactly that. A `build` agent without the capability cannot write a base, and no pack grants it.
 
 ## a_missing_tool_is_not_a_permission_problem
 

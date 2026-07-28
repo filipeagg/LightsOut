@@ -149,6 +149,22 @@ export class KnowledgeLoader {
     return path.join(this.workspace, "knowledge");
   }
 
+  /**
+   * Do this base's documents live inside the knowledge area? (KB-05 amended, §17.1b)
+   *
+   * The reason a linked base may not be written to is that the folder belongs to something else —
+   * the user's own source tree, another project. A folder under `knowledge/` belongs to the
+   * knowledge area, and `knowledge/hispatec/mercado` is as curatable as `knowledge/mercado`.
+   * Nesting was never the reason for the ban; it only looked like it, because "directly under
+   * knowledge/" was how a base in place was recognised.
+   */
+  ownsItsDocuments(baseId: string): boolean {
+    const base = this.getOrThrow(baseId);
+    const root = path.resolve(this.knowledgeDir);
+    const docs = path.resolve(base.docsDir);
+    return docs === root || docs.startsWith(root + path.sep);
+  }
+
   list(): KnowledgeBase[] {
     return [...this.bases.values()].sort((a, b) =>
       a.manifest.id.localeCompare(b.manifest.id),

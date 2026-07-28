@@ -46,6 +46,25 @@ describe("the manual served over MCP (MC-09)", () => {
     }
   });
 
+  /**
+   * The guide told a session to use a `curate` pack that PE-14 removed months earlier, and it
+   * planned around it. A document that is confidently out of date is worse than one that is
+   * missing: this test is the reason the next pack change cannot leave it behind.
+   */
+  it("offers only packs that exist, and does not present a retired one as a choice", () => {
+    const policies = (guide("policies") as { content: string }).content;
+    for (const real of ["| read |", "| build |", "| build-network |"]) {
+      expect(policies, `the pack table lost ${real}`).toContain(real);
+    }
+    for (const gone of ["| curate |", "| probe |", "| default |", "| no-write |", "| test |"]) {
+      expect(policies, `${gone} is a retired pack presented as a choice`).not.toContain(gone);
+    }
+    // Curating knowledge is a capability on the profile now, and the guide has to say so or the
+    // reader concludes it is impossible.
+    const all = TOPIC_ORDER.map((t) => (guide(t) as { content: string }).content).join("\n");
+    expect(all).toContain("capabilities: [knowledge_write]");
+  });
+
   it("teaches the rules a client cannot infer from the tool list", () => {
     const all = TOPIC_ORDER.map((t) => (guide(t) as { content: string }).content).join("\n");
     for (const idea of [

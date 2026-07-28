@@ -52,8 +52,14 @@ export type ClassifyInput = {
    * the phase 3 behaviour and remains the safe default.
    */
   workspacePath?: string;
-  /** Base id this project may write into, if any (KB-05). */
+  /** Base id this project may write into, if any (KB-05). Used for the reason it gives. */
   writableKnowledgeBase?: string | undefined;
+  /**
+   * Where that base's documents actually live, absolute (KB-05 amended, §17.1b). Given when the
+   * base is known: `knowledge/<id>/` is only its default, and a base reading from a subfolder of
+   * `knowledge/` would otherwise have its own writes classified as an escape.
+   */
+  writableKnowledgeDir?: string | undefined;
   /**
    * Absolute paths of the workspace directories this project may **read** (PE-09, §9.5). A read
    * inside one of them is `project_read`; a write is still `outside_workspace`, which the hard
@@ -875,8 +881,16 @@ export class Classifier {
       if (!writing) {
         return { class: "project_read", reason: `read of curated knowledge: ${target}` };
       }
-      const writable = input.writableKnowledgeBase;
-      if (writable && Classifier.isInside(path.join(knowledgeRoot, writable), resolved)) {
+      // The base's real documents directory, which is `knowledge/<id>/` for most bases and a
+      // subfolder for one that reads from deeper inside `knowledge/` (KB-05 amended, §17.1b).
+      // Deriving it from the id was why a nested base could be attached as writable and then have
+      // every write to it denied as `outside_workspace`.
+      const writableDir =
+        input.writableKnowledgeDir ??
+        (input.writableKnowledgeBase
+          ? path.join(knowledgeRoot, input.writableKnowledgeBase)
+          : undefined);
+      if (writableDir && Classifier.isInside(writableDir, resolved)) {
         return { class: "knowledge_write", reason: `write into the project's base: ${target}` };
       }
       return {

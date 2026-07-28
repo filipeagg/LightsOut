@@ -84,6 +84,45 @@ describe("document formats (KB-08)", () => {
   });
 });
 
+/**
+ * KB-05 amended (§17.1b). The rule is about ownership, not depth: a base reading from a subfolder
+ * of `knowledge/` is in the knowledge area and may be curated; one reading from the user's own tree
+ * may not. `knowledge/hispatec/mercado` being uncurateable was the failure that moved this.
+ */
+describe("which base owns its documents (KB-05b)", () => {
+  const loaderWith = async (source?: string) => {
+    const loader = new KnowledgeLoader(workspace);
+    const writer = new KnowledgeWriter(loader);
+    await loader.load();
+    await writer.putManifest("mercado", {
+      name: "Mercado",
+      kind: "market",
+      ...(source ? { source } : {}),
+    });
+    return loader;
+  };
+
+  it("owns a base that keeps its documents in its own folder", async () => {
+    const loader = await loaderWith();
+    expect(loader.ownsItsDocuments("mercado")).toBe(true);
+  });
+
+  it("owns a base that reads from deeper inside knowledge/", async () => {
+    await write("knowledge/hispatec/mercado/index.md", "# mercado");
+    const loader = await loaderWith("knowledge/hispatec/mercado");
+    expect(loader.getOrThrow("mercado").docsDir).toBe(
+      path.resolve(workspace, "knowledge/hispatec/mercado"),
+    );
+    expect(loader.ownsItsDocuments("mercado")).toBe(true);
+  });
+
+  it("does not own a base that reads someone else's folder", async () => {
+    await write("docs/platform/data-model.md", "# tables");
+    const loader = await loaderWith("docs/platform");
+    expect(loader.ownsItsDocuments("mercado")).toBe(false);
+  });
+});
+
 describe("a linked base", () => {
   it("reads its documents from the folder and keeps its own index", async () => {
     await write("docs/platform/data-model.md", "# tables");

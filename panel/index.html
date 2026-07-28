@@ -2501,6 +2501,10 @@ function viewTriggers() {
       the container's clock (<code>${esc(t.timezone || "UTC")}</code>). A firing that lands while the
       project is busy or paused is skipped and says so; one missed because the machine was off runs
       once at the next boot.</p>
+    <p class="sub"><b>One trigger runs the whole plan.</b> Point it at the first phase: when a phase
+      closes ok the next one starts on its own, and relaunching a repeatable phase puts the
+      repeatable phases after it back in the queue. You only need a second trigger for work that has
+      nothing to do with the first.</p>
     <div class="row" style="margin-bottom:16px">
       <button class="btn primary" onclick="editing='new-trigger';refreshSchedulePreview()">New trigger</button>
     </div>
@@ -2667,8 +2671,8 @@ function triggerForm(projects, agents) {
     </div>
     ${schedulePicker()}
     <div class="row wrap" style="gap:16px">
-      <label class="tiny">Repeatable phase<br>
-        <select id="tg-phase" ${window.__triggerProject ? "" : "disabled"}>
+      <label class="tiny">Start at this phase<br>
+        <select id="tg-phase" onchange="paint()" ${window.__triggerProject ? "" : "disabled"}>
           ${!window.__triggerProject
             ? `<option value="">choose a project first</option>`
             : repeatable.length === 0
@@ -2686,6 +2690,7 @@ function triggerForm(projects, agents) {
           ${agents.filter((a) => !a.advisor).map((a) => `<option value="${esc(a.id)}">${esc(a.name || a.id)}</option>`).join("")}
         </select></label>
     </div>
+    ${phaseChainNote()}
     <label class="tiny">Request — what is asked, every time it fires<br>
       <textarea id="tg-request" rows="3" style="width:100%"></textarea></label>
     <label class="tiny">Expects — what comes back, and how anyone knows (OR-10)<br>
@@ -2697,13 +2702,58 @@ function triggerForm(projects, agents) {
   </div>`;
 }
 
+/**
+ * What one trigger actually runs (TP-07, §16.2).
+ *
+ * "Repeatable phase" read as "pick the one phase that runs", and the obvious question followed:
+ * how do I run the whole plan? You already do — a phase that closes ok launches the next pending
+ * one, so choosing the first phase runs the sequence. Nothing in the form said so, so the form now
+ * shows the sequence it is about to schedule.
+ */
+function phaseChainNote() {
+  if (!window.__triggerProject) return "";
+  const all = window.__triggerPhasesAll || [];
+  const chosen = $("tg-phase") ? $("tg-phase").value : "";
+  if (!chosen || all.length === 0) return "";
+  const from = all.findIndex((p) => p.ref === chosen);
+  if (from === -1) return "";
+  // What the chain will actually do: this phase, then every later one that is not skipped, each
+  // starting when the previous closes ok. A human gate stops there until somebody answers it.
+  const sequence = all.slice(from).filter((p) => p.status !== "skipped");
+  const gateAt = sequence.findIndex((p) => p.gate === "human");
+  return `<div class="note" style="margin:12px 0">
+    <b>Runs:</b> ${sequence
+      .map((p, i) => `${i > 0 ? " → " : ""}<code>${esc(p.ref)}</code>`)
+      .join("")}
+    <div class="tiny muted">One trigger is enough for the whole plan: each phase starts when the
+      previous one closes ok. ${sequence.length > 1
+        ? `The request and expects below belong to <code>${esc(sequence[0].ref)}</code>; the phases
+           after it get theirs derived from the plan.`
+        : `This is the last phase, so nothing follows it.`}</div>
+    ${gateAt > 0
+      ? `<div class="tiny" style="color:var(--amber)">It stops at
+           <code>${esc(sequence[gateAt].ref)}</code>, which has a human gate: unattended runs answer
+           permissions, not questions. Nothing after it runs until somebody answers.</div>`
+      : ""}
+  </div>`;
+}
+
 /** The phases a trigger may fire are the repeatable ones (TP-07), so the select shows only those. */
 async function loadTriggerPhases(projectId) {
   window.__triggerProject = projectId;
   window.__triggerPhases = [];
+  window.__triggerPhasesAll = [];
   if (projectId) {
     const data = await api(`/api/projects/${encodeURIComponent(projectId)}/phases`).catch(() => null);
     const phases = (data && data.phases) || [];
+    // Kept whole as well: the sequence a trigger sets off includes the phases that are not
+    // repeatable, because a phase that closes ok starts the next pending one whatever it is.
+    window.__triggerPhasesAll = phases.map((p) => ({
+      ref: p.ref,
+      title: p.title,
+      gate: p.gate,
+      status: p.status,
+    }));
     window.__triggerPhases = phases.filter((p) => p.repeatable).map((p) => ({ ref: p.ref, title: p.title }));
   }
   paint();

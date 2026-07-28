@@ -26,19 +26,29 @@ here="$(cd "$(dirname "$0")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-command -v git-filter-repo >/dev/null 2>&1 || {
-  echo "ERROR: git-filter-repo not found." >&2
+# On Windows, pip installing git-filter-repo sometimes fails to write the .exe wrapper (a
+# WinError 2 renaming it into place) while still installing the underlying module fine, so the
+# package is importable but the command is not on PATH. Fall back to `python -m git_filter_repo`
+# in that case rather than telling the user to reinstall something that already installed.
+if command -v git-filter-repo >/dev/null 2>&1; then
+  filter_repo() { git-filter-repo "$@"; }
+elif command -v python3 >/dev/null 2>&1 && python3 -c "import git_filter_repo" >/dev/null 2>&1; then
+  filter_repo() { python3 -m git_filter_repo "$@"; }
+elif command -v python >/dev/null 2>&1 && python -c "import git_filter_repo" >/dev/null 2>&1; then
+  filter_repo() { python -m git_filter_repo "$@"; }
+else
+  echo "ERROR: git-filter-repo not found (checked the command and the Python module)." >&2
   echo "  pip install git-filter-repo --break-system-packages" >&2
   echo "  (or: brew install git-filter-repo)" >&2
   exit 1
-}
+fi
 
 echo "Cloning working copy into $work ..."
 git clone --no-hardlinks "$here" "$work/mirror" >/dev/null
 cd "$work/mirror"
 
 echo "Stripping internal-only paths from every commit ..."
-git filter-repo --force \
+filter_repo --force \
   --paths-from-file "$here/scripts/publish-mirror-exclude.txt" --invert-paths
 
 # Belt and braces: if an excluded path is ever re-added by hand after this point, it stays

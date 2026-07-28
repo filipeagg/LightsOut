@@ -579,6 +579,10 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
           name: z.string().min(1).optional(),
           every: everyBody.optional(),
           cron: z.string().min(1).optional(),
+          // TR-09 amended: the project and the target are editable too, and revalidated.
+          projectId: z.string().min(1).optional(),
+          phase: z.string().min(1).optional(),
+          agentId: z.string().min(1).optional(),
           title: z.string().min(1).optional(),
           request: z.string().min(1).optional(),
           expects: z.string().min(1).optional(),

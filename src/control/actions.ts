@@ -794,23 +794,7 @@ export class Actions {
     if (!input.request.trim() || !input.expects.trim()) {
       throw new Error("a trigger states its request and what it expects back, like any launch (OR-10)");
     }
-    if ((input.phase ? 1 : 0) + (input.agentId ? 1 : 0) !== 1) {
-      throw new Error("a trigger fires either a phase or a task with an agent, not both and not neither");
-    }
-
-    if (input.phase) {
-      const phases = this.need(this.deps.phases, "phases");
-      const row = phases.list(project.id).find((p) => p.phase_id === input.phase || p.id === input.phase);
-      if (!row) throw new Error(`unknown phase: ${input.phase}`);
-      if (!row.repeatable) {
-        throw new Error(
-          `phase ${row.phase_id} is not repeatable, so it can only run once: a trigger needs a ` +
-            "phase that may run again (TP-07)",
-        );
-      }
-    } else {
-      this.requireLaunchable(input.agentId!);
-    }
+    this.requireTriggerTarget(project.id, input);
 
     let unattendedTurnedOn = false;
     if (!project.unattended) {
@@ -843,6 +827,37 @@ export class Actions {
   }
 
   /**
+   * What a trigger fires has to exist and be able to run again (TR-02, TP-07). Shared by create and
+   * edit, because an edit that could leave a trigger pointing at nothing would be a worse feature
+   * than not being able to edit it — which is what it was until 2026-07-28.
+   */
+  private requireTriggerTarget(
+    projectId: string,
+    target: { phase?: string | undefined; agentId?: string | undefined },
+  ): void {
+    if ((target.phase ? 1 : 0) + (target.agentId ? 1 : 0) !== 1) {
+      throw new Error(
+        "a trigger fires either a phase or a task with an agent, not both and not neither",
+      );
+    }
+    if (target.phase) {
+      const phases = this.need(this.deps.phases, "phases");
+      const row = phases
+        .list(projectId)
+        .find((p) => p.phase_id === target.phase || p.id === target.phase);
+      if (!row) throw new Error(`unknown phase in ${projectId}: ${target.phase}`);
+      if (!row.repeatable) {
+        throw new Error(
+          `phase ${row.phase_id} is not repeatable, so it can only run once: a trigger needs a ` +
+            "phase that may run again (TP-07)",
+        );
+      }
+      return;
+    }
+    this.requireLaunchable(target.agentId!);
+  }
+
+  /**
    * One schedule, stated either way (TR-08). `every` is the ordinary-language form the panel's
    * picker and a client that does not speak cron use; `cron` is the escape hatch.
    */
@@ -857,13 +872,24 @@ export class Actions {
     );
   }
 
+  /**
+   * Edit anything about a trigger, including the project and what it fires (TR-09 amended).
+   *
+   * It used to refuse both on the grounds that "a different target is a different trigger", which
+   * was aesthetics dressed as a rule: moving a nightly plan from one phase of a project to another
+   * is an adjustment, and being told to delete and retype it was the wrong answer. What the edit may
+   * not do is leave a trigger pointing at nothing, so it revalidates exactly as creating does.
+   */
   updateTrigger(
     actor: Actor,
     triggerId: string,
     patch: {
+      projectId?: string;
       name?: string;
       cron?: string;
       every?: Schedule;
+      phase?: string;
+      agentId?: string;
       request?: string;
       expects?: string;
       title?: string;
@@ -871,11 +897,40 @@ export class Actions {
     },
   ): TriggerRow & { nextFireAt: string | null; schedule: string; caveat?: string } {
     const current = this.deps.repos.triggers.getOrThrow(triggerId);
-    const { every, ...rest } = patch;
+    const { every, phase, agentId, projectId, ...rest } = patch;
     const cron =
       every || patch.cron !== undefined ? this.cronFrom({ ...(patch.cron !== undefined ? { cron: patch.cron } : {}), ...(every ? { every } : {}) }) : undefined;
+
+    // The target is validated against the project it will belong to after the edit, not the one it
+    // belonged to before: moving a trigger to another project moves what it fires with it.
+    const nextProject = projectId ?? current.project_id;
+    let target: { phaseRef?: string | null; agentId?: string | null } = {};
+    if (phase !== undefined || agentId !== undefined || projectId !== undefined) {
+      const wanted = {
+        ...(phase !== undefined
+          ? { phase }
+          : agentId === undefined && current.phase_ref
+            ? { phase: current.phase_ref }
+            : {}),
+        ...(agentId !== undefined
+          ? { agentId }
+          : phase === undefined && current.agent_id
+            ? { agentId: current.agent_id }
+            : {}),
+      };
+      this.project(nextProject);
+      this.requireNotArchived(nextProject);
+      this.requireTriggerTarget(nextProject, wanted);
+      // One statement sets one and clears the other: the table's CHECK allows exactly one.
+      target = wanted.phase
+        ? { phaseRef: wanted.phase, agentId: null }
+        : { phaseRef: null, agentId: wanted.agentId! };
+    }
+
     const row = this.deps.repos.triggers.update(current.id, {
       ...rest,
+      ...(projectId === undefined ? {} : { projectId }),
+      ...target,
       ...(cron === undefined ? {} : { cron }),
     });
     this.changed("trigger", row.id, actor);

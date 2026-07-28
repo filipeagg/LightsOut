@@ -2531,7 +2531,7 @@ function viewTriggers() {
           <button class="btn sm danger" onclick="deleteTrigger('${esc(x.id)}','${esc(x.name)}')">Delete</button>
         </div>
       </div>
-      ${editing === `trigger:${x.id}` ? triggerEditForm(x) : ""}
+      ${editing === `trigger:${x.id}` ? triggerForm(projects, agents, x) : ""}
     </div>`).join("")}`;
 }
 
@@ -2658,16 +2658,26 @@ function schedulePicker() {
   </div>`;
 }
 
-function triggerForm(projects, agents) {
+/**
+ * One form for creating and for editing (TR-09 amended).
+ *
+ * The edit form used to be a different, smaller thing that hid the project and the phase behind a
+ * grey sentence saying to delete and recreate the trigger. That was aesthetics dressed as a rule:
+ * moving a nightly plan to another phase is an adjustment. Same fields either way, so what a
+ * trigger *is* is visible in the place where you change it.
+ */
+function triggerForm(projects, agents, existing) {
   const repeatable = (window.__triggerPhases || []);
+  const value = existing || {};
   return `<div class="card pad" style="margin-bottom:16px">
     <div class="row wrap" style="gap:16px">
       <label class="tiny">Project<br>
         <select id="tg-project" onchange="loadTriggerPhases(this.value)">
-          <option value="">(choose one)</option>
+          ${existing ? "" : `<option value="">(choose one)</option>`}
           ${projects.map((p) => `<option value="${esc(p.id)}" ${p.id === window.__triggerProject ? "selected" : ""}>${esc(p.name || p.id)}</option>`).join("")}
         </select></label>
-      <label class="tiny">Name<br><input id="tg-name" placeholder="Daily sector digest"></label>
+      <label class="tiny">Name<br>
+        <input id="tg-name" placeholder="Daily sector digest" value="${esc(value.name || "")}"></label>
     </div>
     ${schedulePicker()}
     <div class="row wrap" style="gap:16px">
@@ -2678,7 +2688,8 @@ function triggerForm(projects, agents) {
             : repeatable.length === 0
               ? `<option value="">this project has no repeatable phase</option>`
               : `<option value="">(a free task instead)</option>` +
-                repeatable.map((p) => `<option value="${esc(p.ref)}">${esc(p.title)}</option>`).join("")}
+                repeatable.map((p) => `<option value="${esc(p.ref)}" ${
+                  p.ref === value.phase ? "selected" : ""}>${esc(p.title)}</option>`).join("")}
         </select>
         ${window.__triggerProject && repeatable.length === 0
           ? `<div class="tiny muted" style="max-width:30ch">Only a repeatable phase can fire again
@@ -2687,16 +2698,18 @@ function triggerForm(projects, agents) {
       <label class="tiny">…or agent, for a free task<br>
         <select id="tg-agent">
           <option value="">(none)</option>
-          ${agents.filter((a) => !a.advisor).map((a) => `<option value="${esc(a.id)}">${esc(a.name || a.id)}</option>`).join("")}
+          ${agents.filter((a) => !a.advisor).map((a) => `<option value="${esc(a.id)}" ${
+            a.id === value.agentId ? "selected" : ""}>${esc(a.name || a.id)}</option>`).join("")}
         </select></label>
     </div>
     ${phaseChainNote()}
     <label class="tiny">Request — what is asked, every time it fires<br>
-      <textarea id="tg-request" rows="3" style="width:100%"></textarea></label>
+      <textarea id="tg-request" rows="3" style="width:100%">${esc(value.request || "")}</textarea></label>
     <label class="tiny">Expects — what comes back, and how anyone knows (OR-10)<br>
-      <textarea id="tg-expects" rows="2" style="width:100%"></textarea></label>
+      <textarea id="tg-expects" rows="2" style="width:100%">${esc(value.expects || "")}</textarea></label>
     <div class="row" style="gap:8px;margin-top:12px">
-      <button class="btn primary" onclick="createTrigger()">Create</button>
+      <button class="btn primary" onclick="${existing ? `saveTrigger('${esc(value.id)}')` : "createTrigger()"}">
+        ${existing ? "Save" : "Create"}</button>
       <button class="btn" onclick="editing=null;paint()">Cancel</button>
     </div>
   </div>`;
@@ -2779,42 +2792,31 @@ async function createTrigger() {
  * shape this trigger was built from (`every`), so a weekday schedule reopens as weekday buttons
  * and only a cron nothing can express reopens as cron.
  */
-function openTriggerEdit(id) {
+/** Open the shared form on an existing trigger: same fields, so nothing about it is hidden. */
+async function openTriggerEdit(id) {
   const trigger = ((store.triggers && store.triggers.triggers) || []).find((t) => t.id === id);
   if (!trigger) return;
   editing = `trigger:${id}`;
   window.__schedule = { ...scheduleState(), ...(trigger.every || {}) };
+  // The phase list belongs to *its* project, and the selects need it before they can show what it
+  // fires. `loadTriggerPhases` paints when it lands.
+  await loadTriggerPhases(trigger.projectId);
   void refreshSchedulePreview();
 }
 
-function triggerEditForm(x) {
-  return `<div class="card pad" style="margin-top:12px">
-    <div class="row wrap" style="gap:16px">
-      <label class="tiny">Name<br><input id="tg-e-name" value="${esc(x.name)}"></label>
-      <div class="tiny muted" style="align-self:flex-end">
-        ${x.phase ? `fires phase <code>${esc(x.phase)}</code>` : `fires a task for <code>${esc(x.agentId || "")}</code>`}
-        — change that by deleting and creating it again
-      </div>
-    </div>
-    ${schedulePicker()}
-    <label class="tiny">Request — what is asked, every time it fires<br>
-      <textarea id="tg-e-request" rows="3" style="width:100%">${esc(x.request)}</textarea></label>
-    <label class="tiny">Expects — what comes back, and how anyone knows (OR-10)<br>
-      <textarea id="tg-e-expects" rows="2" style="width:100%">${esc(x.expects)}</textarea></label>
-    <div class="row" style="gap:8px;margin-top:12px">
-      <button class="btn primary" onclick="saveTrigger('${esc(x.id)}')">Save</button>
-      <button class="btn" onclick="editing=null;paint()">Cancel</button>
-    </div>
-  </div>`;
-}
-
 async function saveTrigger(id) {
-  await act("PUT", `/api/triggers/${encodeURIComponent(id)}`, {
-    name: field("tg-e-name"),
+  const payload = {
+    name: field("tg-name"),
     every: scheduleFromForm(),
-    request: $("tg-e-request").value,
-    expects: $("tg-e-expects").value,
-  });
+    request: $("tg-request").value,
+    expects: $("tg-expects").value,
+    projectId: field("tg-project"),
+  };
+  // Exactly one target, the same rule the server enforces: a phase, or an agent for a free task.
+  if (field("tg-phase")) payload.phase = field("tg-phase");
+  else if (field("tg-agent")) payload.agentId = field("tg-agent");
+  else { store.error = "choose the phase it starts at, or an agent for a free task"; return paint(); }
+  await act("PUT", `/api/triggers/${encodeURIComponent(id)}`, payload);
 }
 
 /**

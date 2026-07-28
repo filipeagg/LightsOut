@@ -579,12 +579,25 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
 
   tool(
     "write_trigger",
-    "Edit a trigger, or turn it off without losing it (TR-01, TR-06).",
+    "Edit a trigger, or turn it off without losing it (TR-01, TR-06). Everything is editable, " +
+      "including the project and what it fires; the target is revalidated, so an edit cannot " +
+      "leave it pointing at a phase that does not exist or is not repeatable.",
     {
       triggerId: z.string().min(1),
       name: z.string().min(1).optional(),
       every: everySchema.optional().describe("A new schedule in ordinary terms (TR-08)."),
       cron: z.string().min(1).optional(),
+      projectId: z.string().min(1).optional().describe("Move it to another project."),
+      phase: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Fire this repeatable phase instead. Clears the agent."),
+      agentId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Fire a free task on this agent instead. Clears the phase."),
       title: z.string().min(1).optional(),
       request: z.string().min(1).optional(),
       expects: z.string().min(1).optional(),

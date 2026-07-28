@@ -37,7 +37,12 @@ export type CreateTrigger = {
   createdBy: string;
 };
 
-export type UpdateTrigger = Partial<Omit<CreateTrigger, "projectId" | "createdBy">>;
+/**
+ * Everything about a trigger is editable, including which project and which phase (TR-09 amended).
+ * `phaseRef` and `agentId` are nullable on purpose: switching from a phase to a free task sets one
+ * and clears the other in the same statement, which is what the table's CHECK requires.
+ */
+export type UpdateTrigger = Partial<Omit<CreateTrigger, "createdBy">>;
 
 export class TriggersRepo {
   constructor(private readonly db: Db) {}
@@ -97,6 +102,7 @@ export class TriggersRepo {
 
   update(id: string, patch: UpdateTrigger): TriggerRow {
     const columns: Record<keyof UpdateTrigger, string> = {
+      projectId: "project_id",
       name: "name",
       cron: "cron",
       phaseRef: "phase_ref",
@@ -110,6 +116,7 @@ export class TriggersRepo {
     const values: unknown[] = [];
     for (const [key, column] of Object.entries(columns) as [keyof UpdateTrigger, string][]) {
       const value = patch[key];
+      // `null` is a value here — it is how a target is cleared — so only `undefined` is skipped.
       if (value === undefined) continue;
       sets.push(`${column} = ?`);
       values.push(typeof value === "boolean" ? (value ? 1 : 0) : value);

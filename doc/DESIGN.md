@@ -1672,6 +1672,14 @@ The bridge holds no state and no DB handle (single-writer preserved, ST-02).
 
 Uniform envelope: success `{ok:true, …}`; failure `{ok:false, error:{code,message}}`. Codes: `NOT_FOUND`, `INVALID_INPUT`, `PROJECT_LOCKED`, `AUTH_REQUIRED`, `CONFLICT`, `INTERNAL`. All ids are strings. Fields marked `?` optional.
 
+**Parity is checked both ways (WP-02b).** The test used to ask only "does every action have a
+tool?", and that is exactly how `launch_task` came to have a tool and no route: the panel's only
+launch button belonged to a phase, so a project created without a template — no phases — could not
+be given any work at all from the browser, and its empty phase list said "launch tasks through
+Claude Desktop". `test/mcp-parity.test.ts` now captures the registered routes the same way it
+captures the tools and fails when either side is missing one. `POST /api/projects/:id/tasks` is the
+route that was missing; one task, or several as a chain.
+
 **Parity with the panel (MC-07).** Every action in `src/control/actions.ts` is reachable from both
 surfaces, with one deliberate exception: **the vault**. `list_vault` shows labels, URLs and field
 names; there is no tool that writes one. A value written through MCP would travel through the

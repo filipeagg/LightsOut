@@ -2311,6 +2311,32 @@ after today's slot does not fire for it: `created_at` is the floor.
 and says so. The alternative — a digest that stops at 03:00 on a permission gate — is the failure
 OR-12 exists to prevent, and a trigger is the strongest possible statement that nobody is watching.
 
+### 21.3b Flags reach the program, or they are not added (PV-04 amended)
+
+**The failure.** `npm run dev --host 0.0.0.0 --port 5170 --strictPort` reads correctly and does
+nothing: npm keeps those flags for itself, so the script ran as `vite 0.0.0.0 5170`, vite ignored
+the positional junk and bound `localhost:5173`, and the panel offered a link to 5170 where nothing
+was listening. Every layer behaved as written; the composition was wrong.
+
+Two rules now, and the second matters more than the first:
+
+1. **A package script needs `--`.** `npm run dev -- --host 0.0.0.0 --port <n>` for npm, pnpm and
+   bun; yarn forwards without it and warns about it, so yarn does not get one. Never added twice.
+2. **A flag is only added to a program that has been identified.** Behind `npm run dev` there may be
+   vite, `next dev`, `node server.js` or anything. While the flags were being eaten this was
+   harmless; now that they arrive, an invented flag is a crash instead of a silent no-op. So
+   `package.json`'s script body is read and the flags of *that* program are used — `--hostname` for
+   next, `--strictPort` only for vite — and an unrecognised program is left exactly as written and
+   steered with `PORT` and `HOST`, which the manager already puts in its environment.
+
+The normalisation is recorded on the row and shown in the panel, which is how this was diagnosed at
+all: the card showed the command it ran and the log showed vite announcing a different port.
+
+**And a dead preview says so.** The row said `running` while the process was gone, and the panel
+still rendered the link. `alive` (the row is running *and* the pid answers) was already computed and
+was not used; now a preview whose process has died shows the URL struck through, names its log and
+offers Stop. A link that cannot work is worse than no link.
+
 **Cron.** Five fields, standard, no seconds and no `@daily` aliases: the parser is thirty lines and
 lives in `src/triggers/cron.ts`, because a dependency for this would be a dependency to audit
 forever. Times are the container's, which is UTC unless the compose file says otherwise, and the

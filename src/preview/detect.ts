@@ -39,7 +39,8 @@ const BUILD_DIRS = ["dist", "build", "out", "public", "_site", "site"];
 /** Scripts worth serving, best first. `start` is last: it is often a server, not a preview. */
 const DEV_SCRIPTS = ["dev", "serve", "preview", "start"];
 
-function packageScripts(projectPath: string): Record<string, string> {
+/** The project's own scripts. Exported: normalisation needs to know what `npm run dev` runs. */
+export function packageScripts(projectPath: string): Record<string, string> {
   const file = path.join(projectPath, "package.json");
   if (!existsSync(file)) return {};
   try {

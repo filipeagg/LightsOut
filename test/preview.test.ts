@@ -14,6 +14,7 @@ import path from "node:path";
 import { Classifier } from "../src/policy/classify.js";
 import { PolicyEngine } from "../src/policy/engine.js";
 import { normalisePreviewCommand } from "../src/preview/normalise.js";
+import { LO_SERVE } from "../src/preview/detect.js";
 import { parseArgs, resolveFile } from "../src/preview/serve.js";
 
 const PROJECT = "/workspace/projects/portal";
@@ -83,14 +84,64 @@ describe("running one inline (PV-02)", () => {
 });
 
 describe("normalisePreviewCommand (PV-04)", () => {
-  it("binds 0.0.0.0 and takes the allocated port", () => {
-    const { command, notes } = normalisePreviewCommand("npm run dev", 5171);
-    expect(command).toContain("--host 0.0.0.0");
-    expect(command).toContain("--port 5171");
-    expect(notes.length).toBeGreaterThan(0);
+  /**
+   * The 2026-07-28 failure, as a test. `npm run dev --host 0.0.0.0 --port 5170` looks right and
+   * is not: npm keeps the flags, the script ran as `vite 0.0.0.0 5170`, vite bound localhost:5173,
+   * and the panel offered a link to 5170 where nothing was listening.
+   */
+  it("passes the flags to the script, not to npm", () => {
+    const { command, notes } = normalisePreviewCommand("npm run dev", 5171, {
+      scripts: { dev: "vite" },
+    });
+    expect(command).toBe("npm run dev -- --host 0.0.0.0 --port 5171 --strictPort");
+    expect(notes.join(" ")).toMatch(/after --/);
   });
 
-  it("adds --strictPort so a busy port is an error, not a move off the published range", () => {
+  it("does not add a second separator when the command already has one", () => {
+    const { command } = normalisePreviewCommand("npm run dev -- --open", 5171, {
+      scripts: { dev: "vite" },
+    });
+    expect(command).toBe("npm run dev -- --open --host 0.0.0.0 --port 5171 --strictPort");
+  });
+
+  it("yarn forwards without a separator", () => {
+    expect(normalisePreviewCommand("yarn dev", 5171, { scripts: { dev: "vite" } }).command).toBe(
+      "yarn dev --host 0.0.0.0 --port 5171 --strictPort",
+    );
+  });
+
+  /**
+   * The other half of the lesson: once the flags actually reach the script, guessing stops being
+   * harmless. An unknown flag is a crash, so a program nobody identified is steered with PORT and
+   * HOST — which the manager sets — and the command is left exactly as written.
+   */
+  it("adds nothing to a program it cannot identify, and says why", () => {
+    const { command, notes } = normalisePreviewCommand("npm run dev", 5171, {
+      scripts: { dev: "node server.js" },
+    });
+    expect(command).toBe("npm run dev");
+    expect(notes.join(" ")).toMatch(/PORT and HOST/);
+  });
+
+  it("adds nothing when package.json was not readable either", () => {
+    expect(normalisePreviewCommand("npm run dev", 5171).command).toBe("npm run dev");
+    expect(normalisePreviewCommand("uvicorn app:api", 5173).command).toBe("uvicorn app:api");
+  });
+
+  it("knows next's flag is --hostname, and that it has no --strictPort", () => {
+    const { command } = normalisePreviewCommand("npm run dev", 5170, {
+      scripts: { dev: "next dev" },
+    });
+    expect(command).toBe("npm run dev -- --hostname 0.0.0.0 --port 5170");
+    expect(command).not.toContain("--strictPort");
+  });
+
+  it("serves lo-serve without a separator and without --strictPort", () => {
+    const { command } = normalisePreviewCommand(`${LO_SERVE} --root src`, 5170);
+    expect(command).toBe(`${LO_SERVE} --root src --host 0.0.0.0 --port 5170`);
+  });
+
+  it("adds --strictPort to vite: a busy port must be an error, not a move off the pool", () => {
     expect(normalisePreviewCommand("vite", 5170).command).toContain("--strictPort");
   });
 
@@ -100,17 +151,18 @@ describe("normalisePreviewCommand (PV-04)", () => {
     expect(command).not.toContain("--host 0.0.0.0");
   });
 
+  it("respects a port the script already fixes, on either side of the runner", () => {
+    expect(
+      normalisePreviewCommand("npm run dev", 5170, { scripts: { dev: "vite --port 4000" } })
+        .command,
+    ).not.toContain("--port 5170");
+  });
+
   it("handles python's positional port and --bind", () => {
     const { command } = normalisePreviewCommand("python3 -m http.server", 5172);
     expect(command).toContain("--bind 0.0.0.0");
     expect(command).toMatch(/http\.server\s+5172/);
-  });
-
-  it("does not add --strictPort to something that has never heard of it", () => {
-    expect(normalisePreviewCommand("python3 -m http.server", 5172).command).not.toContain(
-      "--strictPort",
-    );
-    expect(normalisePreviewCommand("uvicorn app:api", 5173).command).not.toContain("--strictPort");
+    expect(command).not.toContain("--strictPort");
   });
 });
 

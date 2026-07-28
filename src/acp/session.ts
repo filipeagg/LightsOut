@@ -85,6 +85,8 @@ export type RunSessionDeps = {
   workspacePath?: string;
   /** The one base this project may write into, if any (KB-05). */
   writableKnowledgeBase?: string;
+  /** Where that base's documents live, absolute: `knowledge/<id>/` is only the default (§17.1b). */
+  writableKnowledgeDir?: string;
   /** Absolute paths of the workspace directories this project may read (PE-09). */
   readAreas?: string[];
   /** The subset of those it may also write to (PE-09 amended, §9.5). */
@@ -550,6 +552,9 @@ export class RunSession {
       ...(this.deps.workspacePath ? { workspacePath: this.deps.workspacePath } : {}),
       ...(this.deps.writableKnowledgeBase
         ? { writableKnowledgeBase: this.deps.writableKnowledgeBase }
+        : {}),
+      ...(this.deps.writableKnowledgeDir
+        ? { writableKnowledgeDir: this.deps.writableKnowledgeDir }
         : {}),
       // PE-09: the directories this project was allowed to read outside itself.
       ...(this.deps.readAreas?.length ? { readAreas: this.deps.readAreas } : {}),

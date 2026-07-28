@@ -3,6 +3,14 @@
 meta.topic: troubleshooting
 meta.first_move: health, then project_status or status_card, then get_history
 
+## a_tool_this_guide_names_is_not_in_my_session
+
+symptom: the guide documents `create_trigger`, `steer_run`, `patch_doc` — and calling one says no such tool.
+cause: the client cached the tool list when it connected, and this server has grown since. Nothing is wrong with the server, and `guide` is not lying.
+fix: reconnect the LightsOut connector (or restart the client). The list is fetched again on connect.
+check: the panel at http://127.0.0.1:8484 always has every action (MC-07), so it is also the way through while you are still on the old list.
+same_cause: an argument that is refused as unexpected — `templateReason`, `every`, `baseHash` — is a tool whose schema grew after your session started.
+
 ## nothing_starts
 
 symptom: launch returns queued: true and nothing runs.
@@ -25,7 +33,7 @@ read: the perm.request and perm.verdict events in the timeline; each carries the
 outside_workspace: the material lives outside the project. Declare an area (guide{topic:"areas"}), do not weaken the pack.
 other: an unmatched command reached a human. Add a matcher to the pack, or accept the gate.
 deps_install: dependencies change the build for every later run; that gate is deliberate.
-network: only the probe and test packs grant it.
+network: only the build-network pack grants it (and a vault entry with a base_url, for its host — VT-07).
 
 ## it_keeps_producing_the_same_document
 

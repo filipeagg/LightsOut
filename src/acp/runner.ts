@@ -100,6 +100,8 @@ export class TaskRunner {
     /** Hosts this run holds credentials for (VT-07); they carry a network grant with them. */
     vaultHosts?: string[];
     writableKnowledgeBase?: string;
+    /** Where that base's documents live: `knowledge/<id>/` is only the default (§17.1b). */
+    writableKnowledgeDir?: string;
   }> {
     const attachments = this.repos.projectKnowledge.list(project.id);
     const declaredWritable = attachments.find((row) => row.writable === 1)?.base_id;
@@ -123,6 +125,14 @@ export class TaskRunner {
       }
     }
 
+    // KB-05 amended (§17.1b): the classifier is told the real directory, not `knowledge/<id>`. A
+    // base that reads from a subfolder of knowledge/ would otherwise have every write to it
+    // classified as an escape — attachable and unusable.
+    const writableDir =
+      writable && this.context?.knowledge
+        ? this.context.knowledge.get(writable)?.docsDir
+        : undefined;
+
     let knowledgeBlock: string | undefined;
     if (this.context?.knowledge && attachments.length > 0) {
       const phase = this.repos.phases.getByTask(task.id);
@@ -143,6 +153,7 @@ export class TaskRunner {
         ...(knowledgeBlock ? { knowledgeBlock } : {}),
         vaultReads: [],
         ...(writable ? { writableKnowledgeBase: writable } : {}),
+        ...(writableDir ? { writableKnowledgeDir: writableDir } : {}),
       };
     }
 
@@ -164,6 +175,7 @@ export class TaskRunner {
         ...(knowledgeBlock ? { knowledgeBlock } : {}),
         vaultReads: [],
         ...(writable ? { writableKnowledgeBase: writable } : {}),
+        ...(writableDir ? { writableKnowledgeDir: writableDir } : {}),
       };
     }
 
@@ -330,6 +342,9 @@ export class TaskRunner {
       ...(context.vaultEnv ? { vaultEnv: context.vaultEnv } : {}),
       ...(context.writableKnowledgeBase
         ? { writableKnowledgeBase: context.writableKnowledgeBase }
+        : {}),
+      ...(context.writableKnowledgeDir
+        ? { writableKnowledgeDir: context.writableKnowledgeDir }
         : {}),
       // PE-09: what this project may read outside itself, resolved once before the session.
       ...(readAreas.length ? { readAreas: readAreas.map((area) => area.absolute) } : {}),

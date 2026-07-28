@@ -41,10 +41,11 @@ vite: use its own `server.proxy`; the preview log is where a bad target shows up
 
 step.1: `list_previews` — `alive: false` on a running row means the process died.
 step.2: `preview_log { previewId }` — a missing dependency, a port conflict or a bad proxy target says so here.
-step.3: a page that renders blank with no server error is usually a CDN link or a web font: the web-prototype pack has no network, deliberately.
+step.3: a page that renders blank with no server error is usually a CDN link or a web font, fetched by the browser from a network the `build` pack never had.
+step.4: the command the row shows is the one that ran, after normalisation. A package script gets its flags after `--`, and a program this system does not recognise gets none at all — it is steered with PORT and HOST (§21.3b).
 
 ## who_may_serve
 
-capability: `serve`, granted by the pack.
-pack: `web-prototype` — writes in the project, serves, installs into the project toolchain, **no network**.
-agent: `web-prototyper` (builtin). A prototype needing a real API is integration work and belongs on `integrator`.
+capability: `serve` on the **profile** — `capabilities: [serve]`, not a pack (PE-14).
+almost_nobody: preview_start owns the servers, so an agent needs this only to run one itself, which PV-02 says not to do.
+a_prototype_needing_a_real_api: integration work — `integrator`, on `build-network`.

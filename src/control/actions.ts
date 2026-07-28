@@ -1509,10 +1509,18 @@ export class Actions {
     const project = this.project(projectId);
     const base = this.need(this.deps.knowledge, "knowledge").getOrThrow(baseId);
     if (writable) {
-      if (base.source !== undefined) {
+      // KB-05 amended (§17.1b): what disqualifies a base is documents that belong to something
+      // else, not documents in a subfolder. A source under knowledge/ is still the knowledge area.
+      if (!this.need(this.deps.knowledge, "knowledge").ownsItsDocuments(baseId)) {
         throw new Error(
-          `${baseId} reads its documents from ${base.source}; a linked base cannot be the ` +
-            `writable one (KB-05, KB-08)`,
+          `${baseId} reads its documents from ${base.source}, which is outside knowledge/; a base ` +
+            "that reads someone else's folder cannot be the writable one (KB-05, KB-08). Move or " +
+            "copy the material under knowledge/ to curate it",
+        );
+      }
+      if (base.manifest.enforcement === "hard") {
+        throw new Error(
+          `${baseId} is a hard-rule base (KB-11c): rules a person owns are not rewritten by an agent`,
         );
       }
       const existing = this.deps.repos.projectKnowledge.writableBase(project.id);

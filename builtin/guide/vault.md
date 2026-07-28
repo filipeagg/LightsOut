@@ -14,7 +14,7 @@ resolution: values are placed in the environment of the adapter process, and onl
 ## writing_a_value
 
 surface: the panel only, on loopback. MCP cannot write a value, deliberately: a value sent through a tool call would travel through the conversation to get here (MC-07).
-test_only: an entry may be flagged test_only; the probe pack refuses anything else (VT-06).
+test_only: an entry may be flagged test_only; a pack with `vault.test_only_required` refuses anything else (VT-06).
 
 ## for_the_agent
 

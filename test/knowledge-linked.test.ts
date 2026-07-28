@@ -149,6 +149,19 @@ describe("what the curator is told about the base (KB-05c)", () => {
     expect(text).toMatch(/relative `knowledge\/…` resolves inside your project/);
   });
 
+  /**
+   * The edit tool scopes itself to the session's directory and refuses the base before LightsOut is
+   * asked. The engines' rule, not ours, and not worth a mechanism: the prompt says which tool to
+   * use, because an agent that reads the refusal as "read-only" gives up on a write it is allowed.
+   */
+  it("says the edit tool will refuse it, and what to use instead", () => {
+    const text = prompt({ baseId: "hispatec-mercado", dir: "/workspace/knowledge/hispatec-mercado" });
+    expect(text).toMatch(/structured edit tool will refuse/);
+    expect(text).toContain("cat > <base.dir>/index.md");
+    // And that it is not a policy denial, which is the wrong lesson to draw from it.
+    expect(text).toMatch(/not a policy\s*\n?denial|the policy allows this write/);
+  });
+
   it("says nothing about a base when the run has none to write", () => {
     expect(prompt()).not.toContain("The knowledge base you write into");
   });

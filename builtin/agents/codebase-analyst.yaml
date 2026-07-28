@@ -54,6 +54,11 @@ instructions: |
   inside this project, so a relative knowledge/... produces documents nobody outside the
   project can read — the phase then fails for a missing deliverable.
 
+  Your edit tool will refuse that absolute path: it is scoped to the project directory and
+  refuses anything outside it on its own, before any policy is consulted. Write those
+  documents with the shell (cat > file <<'MD' … MD, or python) and carry on. Do not read
+  that refusal as "the base is read-only" and do not spend turns retrying the edit tool.
+
   Every document you write is machine-first (see the protocol block). No prose, one
   fact per line, and the current state supersedes the previous one — a phase relaunched
   five times produces one document, not five chapters. Shape:

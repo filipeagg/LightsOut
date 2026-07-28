@@ -202,6 +202,8 @@ async function main(): Promise<void> {
   // 5f. Triggers (TR-01..07): launches with a clock on them. Catch-up first, so a slot missed
   // while the machine was off runs once before the clock starts ticking normally (TR-04).
   const scheduler = new Scheduler(repos, actions, bus);
+  // TR-09: and back, so a person can fire one by hand through the same path the clock takes.
+  actions.attachScheduler(scheduler);
   const caughtUp = await scheduler.catchUp();
   for (const outcome of caughtUp) {
     console.log(`[boot] trigger ${outcome.triggerId}: ${outcome.result}`);

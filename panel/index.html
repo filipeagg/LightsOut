@@ -326,6 +326,16 @@ async function act(method, path, payload) {
 
 /** One line naming what the server actually did, read from what it sent back. */
 function describeResult(method, path, body) {
+  // TR-09: a manual firing either launched or was refused, and the reason is the whole point of
+  // having pressed the button. Checked first because `result` is a plain sentence from the server.
+  if (body.triggerId && body.result !== undefined) {
+    return body.fired ? `Fired: ${body.result}.` : `Not fired — ${body.result}.`;
+  }
+  if (body.trigger) {
+    const t = body.trigger;
+    return `Saved "${t.name}": runs ${t.schedule || t.cron}` +
+      (t.nextFireAt ? `, next at ${String(t.nextFireAt).replace("T", " ").slice(0, 16)}.` : ".");
+  }
   if (body.base) {
     const where = body.inPlace
       ? ` — the folder itself is now the base`
@@ -2450,11 +2460,14 @@ function viewTriggers() {
           ${x.lastFiredAt ? `<div class="tiny muted">last: ${esc(x.lastResult || "")} (${esc(x.lastFiredAt)})</div>` : ""}
         </div>
         <div class="row" style="gap:6px">
+          <button class="btn sm primary" onclick="fireTrigger('${esc(x.id)}','${esc(x.name)}')">Run now</button>
+          <button class="btn sm" onclick="openTriggerEdit('${esc(x.id)}')">Edit</button>
           <button class="btn sm" onclick="toggleTrigger('${esc(x.id)}',${x.enabled ? "false" : "true"})">
             ${x.enabled ? "Disable" : "Enable"}</button>
           <button class="btn sm danger" onclick="deleteTrigger('${esc(x.id)}','${esc(x.name)}')">Delete</button>
         </div>
       </div>
+      ${editing === `trigger:${x.id}` ? triggerEditForm(x) : ""}
     </div>`).join("")}`;
 }
 
@@ -2641,6 +2654,58 @@ async function createTrigger() {
   if (field("tg-phase")) payload.phase = field("tg-phase");
   else if (field("tg-agent")) payload.agentId = field("tg-agent");
   await act("POST", `/api/projects/${encodeURIComponent(projectId)}/triggers`, payload);
+}
+
+/**
+ * TR-09: editing one. The schedule picker is the same one the create form uses, opened on the
+ * shape this trigger was built from (`every`), so a weekday schedule reopens as weekday buttons
+ * and only a cron nothing can express reopens as cron.
+ */
+function openTriggerEdit(id) {
+  const trigger = ((store.triggers && store.triggers.triggers) || []).find((t) => t.id === id);
+  if (!trigger) return;
+  editing = `trigger:${id}`;
+  window.__schedule = { ...scheduleState(), ...(trigger.every || {}) };
+  void refreshSchedulePreview();
+}
+
+function triggerEditForm(x) {
+  return `<div class="card pad" style="margin-top:12px">
+    <div class="row wrap" style="gap:16px">
+      <label class="tiny">Name<br><input id="tg-e-name" value="${esc(x.name)}"></label>
+      <div class="tiny muted" style="align-self:flex-end">
+        ${x.phase ? `fires phase <code>${esc(x.phase)}</code>` : `fires a task for <code>${esc(x.agentId || "")}</code>`}
+        — change that by deleting and creating it again
+      </div>
+    </div>
+    ${schedulePicker()}
+    <label class="tiny">Request — what is asked, every time it fires<br>
+      <textarea id="tg-e-request" rows="3" style="width:100%">${esc(x.request)}</textarea></label>
+    <label class="tiny">Expects — what comes back, and how anyone knows (OR-10)<br>
+      <textarea id="tg-e-expects" rows="2" style="width:100%">${esc(x.expects)}</textarea></label>
+    <div class="row" style="gap:8px;margin-top:12px">
+      <button class="btn primary" onclick="saveTrigger('${esc(x.id)}')">Save</button>
+      <button class="btn" onclick="editing=null;paint()">Cancel</button>
+    </div>
+  </div>`;
+}
+
+async function saveTrigger(id) {
+  await act("PUT", `/api/triggers/${encodeURIComponent(id)}`, {
+    name: field("tg-e-name"),
+    every: scheduleFromForm(),
+    request: $("tg-e-request").value,
+    expects: $("tg-e-expects").value,
+  });
+}
+
+/**
+ * Run it now (TR-09). Not a shortcut past the rules: the server refuses if a run of that project
+ * is in flight or its chain is paused, and says which — so the confirmation is worth reading.
+ */
+async function fireTrigger(id, name) {
+  if (!window.confirm(`Run "${name}" now? It launches exactly what it would launch at its time.`)) return;
+  await act("POST", `/api/triggers/${encodeURIComponent(id)}/fire`);
 }
 
 async function toggleTrigger(id, enabled) {

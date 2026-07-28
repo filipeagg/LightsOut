@@ -615,6 +615,15 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
   );
 
   tool(
+    "fire_trigger",
+    "Run a trigger now, without waiting for its time (TR-09). It goes through the same path the " +
+      "clock takes: if a run of that project is in flight or its chain is paused, nothing is " +
+      "queued and the answer says which. A disabled trigger can still be fired by hand.",
+    { triggerId: z.string().min(1) },
+    async ({ triggerId }) => actions.fireTrigger("mcp", triggerId),
+  );
+
+  tool(
     "delete_trigger",
     "Delete a trigger for good. To stop it for now, set enabled false instead.",
     { triggerId: z.string().min(1) },

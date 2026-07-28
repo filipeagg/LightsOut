@@ -80,6 +80,7 @@ import {
   type Schedule,
 } from "../triggers/schedule.js";
 import type { TriggerRow } from "../db/repos/triggers.js";
+import type { Scheduler } from "../triggers/scheduler.js";
 
 export type Actor = "mcp" | "panel" | "system";
 
@@ -100,6 +101,12 @@ export type ActionDeps = {
   health?: { engines(): Promise<{ engine: string; detected: boolean; auth: boolean }[]> };
   /** Development servers a person can open (PV-01); absent in a process that runs none. */
   previews?: PreviewManager;
+  /**
+   * The clock (TR-01). Attached after construction rather than passed in, because the scheduler
+   * launches *through* these actions: one of the two has to exist first, and a setter is more
+   * honest than a lazy factory that pretends the cycle is not there.
+   */
+  scheduler?: Scheduler;
 };
 
 export const DOC_NAMES = ["STATE", "PLAN", "DECISIONS", "QUESTIONS"] as const;
@@ -116,7 +123,7 @@ export class Actions {
   private readonly templateWriter: TemplateWriter | undefined;
   private readonly knowledgeWriter: KnowledgeWriter | undefined;
 
-  constructor(private readonly deps: ActionDeps) {
+  constructor(private readonly deps: ActionDeps & { scheduler?: Scheduler }) {
     this.agentWriter = new AgentWriter(deps.agents);
     this.templateWriter = deps.templates
       ? new TemplateWriter(deps.templates, (id) => {
@@ -127,6 +134,14 @@ export class Actions {
     this.knowledgeWriter = deps.knowledge
       ? new KnowledgeWriter(deps.knowledge)
       : undefined;
+  }
+
+  /**
+   * The one late binding in this file (TR-09). The scheduler launches through these actions, so it
+   * cannot exist before them; `fire_trigger` needs it, so it is attached as soon as it does.
+   */
+  attachScheduler(scheduler: Scheduler): void {
+    this.deps.scheduler = scheduler;
   }
 
   /** Say plainly which subsystem a process is missing instead of failing on undefined. */
@@ -908,6 +923,20 @@ export class Actions {
       nextFireAt: nextFew[0] ?? null,
       nextFew,
     };
+  }
+
+  /**
+   * Fire a trigger now (TR-09). The same path the clock takes, refusals included: a run in flight
+   * or a paused chain answers with the reason instead of queueing, because a person who pressed a
+   * button is owed either the work or the reason, not a promise.
+   */
+  async fireTrigger(
+    actor: Actor,
+    triggerId: string,
+  ): Promise<{ triggerId: string; fired: boolean; result: string }> {
+    const trigger = this.deps.repos.triggers.getOrThrow(triggerId);
+    const scheduler = this.need(this.deps.scheduler, "the scheduler");
+    return scheduler.fireNow(trigger.id, actor);
   }
 
   deleteTrigger(actor: Actor, triggerId: string): { deleted: boolean } {

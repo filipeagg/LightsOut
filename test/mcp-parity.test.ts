@@ -91,6 +91,9 @@ const INTERNAL = new Set([
   "liveRunFor",
   // TR-08: one schedule, stated either way.
   "cronFrom",
+  // TR-09: wiring, not an action. The scheduler launches through these actions, so it is attached
+  // after both exist.
+  "attachScheduler",
 ]);
 
 /** The one exception, with its reason (VT-02, MC-07). Adding to this list is a design decision. */
@@ -117,6 +120,7 @@ const TOOL_FOR: Record<string, string> = {
   createTrigger: "create_trigger",
   updateTrigger: "write_trigger",
   deleteTrigger: "delete_trigger",
+  fireTrigger: "fire_trigger",
   setProjectContext: "set_project_context",
   setProjectUnattended: "set_project_unattended",
   addArea: "add_area",

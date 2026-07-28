@@ -255,6 +255,60 @@ describe("the scheduler", () => {
   });
 });
 
+/**
+ * TR-09: a person pressed a button, so the answer is the work or the reason — never a promise.
+ */
+describe("firing one by hand", () => {
+  it("launches now, outside its schedule, and records the firing", async () => {
+    const projectId = aProject();
+    const id = aTrigger(projectId, "0 3 * * *"); // nowhere near now
+    const { scheduler, launches } = schedulerWith();
+
+    const outcome = await scheduler.fireNow(id, "panel");
+    expect(outcome.fired).toBe(true);
+    expect(outcome.result).toMatch(/by hand \(panel\)/);
+    expect(launches).toEqual([`task:${projectId}:builder`]);
+    // It is a firing, so catch-up must not run the same slot again later (TR-04).
+    expect(repos.triggers.getOrThrow(id).last_fired_at).toBeTruthy();
+  });
+
+  it("fires a disabled trigger, because that is what makes disabling safe", async () => {
+    const projectId = aProject();
+    const id = aTrigger(projectId);
+    repos.triggers.update(id, { enabled: false });
+    const { scheduler, launches } = schedulerWith();
+
+    expect((await scheduler.fireNow(id, "mcp")).fired).toBe(true);
+    expect(launches).toHaveLength(1);
+  });
+
+  it("refuses with the reason instead of queueing behind a run in flight (TR-03)", async () => {
+    const projectId = aProject();
+    const id = aTrigger(projectId);
+    const chain = repos.chains.create({ projectId, title: "c" });
+    const task = repos.tasks.create({
+      projectId,
+      chainId: chain.id,
+      title: "busy",
+      spec: "s",
+      agentId: "builder",
+      position: 1,
+    });
+    repos.runs.start({ taskId: task.id, engine: "claude" });
+
+    const { scheduler, launches } = schedulerWith();
+    const outcome = await scheduler.fireNow(id, "panel");
+    expect(outcome.fired).toBe(false);
+    expect(outcome.result).toMatch(/already in flight/);
+    expect(launches).toEqual([]);
+  });
+
+  it("says so when the trigger is gone", async () => {
+    const { scheduler } = schedulerWith();
+    await expect(scheduler.fireNow("01NOSUCHTRIGGER", "mcp")).rejects.toThrow(/trigger not found/);
+  });
+});
+
 describe("a firing missed while the container was off (TR-04)", () => {
   it("runs once, not once per missed day", async () => {
     const projectId = aProject();

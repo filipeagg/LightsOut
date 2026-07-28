@@ -158,7 +158,7 @@ describe("relaunching a repeatable phase restarts the repeatable tail", () => {
   });
 
   it("puts the later repeatable phases back to pending, and leaves the rest alone", async () => {
-    const { phases, project } = await harness({ writeDeliverables: true });
+    const { phases, project, orch } = await harness({ writeDeliverables: true });
     // A second project so the two-phase template of the outer harness is not in the way.
     const path2 = path.join(workspace, "projects", "cycled");
     await mkdir(path2, { recursive: true });
@@ -182,6 +182,10 @@ describe("relaunching a repeatable phase restarts the repeatable tail", () => {
     expect(after.get("audit")).toBe("done");
     // The project of the outer harness is untouched: the reset is scoped to one project.
     expect(repos.phases.list(project.id).some((p) => p.status === "pending")).toBe(true);
+
+    // The launch is real and the chain drives asynchronously; leaving it running races the
+    // temporary directory's removal.
+    await orch.idle();
   });
 
   it("does not reset anything when the relaunched phase is not repeatable", async () => {

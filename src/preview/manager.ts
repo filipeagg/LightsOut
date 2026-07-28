@@ -20,6 +20,7 @@ import type { PreviewRow } from "../db/repos/previews.js";
 import type { Bus } from "../bus.js";
 import { SCRATCH_REL } from "../policy/classify.js";
 import { normalisePreviewCommand } from "./normalise.js";
+import { packageScripts } from "./detect.js";
 
 export type StartPreviewInput = {
   projectId: string;
@@ -133,8 +134,11 @@ export class PreviewManager {
       throw new Error(`cwd must be inside ${project.id}; ${input.cwd} escapes it`);
     }
 
-    // PV-04: bind 0.0.0.0, take the allocated port, do not wander.
-    const { command, notes } = normalisePreviewCommand(input.command, port);
+    // PV-04: bind 0.0.0.0, take the allocated port, do not wander — and only add flags to a
+    // program that has been identified, which means reading what `npm run dev` actually runs.
+    const { command, notes } = normalisePreviewCommand(input.command, port, {
+      scripts: packageScripts(cwd),
+    });
 
     const logDir = path.join(project.path, SCRATCH_REL);
     await mkdir(logDir, { recursive: true });

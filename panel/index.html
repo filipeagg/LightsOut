@@ -1133,10 +1133,16 @@ function previewCard(p) {
     ${previews.length
       ? `<table style="margin-top:12px"><tbody>${previews
           .map(
+            // PV-03: a link to a process that is gone is worse than no link. `alive` is false when
+            // the row says running and the pid does not answer, and it is said out loud.
             (v) => `<tr>
-        <td><a href="${esc(v.url)}" target="_blank" rel="noreferrer" class="mono"
-               style="font-size:15px">${esc(v.url)}</a></td>
-        <td class="tiny mono muted">${esc(v.command)}</td>
+        <td>${v.alive === false
+          ? `<span class="mono" style="font-size:15px;color:var(--fg-3);text-decoration:line-through">${esc(v.url)}</span>
+             <div class="tiny" style="color:var(--red)">the server is not running any more — see
+               <code>${esc((v.logPath || "").replace(/^.*\/(?=\.lightsout)/, ""))}</code>, then Stop and Preview again</div>`
+          : `<a href="${esc(v.url)}" target="_blank" rel="noreferrer" class="mono"
+               style="font-size:15px">${esc(v.url)}</a>`}</td>
+        <td class="tiny mono muted">${esc(v.normalised || v.command)}</td>
         <td class="tiny muted">since ${esc((v.startedAt || "").slice(11, 16))}${
           v.expiresAt ? `, until ${esc(v.expiresAt.slice(11, 16))}` : ""
         }</td>

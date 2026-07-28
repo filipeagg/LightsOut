@@ -194,6 +194,7 @@ asks. Everything it starts is an ordinary task in an ordinary chain.
 - TR-04 MUST. A firing missed because the container was off runs once at boot if its window has passed and it has not run since. A machine that was asleep is not a reason for the daily digest to be missing.
 - TR-05 MUST. Every firing is recorded — when, what it launched, or why it did not — and the trigger carries its last result so a person can see at a glance that it is still working.
 - TR-06 MUST. Triggers are created, edited, disabled and deleted from both surfaces (MC-07), and the panel shows the next fire time.
+- TR-08 MUST. Saying when something runs does not require knowing cron. Both surfaces accept a schedule stated in ordinary terms — every N minutes or hours, at a time of day, on chosen weekdays, on a day of the month — and cron remains available as the escape hatch for what those cannot express. Whatever is chosen, the system says back in plain language when it will run, and shows the next time it will happen before anything is saved.
 - TR-07 MUST. A project with a trigger runs unattended (OR-12): work that starts at 07:00 with nobody there must not stop at 07:01 waiting for a permission a person would have given.
 
 ## 14. KB — Curated knowledge

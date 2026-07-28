@@ -72,7 +72,13 @@ import {
 } from "../projects/doc-history.js";
 import { applyEdits, type DocEdit } from "../projects/doc-patch.js";
 import { INBOX_REL } from "../acp/prompt.js";
-import { describeCron, nextFire, parseCron } from "../triggers/cron.js";
+import { nextFire, parseCron } from "../triggers/cron.js";
+import {
+  cronToSchedule,
+  describeCronPlainly,
+  scheduleToCron,
+  type Schedule,
+} from "../triggers/schedule.js";
 import type { TriggerRow } from "../db/repos/triggers.js";
 
 export type Actor = "mcp" | "panel" | "system";
@@ -750,7 +756,9 @@ export class Actions {
     input: {
       projectId: string;
       name: string;
-      cron: string;
+      /** The cron itself, or `every` — one of the two, never both (TR-08). */
+      cron?: string;
+      every?: Schedule;
       phase?: string;
       agentId?: string;
       title?: string;
@@ -758,10 +766,16 @@ export class Actions {
       expects: string;
       enabled?: boolean;
     },
-  ): TriggerRow & { nextFireAt: string | null; unattendedTurnedOn: boolean } {
+  ): TriggerRow & {
+    nextFireAt: string | null;
+    schedule: string;
+    caveat?: string;
+    unattendedTurnedOn: boolean;
+  } {
     const project = this.project(input.projectId);
     this.requireNotArchived(project.id);
-    const fields = parseCron(input.cron); // throws with the field that is wrong
+    const cron = this.cronFrom(input);
+    const fields = parseCron(cron); // throws with the field that is wrong
     if (!input.request.trim() || !input.expects.trim()) {
       throw new Error("a trigger states its request and what it expects back, like any launch (OR-10)");
     }
@@ -801,7 +815,31 @@ export class Actions {
       createdBy: actor,
     });
     this.changed("trigger", row.id, actor);
-    return { ...row, nextFireAt: nextFire(fields, new Date())?.toISOString() ?? null, unattendedTurnedOn };
+    const reads = describeCronPlainly(row.cron);
+    return {
+      ...row,
+      nextFireAt: nextFire(fields, new Date())?.toISOString() ?? null,
+      // TR-08: nothing is saved on trust. What it means, and when it happens next, come back with
+      // the row so the caller can show a person what they just agreed to.
+      schedule: reads.text,
+      ...(reads.caveat ? { caveat: reads.caveat } : {}),
+      unattendedTurnedOn,
+    };
+  }
+
+  /**
+   * One schedule, stated either way (TR-08). `every` is the ordinary-language form the panel's
+   * picker and a client that does not speak cron use; `cron` is the escape hatch.
+   */
+  private cronFrom(input: { cron?: string; every?: Schedule }): string {
+    if (input.cron && input.every) {
+      throw new Error("give either cron or every, not both: they would disagree");
+    }
+    if (input.every) return scheduleToCron(input.every);
+    if (input.cron) return input.cron;
+    throw new Error(
+      "say when it runs: `every` in ordinary terms (minutes, hours, days, weeks, months) or `cron`",
+    );
   }
 
   updateTrigger(
@@ -810,16 +848,23 @@ export class Actions {
     patch: {
       name?: string;
       cron?: string;
+      every?: Schedule;
       request?: string;
       expects?: string;
       title?: string;
       enabled?: boolean;
     },
-  ): TriggerRow & { nextFireAt: string | null } {
+  ): TriggerRow & { nextFireAt: string | null; schedule: string; caveat?: string } {
     const current = this.deps.repos.triggers.getOrThrow(triggerId);
-    if (patch.cron !== undefined) parseCron(patch.cron);
-    const row = this.deps.repos.triggers.update(current.id, patch);
+    const { every, ...rest } = patch;
+    const cron =
+      every || patch.cron !== undefined ? this.cronFrom({ ...(patch.cron !== undefined ? { cron: patch.cron } : {}), ...(every ? { every } : {}) }) : undefined;
+    const row = this.deps.repos.triggers.update(current.id, {
+      ...rest,
+      ...(cron === undefined ? {} : { cron }),
+    });
     this.changed("trigger", row.id, actor);
+    const reads = describeCronPlainly(row.cron);
     return {
       ...row,
       nextFireAt: (() => {
@@ -829,6 +874,39 @@ export class Actions {
           return null;
         }
       })(),
+      schedule: reads.text,
+      ...(reads.caveat ? { caveat: reads.caveat } : {}),
+    };
+  }
+
+  /**
+   * What a schedule would mean and when it would next happen, before anything is saved (TR-08).
+   * The panel calls this as the form is filled in; a client can call it to check its arithmetic.
+   */
+  previewSchedule(input: { cron?: string; every?: Schedule }): {
+    cron: string;
+    schedule: string;
+    caveat?: string;
+    nextFireAt: string | null;
+    nextFew: string[];
+  } {
+    const cron = this.cronFrom(input);
+    const fields = parseCron(cron);
+    const reads = describeCronPlainly(cron);
+    const nextFew: string[] = [];
+    let cursor = new Date();
+    for (let i = 0; i < 3; i += 1) {
+      const at = nextFire(fields, cursor);
+      if (!at) break;
+      nextFew.push(at.toISOString());
+      cursor = new Date(at.getTime() + 60_000);
+    }
+    return {
+      cron,
+      schedule: reads.text,
+      ...(reads.caveat ? { caveat: reads.caveat } : {}),
+      nextFireAt: nextFew[0] ?? null,
+      nextFew,
     };
   }
 
@@ -840,20 +918,33 @@ export class Actions {
   }
 
   /** Every trigger with the next time it would fire, and what happened last time (TR-05, TR-06). */
-  listTriggers(projectId?: string): (TriggerRow & { nextFireAt: string | null; cronReads: string })[] {
+  listTriggers(
+    projectId?: string,
+  ): (TriggerRow & {
+    nextFireAt: string | null;
+    cronReads: string;
+    caveat: string | null;
+    /** The shape it was built from, so the panel reopens the picker rather than raw cron (TR-08). */
+    every: Schedule;
+  })[] {
     return this.deps.repos.triggers.list(projectId).map((row) => {
       try {
         const fields = parseCron(row.cron);
+        const reads = describeCronPlainly(row.cron);
         return {
           ...row,
           nextFireAt: row.enabled ? (nextFire(fields, new Date())?.toISOString() ?? null) : null,
-          cronReads: describeCron(row.cron),
+          cronReads: reads.text,
+          caveat: reads.caveat ?? null,
+          every: cronToSchedule(row.cron),
         };
       } catch (err) {
         return {
           ...row,
           nextFireAt: null,
           cronReads: `invalid: ${err instanceof Error ? err.message : String(err)}`,
+          caveat: null,
+          every: { unit: "custom", cron: row.cron } as Schedule,
         };
       }
     });

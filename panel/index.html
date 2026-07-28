@@ -2406,19 +2406,20 @@ function viewTriggers() {
       project is busy or paused is skipped and says so; one missed because the machine was off runs
       once at the next boot.</p>
     <div class="row" style="margin-bottom:16px">
-      <button class="btn primary" onclick="editing='new-trigger';paint()">New trigger</button>
+      <button class="btn primary" onclick="editing='new-trigger';refreshSchedulePreview()">New trigger</button>
     </div>
     ${editing === "new-trigger" ? triggerForm(projects, agents) : ""}
     ${t.triggers.length === 0 ? `<div class="empty">Nothing is scheduled.</div>` : ""}
     ${t.triggers.map((x) => `<div class="card pad" style="margin-bottom:16px">
       <div class="row" style="justify-content:space-between">
         <div>
-          <b>${esc(x.name)}</b> <code class="tiny">${esc(x.cron)}</code>
+          <b>${esc(x.name)}</b> — runs ${esc(x.cronReads)}
           ${x.enabled ? `<span class="pill green"><span class="sdot"></span>on</span>`
                       : `<span class="pill"><span class="sdot"></span>off</span>`}
           <div class="tiny muted">${esc(x.projectId)} · ${x.phase
-            ? `phase <code>${esc(x.phase)}</code>` : `task for <code>${esc(x.agentId || "")}</code>`}</div>
-          <div class="tiny muted">${esc(x.cronReads)}</div>
+            ? `phase <code>${esc(x.phase)}</code>` : `task for <code>${esc(x.agentId || "")}</code>`}
+            · <code>${esc(x.cron)}</code></div>
+          ${x.caveat ? `<div class="tiny" style="color:var(--amber)">${esc(x.caveat)}</div>` : ""}
           <div class="tiny">next: ${x.nextFireAt ? esc(sinceIso(x.nextFireAt)) + ` · <span class="mono">${esc(x.nextFireAt)}</span>` : "<span class='muted'>never</span>"}</div>
           ${x.lastFiredAt ? `<div class="tiny muted">last: ${esc(x.lastResult || "")} (${esc(x.lastFiredAt)})</div>` : ""}
         </div>
@@ -2431,6 +2432,129 @@ function viewTriggers() {
     </div>`).join("")}`;
 }
 
+/**
+ * TR-08: the schedule picker. Five shapes and a cron escape hatch, echoed in words and in the
+ * next three times it would fire — nobody should have to know what `0 7 * * 1-5` means, and
+ * nobody should save a schedule they have not seen stated back to them.
+ */
+const SCHEDULE_UNITS = [
+  ["minutes", "Minutes"],
+  ["hours", "Hours"],
+  ["days", "Days"],
+  ["weeks", "Weeks"],
+  ["months", "Months"],
+  ["custom", "Custom (cron)"],
+];
+const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** The state of the picker. Read by `scheduleFromForm`, written by every control in it. */
+function scheduleState() {
+  if (!window.__schedule) {
+    window.__schedule = { unit: "days", every: 1, hour: 7, minute: 0, weekdays: [1, 2, 3, 4, 5], dayOfMonth: 1, cron: "0 7 * * 1-5" };
+  }
+  return window.__schedule;
+}
+
+function setSchedule(key, value) {
+  const s = scheduleState();
+  s[key] = key === "unit" || key === "cron" ? value : Number(value);
+  void refreshSchedulePreview();
+  paint();
+}
+
+function toggleWeekday(day) {
+  const s = scheduleState();
+  const at = s.weekdays.indexOf(day);
+  if (at === -1) s.weekdays.push(day);
+  else s.weekdays.splice(at, 1);
+  void refreshSchedulePreview();
+  paint();
+}
+
+/** The shape the server takes, built from the picker's state. */
+function scheduleFromForm() {
+  const s = scheduleState();
+  if (s.unit === "minutes") return { unit: "minutes", every: s.every };
+  if (s.unit === "hours") return { unit: "hours", every: s.every, minute: s.minute };
+  if (s.unit === "days") return { unit: "days", every: s.every, hour: s.hour, minute: s.minute };
+  if (s.unit === "weeks") return { unit: "weeks", weekdays: s.weekdays, hour: s.hour, minute: s.minute };
+  if (s.unit === "months") return { unit: "months", dayOfMonth: s.dayOfMonth, hour: s.hour, minute: s.minute };
+  return { unit: "custom", cron: s.cron };
+}
+
+/** Ask the server what it means. The arithmetic lives in one place and it is not the browser. */
+async function refreshSchedulePreview() {
+  try {
+    const answer = await write("POST", "/api/schedule/preview", { every: scheduleFromForm() });
+    window.__schedulePreview = answer;
+  } catch (err) {
+    window.__schedulePreview = { error: err.message };
+  }
+  paint();
+}
+
+function hourOptions(selected) {
+  return Array.from({ length: 24 }, (_, h) =>
+    `<option value="${h}" ${h === selected ? "selected" : ""}>${String(h).padStart(2, "0")}:00</option>`).join("");
+}
+
+function schedulePicker() {
+  const s = scheduleState();
+  const p = window.__schedulePreview;
+  const num = (id, key, min, max) =>
+    `<input id="${id}" type="number" min="${min}" max="${max}" value="${s[key]}" style="width:90px"
+       onchange="setSchedule('${key}',this.value)">`;
+  const timeOfDay = `
+    <label class="tiny">At hour<br>
+      <select onchange="setSchedule('hour',this.value)">${hourOptions(s.hour)}</select></label>
+    <label class="tiny">Minute<br>${num("sc-minute", "minute", 0, 59)}</label>`;
+
+  let fields = "";
+  if (s.unit === "minutes") {
+    fields = `<label class="tiny">Minutes between runs<br>${num("sc-every", "every", 1, 59)}</label>`;
+  } else if (s.unit === "hours") {
+    fields = `<label class="tiny">Hours between runs<br>${num("sc-every", "every", 1, 23)}</label>
+      <label class="tiny">At minute<br>${num("sc-minute", "minute", 0, 59)}</label>`;
+  } else if (s.unit === "days") {
+    fields = `<label class="tiny">Days between runs<br>${num("sc-every", "every", 1, 31)}</label>${timeOfDay}`;
+  } else if (s.unit === "weeks") {
+    fields = `<label class="tiny">On these days<br>
+      <div class="row wrap" style="gap:4px;margin-top:4px">
+        ${WEEKDAY_LABELS.map((label, day) =>
+          `<button type="button" class="btn sm ${s.weekdays.includes(day) ? "primary" : ""}"
+             onclick="toggleWeekday(${day})">${label}</button>`).join("")}
+      </div></label>${timeOfDay}`;
+  } else if (s.unit === "months") {
+    fields = `<label class="tiny">Day of the month<br>${num("sc-dom", "dayOfMonth", 1, 28)}</label>${timeOfDay}`;
+  } else {
+    fields = `<label class="tiny">Cron (five fields)<br>
+      <input value="${esc(s.cron)}" style="width:220px;font-family:var(--mono)"
+        onchange="setSchedule('cron',this.value)"></label>`;
+  }
+
+  const reading = p && p.error
+    ? `<div class="tiny" style="color:var(--red)">${esc(typeof p.error === "string" ? p.error : p.error.message)}</div>`
+    : p && p.schedule
+      ? `<div class="note" style="margin-top:12px">
+           <b>Runs ${esc(p.schedule)}</b> <code class="tiny">${esc(p.cron)}</code>
+           ${p.caveat ? `<div class="tiny" style="color:var(--amber)">${esc(p.caveat)}</div>` : ""}
+           <div class="tiny muted">next: ${(p.nextFew || []).map((t) => esc(t.replace("T", " ").slice(0, 16))).join(" · ") || "never"}</div>
+         </div>`
+      : `<div class="tiny muted" style="margin-top:12px">Choose a schedule to see when it runs.</div>`;
+
+  return `<div class="card pad" style="margin-bottom:12px">
+    <div class="row wrap" style="gap:16px;align-items:flex-start">
+      <label class="tiny">Trigger interval<br>
+        <select onchange="setSchedule('unit',this.value)">
+          ${SCHEDULE_UNITS.map(([id, label]) =>
+            `<option value="${id}" ${id === s.unit ? "selected" : ""}>${label}</option>`).join("")}
+        </select></label>
+      ${fields}
+    </div>
+    ${reading}
+  </div>`;
+}
+
 function triggerForm(projects, agents) {
   const repeatable = (window.__triggerPhases || []);
   return `<div class="card pad" style="margin-bottom:16px">
@@ -2441,7 +2565,9 @@ function triggerForm(projects, agents) {
           ${projects.map((p) => `<option value="${esc(p.id)}" ${p.id === window.__triggerProject ? "selected" : ""}>${esc(p.name || p.id)}</option>`).join("")}
         </select></label>
       <label class="tiny">Name<br><input id="tg-name" placeholder="Daily sector digest"></label>
-      <label class="tiny">When (cron)<br><input id="tg-cron" placeholder="0 7 * * 1-5" value="0 7 * * 1-5"></label>
+    </div>
+    ${schedulePicker()}
+    <div class="row wrap" style="gap:16px">
       <label class="tiny">Repeatable phase<br>
         <select id="tg-phase">
           <option value="">(a free task instead)</option>
@@ -2481,7 +2607,8 @@ async function createTrigger() {
   if (!projectId) { store.error = "choose a project"; return paint(); }
   const payload = {
     name: field("tg-name"),
-    cron: field("tg-cron"),
+    // TR-08: the picker's shape, not a cron string typed by a person.
+    every: scheduleFromForm(),
     request: field("tg-request"),
     expects: field("tg-expects"),
   };

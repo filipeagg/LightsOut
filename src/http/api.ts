@@ -379,6 +379,9 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
           name: t.name,
           cron: t.cron,
           cronReads: t.cronReads,
+          caveat: t.caveat,
+          // TR-08: the shape it was built from, so the picker reopens rather than raw cron.
+          every: t.every,
           phase: t.phase_ref,
           agentId: t.agent_id,
           title: t.title,

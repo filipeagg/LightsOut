@@ -1273,6 +1273,10 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
     { projectId: z.string().optional() },
     async ({ projectId }) => {
       const loader = need(deps.knowledge, "knowledge");
+      // KB-01: the document list is a snapshot, and files can arrive on disk without this process
+      // being told — an agent writing them, the user dropping them in. A listing that says a base
+      // is empty when it is not is worse than a slow listing.
+      await loader.load().catch(() => undefined);
       const attached = projectId
         ? repos.projectKnowledge.list(project(projectId).id)
         : [];

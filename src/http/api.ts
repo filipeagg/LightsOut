@@ -403,6 +403,10 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
   app.get("/api/knowledge", async (_request, reply) =>
     envelope(reply, async () => {
       if (!deps.knowledge) return { bases: [], rejected: [], available: false };
+      // KB-01: re-read before answering. Documents arrive on disk without this process being told
+      // — an agent writes them, the user drops them in — and a base reported as empty when it is
+      // not sends someone looking for a bug in the writer.
+      await deps.knowledge.load().catch(() => undefined);
       return {
         available: true,
         bases: deps.knowledge.list().map((base) => ({

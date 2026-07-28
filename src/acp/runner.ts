@@ -424,6 +424,12 @@ export class TaskRunner {
       // DO-08: the per-run permission memory dies with the run, which is what makes it safe for
       // classes that must never be remembered across runs.
       this.doubts.forgetRun(run.id);
+      // KB-01: a run that could write a base almost certainly did, and the loader's document list
+      // is a snapshot taken at load time. An agent writing files on disk triggers nothing, so
+      // `list_knowledge` kept answering `documents: []` while `read_knowledge` read them happily.
+      if (context.writableKnowledgeBase && this.context?.knowledge) {
+        await this.context.knowledge.load().catch(() => undefined);
+      }
     }
 
     this.repos.runs.finish(run.id, {

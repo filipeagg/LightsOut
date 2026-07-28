@@ -1,0 +1,39 @@
+# Paths stripped from every commit before the public mirror is pushed (scripts/publish-mirror.sh).
+# One path per line, same syntax as `git filter-repo --path`. Comments start with #.
+
+# Continuity docs: name a real customer host and narrate real client work.
+doc/STATE.md
+doc/DECISIONS.md
+
+# Meta-instructions for this exact Claude Desktop setup, not needed to run LightsOut.
+doc/PROJECT-INSTRUCTIONS.md
+doc/tester-project-instructions.md
+
+# One-off debugging/probe scripts tied to specific past incidents, superseded by the
+# official gates in scripts/verify/*.sh. Not part of the reusable product.
+scripts/check-panel.mjs
+scripts/inspect-config-audit.mjs
+scripts/inspect-loss.mjs
+scripts/inspect-run.mjs
+scripts/inspect-writes.mjs
+scripts/inspect-project-refs.mjs
+scripts/mcp-call.mjs
+scripts/migrate-packs-pe14.mjs
+scripts/probe-classify.mjs
+scripts/probe-credgates.mjs
+scripts/probe-events.mjs
+scripts/probe-summary.mjs
+scripts/probe-xlsx.py
+scripts/probe-mapa-gates.mjs
+scripts/status.mjs
+scripts/time-folder-walk.mjs
+scripts/verify-2607.mjs
+scripts/verify-areas.mjs
+scripts/verify-classify-2607.mjs
+scripts/verify-deploy.mjs
+scripts/verify-docs-context.mjs
+scripts/verify-judge.mjs
+scripts/verify-migration3.mjs
+scripts/verify-pe13.mjs
+scripts/verify-resume.mjs
+scripts/verify-dotenv-7-1f.mjs

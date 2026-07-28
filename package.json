@@ -3,7 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "description": "Agent orchestration system: chains of coding-agent runs, mediated permissions, doubts and second opinions, driven over MCP.",
-  "license": "Apache-2.0",
+  "license": "SEE LICENSE IN LICENSE",
+  "author": {
+    "name": "Filipe Gomes",
+    "url": "https://www.linkedin.com/in/filipeagg/"
+  },
   "type": "module",
   "engines": {
     "node": ">=22"

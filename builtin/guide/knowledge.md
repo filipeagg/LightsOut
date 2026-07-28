@@ -40,6 +40,13 @@ may_not: a base whose `source` points outside `knowledge/` — the user's own so
 may_not: a base with `enforcement: hard`. An agent that can rewrite the rules binding it is not bound by them (KB-11c).
 to_curate_material_that_lives_elsewhere: copy or move it under `knowledge/`, then adopt it.
 
+## how_an_agent_actually_writes_one
+
+told_where: the prompt of a run with a writable base carries "The knowledge base you write into" with `base.dir` as an absolute path.
+with_the_shell: `cat > <base.dir>/index.md <<'MD' … MD`, or python. Not the structured edit tool.
+why: `apply_patch`, `Edit` and `Write` scope themselves to the session's directory — the project — and refuse anything outside it before LightsOut is asked. That is the tool's rule, not a policy denial, and the prompt says so.
+symptom_if_missed: documents in `<project>/knowledge/…`, a failed deliverable check, and a run.untracked event naming the mistake.
+
 ## writing_documents
 
 format: machine-first (BA-07) — key: value, tables, stable ids, a `source:` on every claim. Ask guide{topic:"documents"}.

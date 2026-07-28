@@ -2432,6 +2432,26 @@ Deliberately *not* done: moving the files. A system that quietly relocates an ag
 that will one day relocate the wrong thing, and §PE-08 already settled that what is left outside is
 reported and never touched.
 
+### 17.1d The edit tool refuses the base; the prompt says which tool does not
+
+`apply_patch`, `Edit` and `Write` scope themselves to the directory the session started in — the
+project — and refuse a path outside it **on their own, before LightsOut is asked**. It is not the
+kernel sandbox (`sandbox_mode = "danger-full-access"`, ST-09) and it is not a policy denial: the
+same write through the shell is classified `knowledge_write` and allowed.
+
+No mechanism for this. The prompt names the tool that works:
+
+```
+**Your structured edit tool will refuse this path.** … Use the shell instead:
+  cat > <base.dir>/index.md <<'MD' … MD
+```
+
+The reason to fix it in words rather than in code: the only thing that went wrong is that an agent
+drew the wrong conclusion from a refusal — "the base is read-only" — and spent a turn on a
+workaround. Publishing the base from inside the project would work and would add a copy step, a new
+directory in the layout and a new failure mode, to route around one sentence the agent was never
+told. A curator that knows which tool to reach for has no problem here.
+
 ### 17.1b Which base may be written into (KB-05 amended)
 
 **The failure this fixes.** Two rules that were each right made a third thing impossible. A folder

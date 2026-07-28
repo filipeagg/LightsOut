@@ -88,6 +88,19 @@ export class Scheduler {
   }
 
   /**
+   * Fire one now, because somebody pressed the button (TR-09).
+   *
+   * The same path the clock takes, including the three refusals: a manual firing that queued behind
+   * a run in flight would be the one case where "run it now" means "run it at some point", and a
+   * person watching a button is the worst audience for that. Disabled triggers may still be fired
+   * by hand — that is what makes disabling safe to do while testing one.
+   */
+  async fireNow(triggerId: string, actor: string): Promise<FiringOutcome> {
+    const trigger = this.repos.triggers.getOrThrow(triggerId);
+    return this.fire(trigger, new Date(), `by hand (${actor})`);
+  }
+
+  /**
    * Launch, or say why not. The three refusals (TR-03) are checked here rather than left to the
    * orchestrator, because "queued behind yesterday's digest" is not what a person means by a
    * daily trigger.

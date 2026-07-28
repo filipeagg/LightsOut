@@ -528,6 +528,15 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
     }),
   );
 
+  // TR-09: run it now. The same path the clock takes, so a project that is busy or paused answers
+  // with the reason rather than queueing behind itself.
+  app.post("/api/triggers/:id/fire", async (request, reply) =>
+    envelope(reply, async () => {
+      const { id } = idParam.parse(request.params);
+      return actions.fireTrigger("panel", id);
+    }),
+  );
+
   app.delete("/api/triggers/:id", async (request, reply) =>
     envelope(reply, async () => {
       const { id } = idParam.parse(request.params);

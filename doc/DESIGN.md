@@ -2355,6 +2355,25 @@ lives in `src/triggers/cron.ts`, because a dependency for this would be a depend
 forever. Times are the container's, which is UTC unless the compose file says otherwise, and the
 panel says which timezone it is showing rather than pretending to know the user's.
 
+### 16b.2 Editing one, and running it now (TR-09)
+
+The `PUT` route existed from the first day and the panel offered enable, disable and delete — so the
+only way to change a request was to delete the trigger and write it again. Now the card opens an
+editor: the name, the request, what it expects, and the **same schedule picker** the create form
+uses, opened on the shape the trigger was built from (`every`), so a weekday schedule reopens as
+weekday buttons. What it fires — a phase or an agent — is not editable: that is a different trigger
+wearing the same name, and deleting is honest about it.
+
+**Run now** goes through `Scheduler.fireNow`, which is the same `fire()` the tick calls, so the three
+refusals of TR-03 apply unchanged. A manual firing that queued behind a run in flight would be the
+one case where "run it now" means "run it at some point", and a person watching a button is the worst
+possible audience for that: it either launches or answers with the reason. It also records
+`last_fired_at`, because it *is* a firing — and that keeps catch-up (TR-04) from running the slot
+again an hour later.
+
+A **disabled** trigger can still be fired by hand. That is what makes disabling one the safe way to
+work on it: the schedule stops, the button does not.
+
 ### 16b.1 Saying when, without knowing cron (TR-08)
 
 `0 7 * * 1-5` is precise, and it is also a small exam. Most schedules people actually want are one

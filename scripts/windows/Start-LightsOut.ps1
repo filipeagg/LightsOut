@@ -14,7 +14,7 @@ param(
 $ErrorActionPreference = "Stop"
 # The published multi-arch image (SU-01). Set LO_IMAGE, or pass -Image lightsout:local, to run
 # a build made on this machine instead.
-if (-not $Image) { $Image = "ghcr.io/fcg102006/lightsout:latest" }
+if (-not $Image) { $Image = "ghcr.io/filipeagg/lightsout:latest" }
 $container = "lightsout"
 
 # RT-02: the workspace is a folder on this machine, so projects open in the user's own editor.

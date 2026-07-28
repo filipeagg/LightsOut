@@ -13,6 +13,7 @@ itself or as a service, by anyone but the Licensor.
 ## Documents
 
 - `doc/INSTALL.md` — full installation guide, including a fresh machine.
+- `doc/EXAMPLES.md` — realistic usage walkthroughs.
 - `doc/REQUIREMENTS.md` — what the system must do (requirement IDs).
 - `doc/DESIGN.md` — how it is built, section by section.
 - `doc/STATE.md` — current phase, last milestone, next step.
@@ -26,26 +27,23 @@ itself or as a service, by anyone but the Licensor.
 
 ## Install
 
-On Windows, double-click the numbered files in `scripts/windows/`:
-
-1. `1-Start-LightsOut.bat` — starts Docker Desktop if needed, builds or pulls, runs the container.
-2. `2-Connect-Claude.bat` and `3-Connect-Codex.bat` — one-time engine logins (RT-04).
-3. Install `dist/lightsout.mcpb` in Claude Desktop to get the tools (see `extension/README.md`).
-
-Elsewhere:
-
 ```bash
-cp .env.example .env      # defaults work as-is
-./scripts/install.sh      # checks docker, builds, starts
-docker exec -it lightsout node dist/cli/login.js claude
-docker exec -it lightsout node dist/cli/login.js codex
-./scripts/verify/phase1.sh   # must print PHASE 1 GREEN
+docker run -d --name lightsout --restart unless-stopped \
+  -p 127.0.0.1:8484:8484 -p 127.0.0.1:1455:1455 \
+  -v lightsout-db:/data \
+  -v "$HOME/LightsOut:/workspace" \
+  -v claude-auth:/home/app/.claude -v codex-auth:/home/app/.codex \
+  ghcr.io/<owner>/lightsout:latest
 ```
 
-Panel and API: <http://127.0.0.1:8484/> (bound to localhost only).
-Health: `curl -s localhost:8484/health`.
+Open <http://127.0.0.1:8484/> — the first-run wizard walks through connecting the engines,
+Claude Desktop and your first project. Install `dist/lightsout.mcpb` in Claude Desktop to get the
+tools (see `extension/README.md`).
 
-Full guide, including installing on another machine: `doc/INSTALL.md`.
+Panel and API are bound to localhost only. Health: `curl -s localhost:8484/health`.
+
+Platform-specific detail — Windows double-click entry points, building from source instead of
+pulling, the egress allowlist, updating — is in `doc/INSTALL.md`.
 
 ## Egress allowlist (RT-05)
 

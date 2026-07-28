@@ -16,6 +16,7 @@ import { LiveRuns } from "../acp/live.js";
 import { ProjectGit } from "../projects/git.js";
 import { ProjectDocs } from "../projects/docs.js";
 import { ensureScratch, sweep } from "../projects/hygiene.js";
+import path from "node:path";
 import { readProjectConfig } from "../projects/config.js";
 import { runVerify } from "./verify.js";
 import { RunLocks } from "./locks.js";
@@ -341,10 +342,33 @@ export class Orchestrator {
         });
       }
       if (result.untracked.length > 0) {
+        // KB-05c: one shape of leftover is not a leftover at all — it is a knowledge base written
+        // to a relative path, which landed inside the project. "3 untracked files" is true and
+        // says nothing; the run that has to be repaired deserves the diagnosis.
+        const misplaced = result.untracked.filter((file) => /^knowledge[\\/]/.test(file));
+        const writableBase = this.repos.projectKnowledge
+          .list(project.id)
+          .find((row) => row.writable === 1)?.base_id;
         this.repos.events.append({
           runId,
           type: "run.untracked",
-          payload: { count: result.untracked.length, paths: result.untracked },
+          payload: {
+            count: result.untracked.length,
+            paths: result.untracked,
+            ...(misplaced.length
+              ? {
+                  misplacedKnowledge: misplaced,
+                  detail:
+                    `${misplaced.length} of them are under ${project.id}/knowledge/, which is a ` +
+                    "folder of this project and not the shared base: a relative `knowledge/…` " +
+                    "resolves inside the project" +
+                    (writableBase
+                      ? `. The base is ${path.join(this.config.workspace, "knowledge", writableBase)}` +
+                        " — copy them there, or relaunch now that the prompt names the absolute path"
+                      : ". This project has no writable base attached (KB-05)"),
+                }
+              : {}),
+          },
         });
       }
     } catch (err) {

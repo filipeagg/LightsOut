@@ -698,6 +698,15 @@ export class RunSession {
         formatFeedback: this.deps.formatFeedback,
         knowledgeBase: this.deps.knowledgeBlock,
         vaultIndex: this.deps.vaultIndex,
+        // KB-05c: the path the classifier already had, given to the agent that has to write there.
+        ...(this.deps.writableKnowledgeBase && this.deps.writableKnowledgeDir
+          ? {
+              writableKnowledge: {
+                baseId: this.deps.writableKnowledgeBase,
+                dir: this.deps.writableKnowledgeDir,
+              },
+            }
+          : {}),
       },
       docs,
     );

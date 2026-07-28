@@ -115,6 +115,32 @@ afterEach(async () => {
   await rm(workspace, { recursive: true, force: true });
 });
 
+/**
+ * KB-05c (§17.1c): `workspace:` is the system's own notation, and it reached the agent verbatim in
+ * the spec — a string nobody had taught it, in a prompt whose every other path was relative. It
+ * wrote the relative version, which landed inside the project.
+ */
+describe("the deliverable as the agent has to type it (KB-05c)", () => {
+  it("expands a workspace: deliverable into the absolute path", async () => {
+    const { phases, project, config } = await harness({ writeDeliverables: false });
+    const phase = repos.phases.list(project.id)[0]!;
+    const spec = phases.buildSpec(
+      { ...phase, deliverable: "workspace:knowledge/mercado/index.md" },
+      "the request",
+      "what comes back",
+    );
+    expect(spec).toContain(path.join(config.workspace, "knowledge/mercado/index.md"));
+    expect(spec).not.toContain("workspace:knowledge");
+  });
+
+  it("leaves a project-relative deliverable exactly as written", async () => {
+    const { phases, project } = await harness({ writeDeliverables: false });
+    const phase = repos.phases.list(project.id)[0]!;
+    const spec = phases.buildSpec(phase, "the request", "what comes back");
+    expect(spec).toContain("Deliverable: doc/PROMPT.md");
+  });
+});
+
 describe("phase flow", () => {
   it("materialises a template into ordered phases (TP-05)", async () => {
     const { phases, project } = await harness({ writeDeliverables: true });

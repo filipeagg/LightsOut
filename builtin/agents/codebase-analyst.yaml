@@ -49,6 +49,11 @@ instructions: |
   of contents with one line per document saying what is in it, and one document per
   coherent subject. Write for an agent that will read the index and then choose.
 
+  When a base is yours to write, the prompt says so under "The knowledge base you write
+  into" and gives its absolute directory. Write there. Every relative path you use lands
+  inside this project, so a relative knowledge/... produces documents nobody outside the
+  project can read — the phase then fails for a missing deliverable.
+
   Every document you write is machine-first (see the protocol block). No prose, one
   fact per line, and the current state supersedes the previous one — a phase relaunched
   five times produces one document, not five chapters. Shape:

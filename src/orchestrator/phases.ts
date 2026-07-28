@@ -209,18 +209,33 @@ export class PhaseService {
     previous: ProjectPhaseRow,
   ): { request: string; expects: string } {
     const left = previous.deliverable
-      ? `The previous phase (${previous.phase_id}) left ${previous.deliverable}; read it first.`
+      ? `The previous phase (${previous.phase_id}) left ` +
+        `${this.deliverableAsWritten(previous.deliverable)}; read it first.`
       : `The previous phase (${previous.phase_id}) is ${previous.status}.`;
     return {
       request:
         `(derived by the system, not by a person) Continue the project's plan with this phase: ` +
         `${next.title}. ${left} The project's context brief says what the project is for.`,
       expects: next.deliverable
-        ? `${next.deliverable}, in the machine-first format (BA-07), complete enough that the ` +
+        ? `${this.deliverableAsWritten(next.deliverable)}, in the machine-first format (BA-07), complete enough that the ` +
           `next phase can work from it without asking you anything.`
         : `A result block saying what you did and what changed, and a doubt for every decision ` +
           `that was not yours to make.`,
     };
+  }
+
+  /**
+   * A deliverable as the agent has to type it (KB-05c, §17.1c).
+   *
+   * `workspace:knowledge/x/index.md` is the system's notation for "resolved against /workspace",
+   * and it reached the agent verbatim — a string it had never been taught, in a prompt whose every
+   * other path was project-relative. So it wrote `knowledge/x/index.md`, which resolved inside its
+   * own project. The system already knew how to expand the prefix; it expanded it for the check
+   * and not for the instruction.
+   */
+  private deliverableAsWritten(declared: string): string {
+    if (!declared.startsWith(WORKSPACE_PREFIX)) return declared;
+    return path.resolve(this.config.workspace, declared.slice(WORKSPACE_PREFIX.length));
   }
 
   /** One chain per project (§16.2); created on demand for a project older than phase 9. */
@@ -245,8 +260,8 @@ export class PhaseService {
     ];
     if (phase.deliverable) {
       parts.push(
-        `Deliverable: ${phase.deliverable}. The phase is not complete until it exists; ` +
-          `reporting success without it fails the phase.`,
+        `Deliverable: ${this.deliverableAsWritten(phase.deliverable)}. The phase is not complete ` +
+          `until it exists; reporting success without it fails the phase.`,
       );
     }
     return composeSpec({

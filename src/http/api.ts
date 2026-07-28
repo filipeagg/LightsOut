@@ -208,6 +208,10 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
             reasoning: p.reasoning ?? null,
             instructions: p.instructions,
             policy: p.policy,
+            // PE-14: the editor has to render them, and it cannot render what it is not sent —
+            // which is how the capability checkbox came to save nothing (AP-06).
+            capabilities: p.capabilities,
+            writeScopes: p.writeScopes,
             tags: p.tags,
             deliverable: p.deliverable ?? null,
             advisor: p.advisor,

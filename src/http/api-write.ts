@@ -14,6 +14,7 @@ import type { Actions } from "../control/actions.js";
 import { DOC_NAMES } from "../control/actions.js";
 import { failure, success, type Envelope } from "../mcp/envelope.js";
 import { slugify } from "../ids.js";
+import { AGENT_CAPABILITIES } from "../agents/schema.js";
 
 export type WriteDeps = { actions: Actions };
 
@@ -75,6 +76,10 @@ const agentBody = z.object({
   reasoning: reasoningSchema.optional(),
   instructions: z.string().optional(),
   policy: z.string().min(1).optional(),
+  // PE-14: what the agent may do beyond its pack, and where it may write. Both were on the profile
+  // schema and on neither writing surface, so both were silently dropped (AP-06).
+  capabilities: z.array(z.enum(AGENT_CAPABILITIES)).optional(),
+  writeScopes: z.array(z.string().min(1)).optional(),
   tags: z.array(z.string().min(1)).optional(),
   include: z.array(z.string().min(1)).optional(),
   advisor: z.boolean().optional(),

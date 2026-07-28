@@ -26,6 +26,7 @@ import { guide, TOPIC_ORDER } from "./guide.js";
 import { CAPABILITIES } from "../policy/capabilities.js";
 import { modelCatalog } from "../agents/effective.js";
 import { ENGINE_IDS, REASONING_LEVELS } from "../agents/models.js";
+import { AGENT_CAPABILITIES } from "../agents/schema.js";
 import { TOOLCHAIN_MANAGERS } from "../projects/toolchain.js";
 import type { Schedule } from "../triggers/schedule.js";
 import { conflict, failure, invalid, notFound, success, toolResult } from "./envelope.js";
@@ -323,7 +324,13 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
           model: p.model ?? null,
           reasoning: p.reasoning ?? null,
           policy: p.policy,
+          // PE-14: what it may do beyond the pack, and where it may write. Listed because a
+          // caller cannot otherwise tell a curator from any other `build` agent (AP-06).
+          capabilities: p.capabilities,
+          writeScopes: p.writeScopes,
           advisor: p.advisor,
+          enabled: p.enabled,
+          deliverable: p.deliverable ?? null,
           valid: true,
         })),
         ...snapshot.rejected.map((r) => ({
@@ -1336,6 +1343,25 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       reasoning: z.enum(["minimal", "low", "medium", "high"]).optional(),
       instructions: z.string().optional(),
       policy: z.string().min(1).optional(),
+      /**
+       * PE-14: what this agent may do beyond its pack. Missing here until 2026-07-28, which meant
+       * a caller could set `knowledge_write` twice and read an empty list back — the field was
+       * stripped by this schema before the writer ever saw it.
+       */
+      capabilities: z
+        .array(z.enum(AGENT_CAPABILITIES))
+        .optional()
+        .describe(
+          "Extra permissions beyond the pack: knowledge_write (curating a base — every pack " +
+            "denies the class, this is what grants it) and serve. A short list on purpose.",
+        ),
+      writeScopes: z
+        .array(z.string().min(1))
+        .optional()
+        .describe(
+          "Project-relative prefixes this agent may write to, e.g. [\"doc/\"]. Empty means " +
+            "anywhere in the project, which is what `build` alone gives.",
+        ),
       tags: z.array(z.string().min(1)).optional(),
       include: z.array(z.string().min(1)).optional(),
       deliverable: z.string().min(1).optional(),

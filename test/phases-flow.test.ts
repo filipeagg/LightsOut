@@ -141,6 +141,60 @@ describe("the deliverable as the agent has to type it (KB-05c)", () => {
   });
 });
 
+/**
+ * TP-07, §16.2: a plan of repeatable phases is a cycle, and a cycle has to be able to come round
+ * again. The failure: a nightly digest is `gather` → `curate`, both repeatable; after one pass both
+ * were `done`, so a trigger on `gather` re-ran the first step and nothing followed it.
+ */
+describe("relaunching a repeatable phase restarts the repeatable tail", () => {
+  const CYCLE = projectTemplateSchema.parse({
+    id: "cycle",
+    name: "Cycle",
+    phases: [
+      { id: "gather", title: "Gather", agent: "builder", repeatable: true, instructions: "gather" },
+      { id: "curate", title: "Curate", agent: "builder", repeatable: true, instructions: "curate" },
+      { id: "audit", title: "Audit", agent: "builder", instructions: "audit" },
+    ],
+  });
+
+  it("puts the later repeatable phases back to pending, and leaves the rest alone", async () => {
+    const { phases, project } = await harness({ writeDeliverables: true });
+    // A second project so the two-phase template of the outer harness is not in the way.
+    const path2 = path.join(workspace, "projects", "cycled");
+    await mkdir(path2, { recursive: true });
+    const cycled = repos.projects.create({ id: "cycled", name: "Cycled", path: path2 });
+    repos.chains.create({ projectId: cycled.id, title: cycled.name });
+    phases.materialise(cycled.id, CYCLE);
+
+    // One full pass: everything ends up done.
+    for (const row of repos.phases.list(cycled.id)) repos.phases.setStatus(row.id, "done");
+
+    await phases.launchPhase("mcp", cycled.id, "gather", {
+      request: "tonight's items",
+      expects: "the raw list",
+    });
+
+    const after = new Map(repos.phases.list(cycled.id).map((p) => [p.phase_id, p.status]));
+    expect(after.get("gather")).toBe("running");
+    // The repeatable phase after it is ready to run again…
+    expect(after.get("curate")).toBe("pending");
+    // …and the one that is not repeatable is not part of the cycle and is not touched.
+    expect(after.get("audit")).toBe("done");
+    // The project of the outer harness is untouched: the reset is scoped to one project.
+    expect(repos.phases.list(project.id).some((p) => p.status === "pending")).toBe(true);
+  });
+
+  it("does not reset anything when the relaunched phase is not repeatable", async () => {
+    const { phases, project } = await harness({ writeDeliverables: true });
+    for (const row of repos.phases.list(project.id)) repos.phases.setStatus(row.id, "done");
+    // `shape` is not repeatable, so relaunching it is refused outright (TP-07) — nothing resets.
+    await expect(
+      phases.launchPhase("mcp", project.id, "shape", { request: "again", expects: "again" }),
+    ).rejects.toThrow(/not repeatable/);
+    expect(repos.phases.list(project.id).every((p) => p.status === "done")).toBe(true);
+  });
+});
+
 describe("phase flow", () => {
   it("materialises a template into ordered phases (TP-05)", async () => {
     const { phases, project } = await harness({ writeDeliverables: true });

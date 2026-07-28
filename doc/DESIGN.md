@@ -2188,6 +2188,19 @@ one statement in descending order —
 — inside the same transaction as the insert. SQLite checks the constraint per row, so an
 ascending update would collide on the first row.
 
+**Relaunching a repeatable phase restarts the repeatable tail (TP-07 amended).** A plan of
+repeatable phases is a cycle, and a cycle has to be able to come round again. A nightly digest is
+`gather` → `curate`, both `repeatable`; after one pass both were `done`, so a trigger on `gather`
+re-ran the first step and `onTaskClosed` found no pending phase to continue with. The loop only
+looked like a loop.
+
+So `launchPhase` on a repeatable phase puts every **repeatable** phase after it back to `pending`.
+Only repeatable ones, which is what makes it safe for an arc: relaunching `full-development`'s
+`build` leaves `qa` and `audit` alone, because neither declares itself repeatable and neither is part
+of a cycle. A phase with work in flight is never touched, and each reset is a `phase.state` event
+with `reason: repeatable cycle restarted` — a status that changed without anybody asking has to say
+why.
+
 One chain per project. `tasks.chain_id` is `NOT NULL`, so `createProject` creates the project's
 chain immediately and every phase task joins it in position order; `project_status.chain` stays
 optional in the contract only because a project created before phase 9 may not have one. The

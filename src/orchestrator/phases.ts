@@ -188,6 +188,7 @@ export class PhaseService {
     const taskId = launched.taskIds[0]!;
     const running = this.repos.phases.markRunning(phase.id, taskId);
     this.emitPhase(running, actor);
+    this.restartRepeatableTail(project.id, running, actor);
     this.bus.emit("overview");
 
     return {
@@ -196,6 +197,36 @@ export class PhaseService {
       taskId,
       started: launched.started,
     };
+  }
+
+  /**
+   * Relaunching a repeatable phase puts the repeatable phases after it back to `pending` (TP-07,
+   * §16.2 amendment).
+   *
+   * The failure this fixes: a recurring plan runs once and then cannot run again. A daily digest is
+   * `gather` → `curate`, both repeatable; after the first pass both are `done`, so a trigger on
+   * `gather` re-ran the first step and `onTaskClosed` found no pending phase to continue with. The
+   * loop only looked like a loop.
+   *
+   * Only `repeatable` phases are reset, which is why this is safe for an arc: relaunching
+   * `full-development`'s `build` leaves `qa` and `audit` alone, because neither declares itself
+   * repeatable and neither is part of a cycle. A phase with work in flight is never touched.
+   */
+  private restartRepeatableTail(
+    projectId: string,
+    from: ProjectPhaseRow,
+    actor: PhaseActor,
+  ): void {
+    if (!from.repeatable) return;
+    for (const later of this.repos.phases.list(projectId)) {
+      if (later.position <= from.position) continue;
+      if (!later.repeatable) continue;
+      if (later.status !== "done" && later.status !== "failed" && later.status !== "skipped") {
+        continue;
+      }
+      const reset = this.repos.phases.setStatus(later.id, "pending");
+      this.emitPhase(reset, actor, "repeatable cycle restarted");
+    }
   }
 
   /**

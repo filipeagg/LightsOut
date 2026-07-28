@@ -88,7 +88,7 @@ label{display:block;font-size:13px;font-weight:500;color:var(--fg-2);margin-bott
 .note.good{border-color:var(--green-line);background:var(--green-bg);color:var(--green-fg)}
 .copy{display:flex;gap:8px;align-items:center;border-radius:var(--r-sm);height:40px;padding:0 6px 0 12px;
   font-family:var(--mono);font-size:13px;background:var(--surface-2);border:1px solid var(--line-2);color:var(--fg)}
-.copy span{flex:1;overflow:auto;white-space:nowrap}
+.copy span{flex:1;min-width:0;overflow:auto;white-space:nowrap}
 .wizstep{display:grid;grid-template-columns:28px 1fr;gap:16px;padding:24px 0;border-top:1px solid var(--line)}
 .wizstep:first-of-type{border-top:none}
 .wizn{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:12px;
@@ -245,6 +245,9 @@ function engineRow(engine) {
         <button class="btn sm" data-copy="${esc(flow.url)}">${ICON.copy} Copy</button></div>
       ${flow.code ? `<p style="margin:10px 0 0">Code: <code class="num">${esc(flow.code)}</code></p>` : ""}
     </div>` : `<div class="note">Starting the ${esc(name)} CLI…</div>`}
+    <p class="hint" style="margin-top:10px">The engine's own CLI output, unedited — nothing below
+      needs to be typed anywhere. Approving in the browser tab is the whole step; this updates on
+      its own once it does.</p>
     <div class="log">${esc((flow.lines || []).slice(-8).join("\n"))}</div>` : "";
 
   const failed = flow && flow.done && !flow.auth
@@ -295,11 +298,19 @@ function renderDesktop() {
   const mcp = state.mcp;
   $("s3").innerHTML = `${badge(3)}<div>
     <h3>Connect Claude Desktop</h3>
-    <p class="tiny dim">Add LightsOut as a custom connector. Recent builds manage MCP servers in
-      the app and never read the config file, so this URL is the whole setup.</p>
-    <div class="copy" style="margin-top:16px"><span class="mono">${esc(mcp.url)}</span>
-      <button class="btn sm" data-copy="${esc(mcp.url)}">${ICON.copy} Copy</button></div>
-    <p class="hint">Claude Desktop → Settings → Connectors → Add custom connector → paste the URL.</p>
+    <p class="tiny dim">Install <code>dist/lightsout.mcpb</code>: double-click it, drag it onto the
+      Claude Desktop window, or use Settings → Extensions → Advanced settings → Install Extension…</p>
+    <div class="note warn">A custom connector URL will not work here: Claude reaches remote MCP
+      servers from Anthropic's cloud, which has no route to your <code>127.0.0.1</code>. The
+      extension is the only supported path for a local server.</div>
+    <p class="hint">Rebuilt the container or changed <code>extension/</code>? Run
+      <code>scripts/windows/Build-Extension.ps1</code> (or the maintainer equivalent) to refresh
+      <code>dist/lightsout.mcpb</code> before installing it again.</p>
+    <details style="margin-top:12px"><summary class="tiny dim" style="cursor:pointer">Server URL
+      (for the extension's own config, not for pasting into a connector dialog)</summary>
+      <div class="copy" style="margin-top:12px"><span class="mono">${esc(mcp.url)}</span>
+        <button class="btn sm" data-copy="${esc(mcp.url)}">${ICON.copy} Copy</button></div>
+    </details>
     <div class="row wrap" style="margin-top:16px">
       ${mcp.connected
         ? `<span class="pill green"><span class="sdot"></span>connected${

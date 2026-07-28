@@ -1663,8 +1663,10 @@ Primary: streamable HTTP at `POST /mcp` on the same Fastify server (protected on
     "command": "docker", "args": ["exec","-i","lightsout","node","dist/mcp/stdio-bridge.js"] } } }
 ```
 
-Current builds of Claude Desktop ignore that file, so the documented path is the custom-connector
-URL or the packed extension (SU-09, §14.3b); the bridge stays for builds that still read it.
+Current builds of Claude Desktop ignore that file, and a custom connector cannot reach a loopback
+server either (Claude opens that connection from Anthropic's cloud, which has no route to
+`127.0.0.1`), so the documented path is the packed extension alone (SU-09, §14.3b); the bridge is
+what the extension runs, and stays standalone for builds that still read `claude_desktop_config.json`.
 
 The bridge holds no state and no DB handle (single-writer preserved, ST-02).
 
@@ -1995,9 +1997,10 @@ later from `#/setup`:
    user wants another path, the panel shows the one line to change in `Start-LightsOut.ps1` and
    the restart button; it cannot remount itself from inside the container.
 2. **Connect engines.** One button per engine (§14.4), or a field to paste an API key.
-3. **Connect Claude Desktop.** `http://127.0.0.1:8484/mcp` with a copy button and the
-   custom-connector instructions (SU-09), plus a "test connection" indicator that turns green
-   when the first MCP call arrives.
+3. **Connect Claude Desktop.** Instructions to install the `dist/lightsout.mcpb` extension
+   (SU-09), plus a "test connection" indicator that turns green when the first MCP call arrives.
+   The `/mcp` URL is shown too, collapsed, for reference — not as something to paste into a
+   connector dialog, which cannot reach a loopback server.
 4. **First project.** Name, template (the four builtins, TP-02), knowledge bases to attach
    (none on a fresh install), optional git remote and verify command; scaffolds through the same
    `createProject` action as MCP (PM-01, TP-05).
@@ -2011,10 +2014,14 @@ detail the user never sees. The scripts locate `docker.exe` themselves, start Do
 it is not running, and report state by reading `/health` instead of asking the user to interpret
 anything.
 
-Connecting Claude Desktop is a URL, not a file. Recent builds manage MCP servers through
-connectors and extensions and never read `claude_desktop_config.json`, so the documented path is
-pasting `http://127.0.0.1:8484/mcp` into the app's custom-connector dialog: no bridge process, no
-`docker exec`, nothing to edit. The wizard shows the URL with a copy button.
+Connecting Claude Desktop is installing a file, not editing one. Recent builds manage MCP servers
+through connectors and extensions and never read `claude_desktop_config.json` — but a custom
+connector cannot reach a loopback server either, since Claude opens that connection from
+Anthropic's cloud, which has no route to `127.0.0.1`. So the documented path is installing
+`dist/lightsout.mcpb` itself: double-click, drag onto the app window, or Settings →
+Extensions → Advanced settings → Install Extension. No bridge process to run by hand, no
+`docker exec`, nothing to edit; the extension bundles the stdio bridge itself. The wizard shows the
+same instructions plus the `/mcp` URL, collapsed, for anyone scripting their own client.
 
 `Connect-ClaudeDesktop.ps1` and `dist/mcp/stdio-bridge.js` remain for builds that still read the
 config file. The script waits for the app to exit before patching, because Claude Desktop

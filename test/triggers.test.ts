@@ -11,6 +11,12 @@ import { migrate } from "../src/db/migrate.js";
 import { createRepos, type Repos } from "../src/db/repos/index.js";
 import { createBus } from "../src/bus.js";
 import { matches, nextFire, parseCron, previousFire } from "../src/triggers/cron.js";
+import {
+  cronToSchedule,
+  describeCronPlainly,
+  describeSchedule,
+  scheduleToCron,
+} from "../src/triggers/schedule.js";
 import { Scheduler } from "../src/triggers/scheduler.js";
 import type { Actions } from "../src/control/actions.js";
 
@@ -55,6 +61,83 @@ describe("the cron parser", () => {
     expect(previousFire(fields, at("2026-07-28T08:00:00"))?.toISOString().slice(0, 16)).toBe(
       new Date("2026-07-28T07:00:00").toISOString().slice(0, 16),
     );
+  });
+});
+
+describe("saying when, without knowing cron (TR-08)", () => {
+  it("turns each shape into the cron it means", () => {
+    expect(scheduleToCron({ unit: "minutes", every: 15 })).toBe("*/15 * * * *");
+    expect(scheduleToCron({ unit: "minutes", every: 1 })).toBe("* * * * *");
+    expect(scheduleToCron({ unit: "hours", every: 2, minute: 30 })).toBe("30 */2 * * *");
+    expect(scheduleToCron({ unit: "hours", every: 1, minute: 0 })).toBe("0 * * * *");
+    expect(scheduleToCron({ unit: "days", every: 1, hour: 7, minute: 0 })).toBe("0 7 * * *");
+    expect(scheduleToCron({ unit: "days", every: 3, hour: 7, minute: 0 })).toBe("0 7 */3 * *");
+    expect(
+      scheduleToCron({ unit: "weeks", weekdays: [1, 2, 3, 4, 5], hour: 7, minute: 0 }),
+    ).toBe("0 7 * * 1,2,3,4,5");
+    expect(scheduleToCron({ unit: "months", dayOfMonth: 1, hour: 9, minute: 0 })).toBe("0 9 1 * *");
+    expect(scheduleToCron({ unit: "custom", cron: "0 7 * * 1-5" })).toBe("0 7 * * 1-5");
+  });
+
+  it("refuses a shape it cannot honour, in the caller's words", () => {
+    expect(() => scheduleToCron({ unit: "minutes", every: 0 })).toThrow(/minutes between runs/);
+    expect(() => scheduleToCron({ unit: "hours", every: 2, minute: 99 })).toThrow(/minute/);
+    expect(() => scheduleToCron({ unit: "weeks", weekdays: [], hour: 7, minute: 0 })).toThrow(
+      /at least one day/,
+    );
+    expect(() => scheduleToCron({ unit: "custom", cron: "nope" })).toThrow(/five fields/);
+  });
+
+  it("reads a stored cron back into the shape it came from", () => {
+    for (const schedule of [
+      { unit: "minutes", every: 15 },
+      { unit: "hours", every: 2, minute: 30 },
+      { unit: "days", every: 1, hour: 7, minute: 0 },
+      { unit: "days", every: 3, hour: 7, minute: 0 },
+      { unit: "weeks", weekdays: [1, 3, 5], hour: 18, minute: 45 },
+      { unit: "months", dayOfMonth: 1, hour: 9, minute: 0 },
+    ] as const) {
+      expect(cronToSchedule(scheduleToCron(schedule))).toEqual(schedule);
+    }
+  });
+
+  it("opens as custom what the shapes cannot say, rather than rounding it", () => {
+    // A cron with two hours, two days of the month and a weekday: no shape means this.
+    expect(cronToSchedule("0 9,17 1,15 * 2").unit).toBe("custom");
+    expect(cronToSchedule("0 9 * 3 *").unit).toBe("custom");
+    expect(cronToSchedule("0 7 * * 1-5").unit).toBe("custom"); // a range, not a list
+    expect(cronToSchedule("nonsense").unit).toBe("custom");
+  });
+
+  it("says what it means in a sentence", () => {
+    expect(describeSchedule({ unit: "days", every: 1, hour: 7, minute: 0 }).text).toBe(
+      "every day at 07:00",
+    );
+    expect(
+      describeSchedule({ unit: "weeks", weekdays: [1, 2, 3, 4, 5], hour: 7, minute: 0 }).text,
+    ).toBe("every weekday at 07:00");
+    expect(describeSchedule({ unit: "weeks", weekdays: [0, 6], hour: 10, minute: 30 }).text).toBe(
+      "at weekends at 10:30",
+    );
+    expect(describeSchedule({ unit: "minutes", every: 15 }).text).toBe("every 15 minutes");
+    expect(describeSchedule({ unit: "months", dayOfMonth: 1, hour: 9, minute: 5 }).text).toBe(
+      "on day 1 of every month at 09:05",
+    );
+  });
+
+  it("warns when a step is not the even rhythm it looks like", () => {
+    // */7 fires at :00 :07 … :56 and then jumps four minutes. Saying "every 7 minutes" would be
+    // a comfortable lie, and the person finds out at 03:00.
+    expect(describeSchedule({ unit: "minutes", every: 7 }).caveat).toMatch(/jumps/);
+    expect(describeSchedule({ unit: "minutes", every: 15 }).caveat).toBeUndefined();
+    expect(describeSchedule({ unit: "days", every: 3, hour: 7, minute: 0 }).caveat).toMatch(
+      /restarts on the 1st/,
+    );
+  });
+
+  it("describes what is stored, whichever way it was written", () => {
+    expect(describeCronPlainly("0 7 * * 1,2,3,4,5").text).toBe("every weekday at 07:00");
+    expect(describeCronPlainly("*/30 * * * *").text).toBe("every 30 minutes");
   });
 });
 

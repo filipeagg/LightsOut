@@ -36,6 +36,35 @@ async function envelope(
 }
 
 const idParam = z.object({ id: z.string().min(1) });
+
+/** A schedule in ordinary terms (TR-08, §16b.1); the same shapes the MCP tools accept. */
+const everyBody = z.discriminatedUnion("unit", [
+  z.object({ unit: z.literal("minutes"), every: z.number().int().min(1).max(59) }),
+  z.object({
+    unit: z.literal("hours"),
+    every: z.number().int().min(1).max(23),
+    minute: z.number().int().min(0).max(59),
+  }),
+  z.object({
+    unit: z.literal("days"),
+    every: z.number().int().min(1).max(31),
+    hour: z.number().int().min(0).max(23),
+    minute: z.number().int().min(0).max(59),
+  }),
+  z.object({
+    unit: z.literal("weeks"),
+    weekdays: z.array(z.number().int().min(0).max(6)).min(1),
+    hour: z.number().int().min(0).max(23),
+    minute: z.number().int().min(0).max(59),
+  }),
+  z.object({
+    unit: z.literal("months"),
+    dayOfMonth: z.number().int().min(1).max(28),
+    hour: z.number().int().min(0).max(23),
+    minute: z.number().int().min(0).max(59),
+  }),
+  z.object({ unit: z.literal("custom"), cron: z.string().min(1) }),
+]);
 const engineSchema = z.enum(["claude", "codex"]);
 const reasoningSchema = z.enum(["minimal", "low", "medium", "high"]);
 
@@ -447,7 +476,9 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
       const input = body(
         z.object({
           name: z.string().min(1),
-          cron: z.string().min(1),
+          // TR-08: the picker sends `every`; `cron` is what the Custom option sends.
+          every: everyBody.optional(),
+          cron: z.string().min(1).optional(),
           phase: z.string().min(1).optional(),
           agentId: z.string().min(1).optional(),
           title: z.string().min(1).optional(),
@@ -467,6 +498,7 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
       const input = body(
         z.object({
           name: z.string().min(1).optional(),
+          every: everyBody.optional(),
           cron: z.string().min(1).optional(),
           title: z.string().min(1).optional(),
           request: z.string().min(1).optional(),
@@ -476,6 +508,18 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
         request.body,
       );
       return { trigger: actions.updateTrigger("panel", id, input) };
+    }),
+  );
+
+  // TR-08: what the form currently says, in words and as the next three times. Called as the
+  // picker is used, before anything exists — which is why it is a POST that writes nothing.
+  app.post("/api/schedule/preview", async (request, reply) =>
+    envelope(reply, async () => {
+      const input = body(
+        z.object({ every: everyBody.optional(), cron: z.string().min(1).optional() }),
+        request.body,
+      );
+      return actions.previewSchedule(input);
     }),
   );
 

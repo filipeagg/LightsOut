@@ -58,6 +58,9 @@ const READ_ONLY = new Set([
   "previewLog",
   // TR-06: the schedule, with the next fire time. `list_triggers` and the panel serve the same read.
   "listTriggers",
+  // TR-08: arithmetic on a schedule nobody has saved yet. `preview_schedule` and
+  // `POST /api/schedule/preview` are the same call; neither writes anything.
+  "previewSchedule",
 ]);
 
 /**
@@ -80,6 +83,8 @@ const INTERNAL = new Set([
   "commitDoc",
   // SR-09: resolving "the run in flight for this project" for steer and stop.
   "liveRunFor",
+  // TR-08: one schedule, stated either way.
+  "cronFrom",
 ]);
 
 /** The one exception, with its reason (VT-02, MC-07). Adding to this list is a design decision. */

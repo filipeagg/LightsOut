@@ -128,7 +128,11 @@ export function previousFire(fields: CronFields, before: Date): Date | null {
   return null;
 }
 
-/** A plain-language reading, for the panel and for the confirmation a person deserves. */
+/**
+ * A field-by-field reading. Kept for diagnosing an expression that does not do what someone
+ * expected; what a person is shown is `describeSchedule` in `schedule.ts`, which speaks English
+ * (TR-08).
+ */
 export function describeCron(expression: string): string {
   const fields = parseCron(expression);
   const list = (set: Set<number>, all: number) =>

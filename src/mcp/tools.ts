@@ -27,6 +27,7 @@ import { CAPABILITIES } from "../policy/capabilities.js";
 import { modelCatalog } from "../agents/effective.js";
 import { ENGINE_IDS, REASONING_LEVELS } from "../agents/models.js";
 import { TOOLCHAIN_MANAGERS } from "../projects/toolchain.js";
+import type { Schedule } from "../triggers/schedule.js";
 import { conflict, failure, invalid, notFound, success, toolResult } from "./envelope.js";
 // One read model for both surfaces: the panel renders these exact shapes (DESIGN §12.0).
 import { activeRunFor, doubtView, projectListItem, projectStatusView } from "../views.js";
@@ -69,6 +70,38 @@ const modelChoiceSchema = {
     .describe("Model for this launch only; one of those `list_agents` reports for the engine."),
   reasoning: z.enum(REASONING_LEVELS).optional(),
 };
+
+/**
+ * A schedule in ordinary terms (TR-08, §16b.1). The same five shapes the panel's picker offers,
+ * so a client that does not speak cron produces exactly the row the picker would.
+ */
+const everySchema = z.discriminatedUnion("unit", [
+  z.object({ unit: z.literal("minutes"), every: z.number().int().min(1).max(59) }),
+  z.object({
+    unit: z.literal("hours"),
+    every: z.number().int().min(1).max(23),
+    minute: z.number().int().min(0).max(59),
+  }),
+  z.object({
+    unit: z.literal("days"),
+    every: z.number().int().min(1).max(31),
+    hour: z.number().int().min(0).max(23),
+    minute: z.number().int().min(0).max(59),
+  }),
+  z.object({
+    unit: z.literal("weeks"),
+    weekdays: z.array(z.number().int().min(0).max(6)).min(1),
+    hour: z.number().int().min(0).max(23),
+    minute: z.number().int().min(0).max(59),
+  }),
+  z.object({
+    unit: z.literal("months"),
+    dayOfMonth: z.number().int().min(1).max(28),
+    hour: z.number().int().min(0).max(23),
+    minute: z.number().int().min(0).max(59),
+  }),
+  z.object({ unit: z.literal("custom"), cron: z.string().min(1) }),
+]);
 
 function docPath(project: ProjectRow, doc: string): string {
   return path.join(project.path, "doc", `${doc}.md`);
@@ -464,8 +497,12 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
         id: t.id,
         name: t.name,
         projectId: t.project_id,
+        // The sentence first: it is what a person reads. The cron and the shape follow, for a
+        // caller that wants to edit it (TR-08).
+        schedule: t.cronReads,
+        ...(t.caveat ? { caveat: t.caveat } : {}),
+        every: t.every,
         cron: t.cron,
-        cronReads: t.cronReads,
         fires: t.phase_ref ? { phase: t.phase_ref } : { agent: t.agent_id, title: t.title },
         request: t.request,
         expects: t.expects,
@@ -486,12 +523,21 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
     {
       projectId: z.string().min(1),
       name: z.string().min(1).describe("What this trigger is for, in a few words."),
+      every: everySchema
+        .optional()
+        .describe(
+          "When it runs, in ordinary terms (TR-08). One of: {unit:'minutes',every:15}, " +
+            "{unit:'hours',every:2,minute:0}, {unit:'days',every:1,hour:7,minute:0}, " +
+            "{unit:'weeks',weekdays:[1,2,3,4,5],hour:7,minute:0} (0 is Sunday), " +
+            "{unit:'months',dayOfMonth:1,hour:9,minute:0}. Prefer this over cron.",
+        ),
       cron: z
         .string()
         .min(1)
+        .optional()
         .describe(
-          "Five fields, container timezone: minute hour day-of-month month day-of-week. " +
-            '"0 7 * * 1-5" is 07:00 on weekdays.',
+          "The escape hatch, for what `every` cannot say. Five fields, container timezone: " +
+            'minute hour day-of-month month day-of-week. "0 7 * * 1-5" is 07:00 on weekdays.',
         ),
       phase: z
         .string()
@@ -512,7 +558,8 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       trigger: actions.createTrigger("mcp", {
         projectId: args.projectId,
         name: args.name,
-        cron: args.cron,
+        ...(args.every ? { every: args.every as Schedule } : {}),
+        ...(args.cron ? { cron: args.cron } : {}),
         ...(args.phase ? { phase: args.phase } : {}),
         ...(args.agentId ? { agentId: args.agentId } : {}),
         ...(args.title ? { title: args.title } : {}),
@@ -529,15 +576,35 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
     {
       triggerId: z.string().min(1),
       name: z.string().min(1).optional(),
+      every: everySchema.optional().describe("A new schedule in ordinary terms (TR-08)."),
       cron: z.string().min(1).optional(),
       title: z.string().min(1).optional(),
       request: z.string().min(1).optional(),
       expects: z.string().min(1).optional(),
       enabled: z.boolean().optional(),
     },
-    async ({ triggerId, ...patch }) => ({
-      trigger: actions.updateTrigger("mcp", triggerId, stripUndefined(patch)),
+    async ({ triggerId, every, ...patch }) => ({
+      trigger: actions.updateTrigger("mcp", triggerId, {
+        ...stripUndefined(patch),
+        ...(every ? { every: every as Schedule } : {}),
+      }),
     }),
+  );
+
+  tool(
+    "preview_schedule",
+    "What a schedule means and when it would next happen, before you create anything (TR-08). " +
+      "Takes the same `every` or `cron` create_trigger takes, and answers with the sentence to " +
+      "show the person and the next three times it fires.",
+    {
+      every: everySchema.optional(),
+      cron: z.string().min(1).optional(),
+    },
+    async ({ every, cron }) =>
+      actions.previewSchedule({
+        ...(every ? { every: every as Schedule } : {}),
+        ...(cron ? { cron } : {}),
+      }),
   );
 
   tool(

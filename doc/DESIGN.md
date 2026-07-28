@@ -2316,6 +2316,36 @@ lives in `src/triggers/cron.ts`, because a dependency for this would be a depend
 forever. Times are the container's, which is UTC unless the compose file says otherwise, and the
 panel says which timezone it is showing rather than pretending to know the user's.
 
+### 16b.1 Saying when, without knowing cron (TR-08)
+
+`0 7 * * 1-5` is precise, and it is also a small exam. Most schedules people actually want are one
+of five shapes, so those are offered as shapes and cron stays underneath as the storage format —
+one truth in the database, no second field to disagree with it.
+
+```
+every N minutes                     */N * * * *
+every N hours at minute M           M */N * * *
+every day at HH:MM                  M H * * *          (every N days: M H */N * *)
+on chosen weekdays at HH:MM         M H * * 1,3,5
+on day D of the month at HH:MM      M H D * *
+custom                              whatever was typed
+```
+
+`src/triggers/schedule.ts` converts both ways and is shared, so the panel's form and
+`create_trigger`'s `every` argument produce identical rows. Reading back (`cronToSchedule`) is
+best-effort by design: a cron the shapes cannot express — `0 9 1,15 * 2` — opens as **Custom**
+rather than being silently rounded into a shape that means something else.
+
+Two honesty rules, because a scheduler that surprises people at 03:00 is worse than one that asks:
+
+- **A step is a step, not a rhythm.** `*/7` in the minute field fires at :00, :07 … :56 and then
+  jumps four minutes at the hour, and `*/3` in day-of-month restarts on the 1st of each month. When
+  a chosen interval does not divide its field evenly, the description says exactly which values it
+  fires on rather than repeating the comfortable lie "every 7 minutes".
+- **Nothing is saved on trust.** Every surface echoes the schedule in plain language *and* the next
+  time it will fire — `describeSchedule` and `nextFire` — before the row exists. The panel shows both
+  live under the form; `create_trigger` returns them.
+
 ## 17. Curated knowledge (KB-01..07, phase 9)
 
 ### 17.1 Base format

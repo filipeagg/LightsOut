@@ -38,7 +38,10 @@ docker run -d --name lightsout --restart unless-stopped \
 
 Open <http://127.0.0.1:8484/> — the first-run wizard walks through connecting the engines,
 Claude Desktop and your first project. Install `dist/lightsout.mcpb` in Claude Desktop to get the
-tools (see `extension/README.md`).
+tools: double-click the file, drag it onto the Claude Desktop window, or go to Settings →
+Extensions → Advanced settings → Install Extension… (see `extension/README.md`). A custom
+connector URL will not work here: Claude reaches remote MCP servers from Anthropic's cloud, which
+has no route to your `127.0.0.1`.
 
 Panel and API are bound to localhost only. Health: `curl -s localhost:8484/health`.
 

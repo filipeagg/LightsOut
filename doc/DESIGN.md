@@ -1654,6 +1654,37 @@ paths      C:\Users\…\LightsOut\projects\consultant-portal
 
 The live view is the panel at `127.0.0.1:8484`, and the card says so in one line.
 
+### 10.0d Knowledge is a source, not a footnote (KB-01)
+
+**The failure this fixes.** The instructions listed four nouns — project, phase, chain, agent —
+all of them about running coding agents, and said nothing about knowledge. A client with no memory
+of this repository read that, correctly inferred "this is a dev-tooling orchestrator", and told a
+person that a question about market news had no answer here — while a `mercado` base, curated daily
+by the `market-radar` template into exactly that shape, sat one `list_knowledge` call away. The
+system was right and the person got a worse answer anyway, because the one text guaranteed to be in
+context never said knowledge was a capability at all, only that it exists "related" to a project
+(§10.0, `related.knowledge`).
+
+It happened twice. The second time the client did not reach for the web at all: asked what menu
+options EFEMIS has, it answered from a project's source code (`efemis-map-poc`), while
+`knowledge/hispatec/efemis/producto/Estructura_Menu_EFEMIS.md` held the answer. A generic bullet
+was not enough, because a name in context beats a capability in the abstract.
+
+**The fix, in two parts.**
+
+- One bullet in the rules names knowledge as a source and names the two wrong places: "check there
+  before a project's code or the web". `guide{topic:"knowledge"}` remains the detail.
+- `buildServerInstructions(bases)` names the bases this install actually has — `id (kind)`, capped
+  at 8 with "and N more" — between the rules and the closing line. `createMcpServer` passes
+  `deps.knowledge.list()`, the loader's last snapshot: it loads at boot and every `list_knowledge`
+  refreshes it, so a base added on disk is named from the next conversation on. With no curated
+  base the text is `SERVER_INSTRUCTIONS` unchanged: nothing to name, no empty sentence.
+
+`SERVER_INSTRUCTIONS` stays the no-base text, so the length budget in
+`test/guide-and-contract.test.ts` still measures the fixed part; it moved from 1750 to 1900 to hold
+the bullet, and the comment there still says the rule that earns this budget — a client demonstrably
+got it wrong without the line.
+
 ### 10.1 Transport
 
 Primary: streamable HTTP at `POST /mcp` on the same Fastify server (protected only by localhost binding, WP-09). For Claude Desktop stdio configs, `dist/mcp/stdio-bridge.js` is a stateless bridge: reads JSON-RPC from stdin, forwards to `http://127.0.0.1:8484/mcp`, streams responses back. Desktop config:

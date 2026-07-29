@@ -4,7 +4,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { availableTopics, guide, TOPIC_ORDER } from "../src/mcp/guide.js";
-import { SERVER_INSTRUCTIONS } from "../src/mcp/server.js";
+import type { KnowledgeBase } from "../src/knowledge/loader.js";
+import { buildServerInstructions, SERVER_INSTRUCTIONS } from "../src/mcp/server.js";
 import { lintDocument } from "../src/projects/deliverable.js";
 import {
   composeSpec,
@@ -91,9 +92,34 @@ describe("the manual served over MCP (MC-09)", () => {
     expect(SERVER_INSTRUCTIONS).toMatch(/127\.0\.0\.1:8484/);
     // TP-09: choosing a template is one of the things a client gets wrong by never being told.
     expect(SERVER_INSTRUCTIONS).toMatch(/list_templates/);
+    // KB-01: without this, a client with no memory of this repo reads "runs coding agents" and
+    // "four nouns" (none of them knowledge) and concludes there is no knowledge to query — a
+    // real client did exactly that about the "mercado" base before this line existed.
+    expect(SERVER_INSTRUCTIONS).toMatch(/list_knowledge/);
     // Short: it is in context for every conversation. The budget grows only with a rule that
     // earned its place; every line here is one a client demonstrably got wrong without it.
-    expect(SERVER_INSTRUCTIONS.length).toBeLessThan(1750);
+    expect(SERVER_INSTRUCTIONS.length).toBeLessThan(1900);
+  });
+
+  it("names the curated bases an install actually has (KB-01, §10.0d)", () => {
+    const base = (id: string, kind: string): KnowledgeBase =>
+      ({ manifest: { id, kind } }) as unknown as KnowledgeBase;
+    // Nothing curated: nothing to name, and no empty sentence pretending otherwise.
+    expect(buildServerInstructions([])).toBe(SERVER_INSTRUCTIONS);
+    const two = buildServerInstructions([base("efemis", "technical"), base("mercado", "market")]);
+    // The failure this closes: a client read "runs coding agents" and answered a question about
+    // EFEMIS from a project's code, with the efemis base one call away.
+    expect(two).toMatch(/efemis \(technical\)/);
+    expect(two).toMatch(/mercado \(market\)/);
+    // The rules and the closing line survive the insertion.
+    expect(two).toMatch(/list_templates/);
+    expect(two).toMatch(/127\.0\.0\.1:8484/);
+    // Many bases cannot push the rules out of sight.
+    const many = buildServerInstructions(
+      Array.from({ length: 12 }, (_, i) => base(`b${i}`, "other")),
+    );
+    expect(many).toMatch(/and 4 more/);
+    expect(many).not.toMatch(/b8 \(other\)/);
   });
 });
 

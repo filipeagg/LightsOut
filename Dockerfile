@@ -2,6 +2,11 @@
 # Build context expects `dist/` to be built on the host or in a builder stage.
 
 FROM node:22-slim AS builder
+# node:22-slim ships npm 10.9.8, whose arborist crashes resolving vitest's optional peer set
+# ("Cannot read properties of null (reading 'edgesOut')") since @vitejs/devtools-vitest started
+# publishing 0.4.x. Nothing in this repo changed; the registry did. npm 12 resolves it, so both
+# stages that install devDependencies pin it. Pinned, not @latest, so the build stays reproducible.
+RUN npm install -g npm@12.0.2 --no-audit --no-fund
 WORKDIR /build
 COPY package*.json tsconfig.json ./
 # --ignore-scripts: the builder only typechecks/emits JS, so native modules
@@ -17,6 +22,8 @@ FROM node:22-slim AS test
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
+# Same npm pin as the builder stage, and for the same reason.
+RUN npm install -g npm@12.0.2 --no-audit --no-fund
 WORKDIR /build
 COPY package*.json tsconfig.json ./
 RUN npm install --no-audit --no-fund
@@ -51,6 +58,10 @@ RUN set -eu; \
       && rm -rf /var/lib/apt/lists/*; \
     fi; \
     rm -rf /tmp/toolchain.d
+
+# Same npm pin as the builder and test stages: `--omit=dev` still resolves the whole tree before
+# pruning it, so the runtime install hits the identical arborist crash.
+RUN npm install -g npm@12.0.2 --no-audit --no-fund
 
 # Engine CLIs and ACP adapters, pinned (see doc/DECISIONS.md).
 RUN npm install -g --no-audit --no-fund \

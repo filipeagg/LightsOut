@@ -1,6 +1,6 @@
 {
   "name": "lightsout",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "description": "Agent orchestration system: chains of coding-agent runs, mediated permissions, doubts and second opinions, driven over MCP.",
   "license": "SEE LICENSE IN LICENSE",

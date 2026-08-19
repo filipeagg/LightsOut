@@ -27,7 +27,10 @@ for the app to close.
 
 ## Contents
 
-- `manifest.json` — metadata, the fifteen tools, and the port as a user-configurable option.
+- `manifest.json` — metadata, the port as a user-configurable option, and `tools_generated: true`.
+  The tool list is **not** written here: the container serves it, it grows with every release, and
+  some descriptions name this install's own knowledge bases. A static copy would be stale the day
+  after it is packed, and would carry local names into a published file.
 - `server/index.js` — the bridge. No dependencies: Claude Desktop ships its own Node runtime,
   and the bridge only needs `fetch` against localhost. It holds no state and no database handle,
   so the container remains the single writer (ST-02).

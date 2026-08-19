@@ -45,6 +45,6 @@ try {
 $manifest = Get-Content (Join-Path $Source "manifest.json") -Raw | ConvertFrom-Json
 Write-Host ""
 Write-Host "Built $target" -ForegroundColor Green
-Write-Host "  $($manifest.display_name) $($manifest.version), $($manifest.tools.Count) tools"
+Write-Host "  $($manifest.display_name) $($manifest.version), tools listed by the container at connect time"
 Write-Host "Install it by double-clicking the file, or from Claude Desktop:"
 Write-Host "  Settings > Extensions > Advanced settings > Install Extension..."

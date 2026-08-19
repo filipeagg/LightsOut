@@ -223,6 +223,8 @@ existing codebase is put together, how an API behaves, how the organisation does
   - KB-11c MUST. A hard-rule base is never the writable one (KB-05), whatever a template declares: an agent that could rewrite the rules it is bound by is not bound by them.
   - KB-11d SHOULD. Enforcement is by instruction and self-report, and the documentation says so plainly: nothing mechanically parses a design system to detect a violation. What the system guarantees is that a violation the agent declares cannot be waved through by anything other than the user.
 
+- KB-13 MUST. Curated knowledge is queryable without attaching it to anything: a search over the documents of every base — or one named base — returns the documents that mention a word or phrase with an excerpt each, accent- and case-insensitive, and reading one whole is the next call. The tools that do this say in their own descriptions that they answer questions about a product, a market or a way of working, and they name the bases the install actually has: the tool list is the only text a client is guaranteed to read, and a client that read "runs coding agents unattended" answered a question about EFEMIS from a project's source code with the answer one call away, twice.
+
 ## 15. VT — Credentials vault
 
 - VT-01 MUST. A vault holds the URLs, credentials and test accounts the probing agent (BA-02) needs: entries of `{id, label, base_url, auth kind, fields, notes, scope}`, grouped by target system.

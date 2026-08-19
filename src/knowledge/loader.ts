@@ -51,6 +51,15 @@ export type AdoptableFolder = {
   hasIndex: boolean;
 };
 
+/** One document that matches a search, with enough context to decide whether to read it (KB-13). */
+export type KnowledgeHit = {
+  baseId: string;
+  kind: string;
+  file: string;
+  line: number;
+  excerpt: string;
+};
+
 export type KnowledgeLoadReport = {
   loaded: number;
   rejected: RejectedBase[];
@@ -63,6 +72,19 @@ export const INDEX_FILE = "index.md";
 /** A base is a tree, not a flat list (KB-09), but a bounded one. */
 const MAX_DEPTH = 8;
 const MAX_DOCUMENTS = 500;
+
+/** Long enough to answer from, short enough that twenty hits are still a list (KB-13). */
+const MAX_EXCERPT = 400;
+
+/** Lowercase and strip diacritics so `vademecum` finds `Vademécum`. */
+function fold(text: string): string {
+  // The class is written with escapes on purpose: combining marks are invisible in an editor.
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
 
 /**
  * The base's index, by whatever case it was written in. A folder that arrived with `INDEX.md`
@@ -215,6 +237,51 @@ export class KnowledgeLoader {
     throw lastError instanceof Error
       ? lastError
       : new Error(`cannot read ${file} in ${baseId}`);
+  }
+
+  /**
+   * Text search across curated documents (KB-13). Case- and accent-insensitive, because the
+   * documents are written in Spanish and nobody types `Vademécum` with the accent when asking.
+   * Returns the matching line with one line of context either side, labelled by base and file,
+   * so the caller can quote it or go read the document whole.
+   */
+  async search(
+    query: string,
+    opts: { baseId?: string; limit?: number } = {},
+  ): Promise<KnowledgeHit[]> {
+    const needle = fold(query);
+    if (needle.length === 0) return [];
+    const limit = Math.max(1, Math.min(opts.limit ?? 20, 100));
+    const bases = opts.baseId ? [this.getOrThrow(opts.baseId)] : this.list();
+    const hits: KnowledgeHit[] = [];
+
+    for (const base of bases) {
+      for (const doc of base.documents) {
+        if (hits.length >= limit) return hits;
+        // A document that cannot be read is not a reason to fail the whole search: the folder is
+        // the user's own and a file can vanish between the scan and the query.
+        const content = await this.readDocument(base.manifest.id, doc.file).catch(() => undefined);
+        if (content === undefined) continue;
+        const lines = content.split("\n");
+        for (let i = 0; i < lines.length; i += 1) {
+          if (!fold(lines[i] ?? "").includes(needle)) continue;
+          hits.push({
+            baseId: base.manifest.id,
+            kind: base.manifest.kind,
+            file: doc.file,
+            line: i + 1,
+            excerpt: lines
+              .slice(Math.max(0, i - 1), i + 2)
+              .join("\n")
+              .trim()
+              .slice(0, MAX_EXCERPT),
+          });
+          // One hit per document: the point is to say which document to read, not to paste it.
+          break;
+        }
+      }
+    }
+    return hits;
   }
 
   async load(): Promise<KnowledgeLoadReport> {

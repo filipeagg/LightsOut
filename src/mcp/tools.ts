@@ -130,6 +130,29 @@ function pendingPhaseHint(deps: McpDeps, projectId: string): string | undefined 
   }
 }
 
+/**
+ * The bases this install has, appended to the description of every knowledge tool (KB-13,
+ * §10.0d). The tool list is the one thing a client always reads — server instructions are cached,
+ * skipped or summarised by some clients — so the names belong here too. Ids, kind and the first
+ * words of the description: enough to recognise a question as belonging to one, not a catalogue.
+ * Never throws: a description that breaks registration would be worse than a vaguer one.
+ */
+function knownBases(deps: McpDeps): string {
+  try {
+    const bases = deps.knowledge?.list() ?? [];
+    if (bases.length === 0) return "";
+    const named = bases.slice(0, 8).map((base) => {
+      const { id, kind, description } = base.manifest;
+      const gist = (description ?? "").trim().slice(0, 90);
+      return gist.length > 0 ? `${id} (${kind}): ${gist}` : `${id} (${kind})`;
+    });
+    const rest = bases.length - named.length;
+    return ` Bases here now — ${named.join("; ")}${rest > 0 ? `; and ${rest} more` : ""}.`;
+  } catch {
+    return "";
+  }
+}
+
 export function registerTools(server: McpServer, deps: McpDeps): void {
   const { repos, orchestrator, agents, doubts, actions } = deps;
 
@@ -1291,7 +1314,10 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
 
   tool(
     "list_knowledge",
-    "Curated knowledge bases, and which ones a project has attached (KB-01, KB-03).",
+    "Curated knowledge bases on this install, and which ones a project has attached (KB-01, " +
+      "KB-03). These bases answer questions about a product, a market or a way of working " +
+      "directly — read them before a project's code or the web." +
+      knownBases(deps),
     { projectId: z.string().optional() },
     async ({ projectId }) => {
       const loader = need(deps.knowledge, "knowledge");
@@ -1332,13 +1358,44 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
 
   tool(
     "read_knowledge",
-    "Read one document of a knowledge base, the call the injection block points at (KB-04).",
+    "Read one document of a knowledge base whole: what search_knowledge and the injection block " +
+      "point at (KB-04)." +
+      knownBases(deps),
     { baseId: z.string().min(1), file: z.string().min(1) },
     async ({ baseId, file }) => ({
       baseId,
       file,
       content: await need(deps.knowledge, "knowledge").readDocument(baseId, file),
     }),
+  );
+
+  tool(
+    "search_knowledge",
+    "Search the curated knowledge for a word or phrase and get the documents that mention it, " +
+      "with an excerpt each (KB-13). This is where a question about a product, a market or a way " +
+      "of working is answered — try it before a project's code or the web. Accent- and " +
+      "case-insensitive; `read_knowledge` then gives the document whole." +
+      knownBases(deps),
+    {
+      query: z.string().min(1).describe("A word or phrase as it would appear in the documents."),
+      baseId: z.string().min(1).optional().describe("Search one base instead of all of them."),
+      limit: z.number().int().min(1).max(100).optional(),
+    },
+    async ({ query, baseId, limit }) => {
+      const loader = need(deps.knowledge, "knowledge");
+      // Same reason as list_knowledge: documents arrive on disk without this process being told.
+      await loader.load().catch(() => undefined);
+      const hits = await loader.search(query, {
+        ...(baseId !== undefined ? { baseId } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+      });
+      return {
+        query,
+        hits,
+        // An empty result is an answer, and the bases it looked in say how much it means.
+        searched: baseId ? [baseId] : loader.list().map((b) => b.manifest.id),
+      };
+    },
   );
 
   tool(

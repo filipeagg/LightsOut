@@ -1680,6 +1680,23 @@ was not enough, because a name in context beats a capability in the abstract.
   refreshes it, so a base added on disk is named from the next conversation on. With no curated
   base the text is `SERVER_INSTRUCTIONS` unchanged: nothing to name, no empty sentence.
 
+**And the same names in the tool list (KB-13).** The instructions were still not enough: a third
+report, "listame las últimas noticias de mercado", got "LightsOut has no news or markets tool" from a
+client that had just described LightsOut as an orchestrator *with knowledge bases* — it knew they
+existed and did not call `list_knowledge`. The tool list is the one text a client is guaranteed to
+read and cannot summarise away, so:
+
+- `knownBases(deps)` in `src/mcp/tools.ts` appends `id (kind): first 90 chars of description` for up
+  to 8 bases to the description of `list_knowledge`, `read_knowledge` and `search_knowledge`. It
+  never throws: a description that breaks registration is worse than a vaguer one.
+- `search_knowledge` is the verb that was missing. Naming a *tool* after the act of asking is what a
+  client reaches for; `list_knowledge` reads like administration. It searches every base or one,
+  accent- and case-insensitive (`fold()` in the loader — the documents are Spanish and nobody types
+  `Vademécum` with the accent), one hit per document with the matching line plus one either side, and
+  it reports which bases it searched so an empty result means something.
+- `KnowledgeLoader.search()` owns it, not the tool, because `readDocument` already holds the escape
+  check and the panel may want the same read later.
+
 `SERVER_INSTRUCTIONS` stays the no-base text, so the length budget in
 `test/guide-and-contract.test.ts` still measures the fixed part; it moved from 1750 to 1900 to hold
 the bullet, and the comment there still says the rule that earns this budget — a client demonstrably

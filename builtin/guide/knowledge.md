@@ -1,13 +1,21 @@
 # guide :: knowledge
 
 meta.topic: knowledge
-meta.tools: list_knowledge, read_knowledge, write_knowledge, write_knowledge_doc, delete_knowledge_doc, delete_knowledge, adopt_knowledge, attach_knowledge
+meta.tools: list_knowledge, search_knowledge, read_knowledge, write_knowledge, write_knowledge_doc, delete_knowledge_doc, delete_knowledge, adopt_knowledge, attach_knowledge
 
 ## what_a_base_is
 
 definition: a folder of curated Markdown in workspace/knowledge/<id>, with a manifest (knowledge.yaml) and an index.md.
 purpose: standing facts an agent should start with instead of rediscovering — a data model, an API's real behaviour, an organisation's conventions.
 injection: an attached base is put into the prompt of every run of that project, budgeted by LO_KNOWLEDGE_BUDGET_CHARS (KB-06).
+
+## answering_a_question_from_knowledge (KB-13)
+
+first_call: search_knowledge { query } — every base, accent- and case-insensitive, one excerpt per document that mentions the phrase.
+then: read_knowledge { baseId, file } for the document whole.
+when: any question about a product, a market, a data model or a way of working. Before a project's code, and before the web: a curated base is a source someone maintains on purpose.
+failure_this_prevents: a client asked what menu options EFEMIS has and answered from a project's source code, with knowledge/hispatec/efemis/producto/Estructura_Menu_EFEMIS.md one call away.
+empty_result: an answer. The response names the bases it searched, so "not here" means something.
 
 ## manifest
 

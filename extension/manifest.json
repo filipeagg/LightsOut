@@ -2,9 +2,9 @@
   "manifest_version": "0.3",
   "name": "lightsout",
   "display_name": "LightsOut",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Run chains of coding agents unattended, with mediated permissions and doubts you answer.",
-  "long_description": "LightsOut orchestrates coding agents (Claude Code and Codex) inside a container on your machine. Launch a chain of tasks and it runs them unattended: it commits per task, runs your verify command, and stops to ask only when a decision is genuinely yours. This extension is a thin local bridge to the container's MCP endpoint at 127.0.0.1; nothing leaves your machine.",
+  "long_description": "LightsOut orchestrates coding agents (Claude Code and Codex) inside a container on your machine. Launch a chain of tasks and it runs them unattended: it commits per task, runs your verify command, and stops to ask only when a decision is genuinely yours. It also keeps curated knowledge bases you can search and read from any conversation. This extension is a thin local bridge to the container's MCP endpoint at 127.0.0.1; nothing leaves your machine.",
   "author": {
     "name": "LightsOut"
   },
@@ -32,23 +32,7 @@
       "required": false
     }
   },
-  "tools": [
-    { "name": "health", "description": "Database, engines and their authentication state" },
-    { "name": "list_projects", "description": "Projects with their active run and open doubts" },
-    { "name": "create_project", "description": "Scaffold a project with docs and git" },
-    { "name": "project_status", "description": "The whole picture of one project in a single call" },
-    { "name": "list_agents", "description": "Agent profiles, valid and rejected" },
-    { "name": "reload_agents", "description": "Re-read profiles and policy packs" },
-    { "name": "launch_chain", "description": "Queue a chain of tasks and start it" },
-    { "name": "launch_task", "description": "Queue one task" },
-    { "name": "abort_run", "description": "Abort a chain and drop its queued tasks" },
-    { "name": "list_doubts", "description": "Decisions the agents need from a human" },
-    { "name": "answer_doubt", "description": "Answer a doubt so the work resumes" },
-    { "name": "get_history", "description": "Past runs with duration and cost" },
-    { "name": "read_doc", "description": "Read a project's managed document" },
-    { "name": "write_doc", "description": "Overwrite a project document" },
-    { "name": "consult", "description": "Ask an engine a question, read-only" }
-  ],
+  "tools_generated": true,
   "compatibility": {
     "claude_desktop": ">=0.10.0",
     "platforms": ["win32", "darwin", "linux"],

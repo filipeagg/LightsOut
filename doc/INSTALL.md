@@ -26,8 +26,12 @@ a licensing question, not a technical one (SU-07).
 ### 2. Start LightsOut
 
 Double-click `scripts/windows/1-Start-LightsOut.bat`. It finds Docker Desktop, starts it if it is
-not running, pulls or builds the image, runs the container with automatic restart, and opens the
+not running, pulls the published image, runs the container with automatic restart, and opens the
 panel at <http://127.0.0.1:8484>.
+
+A machine with no clone needs only that `.bat` and the `Start-LightsOut.ps1` beside it, kept in the
+same folder — both are in `scripts/windows/` on the public repository, and the script needs no
+repository once it runs.
 
 On macOS or Linux, or if you prefer a command:
 
@@ -36,8 +40,12 @@ docker run -d --name lightsout --restart unless-stopped \
   -p 127.0.0.1:8484:8484 -p 127.0.0.1:1455:1455 \
   -v lightsout-db:/data -v "$HOME/LightsOut:/workspace" \
   -v claude-auth:/home/app/.claude -v codex-auth:/home/app/.codex \
-  lightsout:local
+  -e LO_WORKSPACE_MODE=host \
+  ghcr.io/filipeagg/lightsout:latest
 ```
+
+The image is public and multi-arch (linux/amd64 and linux/arm64), so no registry login is needed.
+Pass `lightsout:local` instead to run a build made on that machine.
 
 Every setting has a working default (DESIGN §3.4), so there is no file to edit.
 
@@ -76,8 +84,16 @@ no extra networking is needed.
 
 ### 4. Connect Claude Desktop
 
-Install the extension `dist/lightsout.mcpb`: double-click it, drag it onto the Claude Desktop
+Install the extension `lightsout.mcpb`: double-click it, drag it onto the Claude Desktop
 window, or use Settings → Extensions → Advanced settings → Install Extension…
+
+A machine without the repository downloads it from the release:
+<https://github.com/filipeagg/LightsOut/releases/latest> (asset `lightsout.mcpb`). In a clone it is
+`dist/lightsout.mcpb`. One file, no dependencies — Claude Desktop runs it with its own Node.
+
+The extension asks for one setting, the port, and 8484 is the default. It lists no tools of its
+own: it is a bridge, and the container serves the tool list when Claude Desktop connects, so a
+version that gained tools needs no new extension — only a restart of the app.
 
 That is the only supported way to reach a local MCP server. A custom connector URL will not work:
 Claude reaches remote MCP servers from Anthropic's cloud, which has no route to your `127.0.0.1`.
@@ -92,12 +108,14 @@ authenticated, and no active runs. The same picture is at <http://127.0.0.1:8484
 ### Updating
 
 ```powershell
-docker pull <image>
+docker pull ghcr.io/filipeagg/lightsout:latest
 docker rm -f lightsout
 ```
 
-then start again. Migrations run at boot and every volume survives, so credentials, database and
-projects are kept (SU-08).
+then start again — `1-Start-LightsOut.bat` does both steps itself. Migrations run at boot and every
+volume survives, so credentials, database and projects are kept (SU-08). Restart Claude Desktop
+afterwards: it reads the tool list once, when it connects, so tools added by the new version stay
+invisible until it does.
 
 ---
 

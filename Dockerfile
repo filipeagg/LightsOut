@@ -59,11 +59,12 @@ RUN set -eu; \
     fi; \
     rm -rf /tmp/toolchain.d
 
-# Same npm pin as the builder and test stages: `--omit=dev` still resolves the whole tree before
-# pruning it, so the runtime install hits the identical arborist crash.
-RUN npm install -g npm@12.0.2 --no-audit --no-fund
-
 # Engine CLIs and ACP adapters, pinned (see doc/DECISIONS.md).
+# These install with the npm the base image ships, deliberately. npm 12 does not fetch
+# claude-code's platform-native optional dependency: the bin becomes a 500-byte stub that prints
+# "native binary not installed" instead of the 275 MB binary, and every Claude run fails. The same
+# npm also serves ST-07's toolchain installs at runtime, so it stays at the version that installs
+# native optional dependencies correctly.
 RUN npm install -g --no-audit --no-fund \
       @anthropic-ai/claude-code@2.1.219 \
       @openai/codex@0.145.0 \
@@ -77,7 +78,11 @@ RUN usermod -l app -d /home/app -m node \
 WORKDIR /opt/lightsout
 
 COPY package*.json ./
-RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
+# npm 12 for this one command only, through npx, so the image keeps the npm above: `--omit=dev`
+# still resolves the whole tree before pruning it, so the runtime install hits the same arborist
+# crash the builder and test stages do, but nothing else here wants npm 12.
+RUN npx --yes npm@12.0.2 install --omit=dev --no-audit --no-fund \
+    && npm cache clean --force
 
 COPY --from=builder /build/dist/ ./dist/
 COPY panel/ ./panel/

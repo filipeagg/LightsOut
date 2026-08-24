@@ -2085,11 +2085,21 @@ Maintainer verification runs the same bash gates against Docker Desktop through 
 a `flowId`; the panel subscribes to `GET /api/setup/login/:flowId` (SSE) and renders the URL
 and code parsed from the CLI output, then the final state from a fresh auth probe.
 
-The callback needs care. Both CLIs bind their loopback listener inside the container, which a
-published port cannot reach (the mapping arrives on the container's external interface). A
-small TCP forwarder (`src/net/forwarder.ts`, `node:net`, no new dependency) listens on the
-container's non-loopback address, port 1455, and pipes to `127.0.0.1:1455`; the published port
-then works. It runs only while a login flow is active.
+Some logins ask for the code instead of taking a callback, and the panel has to be able to
+answer. Claude Code 2.1.219 with stdin on a pipe opens no loopback listener at all: its
+`redirect_uri` is `https://platform.claude.com/oauth/code/callback`, it prints the authorize URL
+and then blocks on `Paste code here if prompted >`, waiting for the `code#state` string the
+browser page hands back. So the flow has a second channel. A `prompt` event carries the CLI's
+own question through the same SSE stream, and `POST /api/setup/login/:flowId/input` writes one
+line to the child's stdin. Nothing is parsed out of that line and nothing is stored: it reaches
+the CLI as typed, which keeps NF-02 literal. A flow that never prompts never shows the field, so
+an engine that does finish through a callback is unaffected.
+
+When a CLI does take a callback, it needs care: it binds its loopback listener inside the
+container, which a published port cannot reach (the mapping arrives on the container's external
+interface). A small TCP forwarder (`src/net/forwarder.ts`, `node:net`, no new dependency) listens
+on the container's non-loopback address, port 1455, and pipes to `127.0.0.1:1455`; the published
+port then works. It runs only while a login flow is active.
 
 The same forwarder serves the scripted path: `dist/cli/login.js <engine>` starts it, runs the
 engine's login with inherited stdio and reports the resulting auth state. That is what

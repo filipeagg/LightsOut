@@ -89,7 +89,11 @@ label{display:block;font-size:13px;font-weight:500;color:var(--fg-2);margin-bott
 .copy{display:flex;gap:8px;align-items:center;border-radius:var(--r-sm);height:40px;padding:0 6px 0 12px;
   font-family:var(--mono);font-size:13px;background:var(--surface-2);border:1px solid var(--line-2);color:var(--fg)}
 .copy span{flex:1;min-width:0;overflow:auto;white-space:nowrap}
-.wizstep{display:grid;grid-template-columns:28px 1fr;gap:16px;padding:24px 0;border-top:1px solid var(--line)}
+/* minmax(0,1fr), not 1fr: a bare `1fr` is `minmax(auto,1fr)`, so the track grows to the widest
+   min-content inside it — and an OAuth URL on one nowrap line is 3500px of that, which pushed the
+   whole step out of the card. The min-width:0 on `.copy span` only governs flex shrinking, not the
+   track's intrinsic minimum. */
+.wizstep{display:grid;grid-template-columns:28px minmax(0,1fr);gap:16px;padding:24px 0;border-top:1px solid var(--line)}
 .wizstep:first-of-type{border-top:none}
 .wizn{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:12px;
   font-weight:500;background:var(--surface-2);color:var(--fg-3);border:1px solid var(--line-2)}
@@ -147,9 +151,10 @@ const ICON = {
 };
 
 let state = null;
-/** Per-engine login flow: {flowId, url, code, lines, done, auth, error}. */
+/** Per-engine login flow: {flowId, url, code, prompt, lines, done, auth, error}. */
 const flows = { claude: null, codex: null };
-const draft = { workspacePath: "", project: { name: "", verify: "", remote: "" }, keys: {} };
+const draft = { workspacePath: "", project: { name: "", verify: "", remote: "" }, keys: {},
+  loginInput: {} };
 let busy = "";
 let lastError = "";
 
@@ -245,9 +250,20 @@ function engineRow(engine) {
         <button class="btn sm" data-copy="${esc(flow.url)}">${ICON.copy} Copy</button></div>
       ${flow.code ? `<p style="margin:10px 0 0">Code: <code class="num">${esc(flow.code)}</code></p>` : ""}
     </div>` : `<div class="note">Starting the ${esc(name)} CLI…</div>`}
-    <p class="hint" style="margin-top:10px">The engine's own CLI output, unedited — nothing below
-      needs to be typed anywhere. Approving in the browser tab is the whole step; this updates on
-      its own once it does.</p>
+    ${flow.prompt ? `<div class="field">
+      <label for="in-${esc(engine.engine)}">${esc(flow.prompt)}</label>
+      <div class="row"><input id="in-${esc(engine.engine)}" type="text" autocomplete="off"
+          spellcheck="false" placeholder="paste the code from that page"
+          value="${esc(draft.loginInput[engine.engine] || "")}"
+          data-loginfield="${esc(engine.engine)}">
+        <button class="btn" data-act="submit-login-input" data-engine="${esc(engine.engine)}"
+          ${busy === "login-" + engine.engine ? "disabled" : ""}>Send</button></div>
+      <p class="hint">Approving in the browser leaves a code on the page — the CLI is waiting for
+        it. It is written straight to the CLI's stdin and never stored here.</p>
+    </div>` : ""}
+    <p class="hint" style="margin-top:10px">The engine's own CLI output, unedited. Approving in the
+      browser tab is usually the whole step; when the CLI asks for the code instead, the field
+      above is where it goes. This updates on its own once the login lands.</p>
     <div class="log">${esc((flow.lines || []).slice(-8).join("\n"))}</div>` : "";
 
   const failed = flow && flow.done && !flow.auth
@@ -382,13 +398,15 @@ function render() {
 
 /* ---------- actions ---------- */
 async function startLogin(engine) {
-  flows[engine] = { flowId: null, url: "", code: "", lines: [], done: false, auth: false, error: "" };
+  flows[engine] = { flowId: null, url: "", code: "", prompt: "", lines: [], done: false,
+    auth: false, error: "" };
+  delete draft.loginInput[engine];
   render();
   let started;
   try {
     started = await api(`/api/setup/login/${engine}`, { method: "POST" });
   } catch (err) {
-    flows[engine] = { done: true, auth: false, lines: [], error: err.message };
+    flows[engine] = { done: true, auth: false, prompt: "", lines: [], error: err.message };
     render();
     return;
   }
@@ -400,14 +418,19 @@ async function startLogin(engine) {
     if (event.type === "log") flow.lines.push(event.line);
     else if (event.type === "url") flow.url = event.url;
     else if (event.type === "code") flow.code = event.code;
+    // The CLI is blocked on stdin; an empty label closes the field again (§14.4).
+    else if (event.type === "prompt") flow.prompt = event.label;
     else if (event.type === "error") { flow.error = event.message; }
     else if (event.type === "done") {
       flow.done = true;
+      flow.prompt = "";
       flow.auth = event.auth;
       source.close();
       void refresh();
       return;
     }
+    // A re-render replaces the answer field and loses the caret: let a log line wait instead.
+    if (event.type === "log" && document.activeElement?.hasAttribute?.("data-loginfield")) return;
     render();
   };
   source.onerror = () => {
@@ -415,6 +438,28 @@ async function startLogin(engine) {
     flow.done = true;
     void refresh();
   };
+}
+
+/** Hand the CLI the line it is blocked on (§14.4); it is never kept on this side. */
+async function submitLoginInput(engine) {
+  const flow = flows[engine];
+  const value = (draft.loginInput[engine] || "").trim();
+  if (!flow || !flow.flowId || !value) return;
+  busy = `login-${engine}`;
+  render();
+  try {
+    await api(`/api/setup/login/${flow.flowId}/input`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ value }),
+    });
+    delete draft.loginInput[engine];
+    flow.prompt = "";
+  } catch (err) {
+    flow.error = err.message;
+  }
+  busy = "";
+  render();
 }
 
 async function submitKey(engine) {
@@ -501,6 +546,7 @@ document.addEventListener("click", (event) => {
     else delete draft.keys[engine];
     render();
   } else if (act === "submit-key") void submitKey(engine);
+  else if (act === "submit-login-input") void submitLoginInput(engine);
   else if (act === "create-project") void createProject();
   else if (act === "recheck") void refresh();
 });
@@ -515,6 +561,17 @@ document.addEventListener("input", (event) => {
   else if (path === "project.remote") draft.project.remote = field.value;
   const keyEngine = field.getAttribute("data-keyfield");
   if (keyEngine) draft.keys[keyEngine] = field.value;
+  const loginEngine = field.getAttribute("data-loginfield");
+  if (loginEngine) draft.loginInput[loginEngine] = field.value;
+});
+
+/* A pasted code is normally followed by Enter, so accept that as the Send button. */
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  const engine = event.target.getAttribute?.("data-loginfield");
+  if (!engine) return;
+  event.preventDefault();
+  void submitLoginInput(engine);
 });
 
 $("finish").addEventListener("click", () => {

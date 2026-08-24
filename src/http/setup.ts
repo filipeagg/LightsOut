@@ -214,6 +214,24 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     return reply;
   });
 
+  /**
+   * Answer a prompt the CLI is blocked on: the OAuth code the browser page shows, when the
+   * engine's login asks for it instead of taking the loopback callback (SU-04, §14.4). The value
+   * goes straight to the child's stdin and is never read back, logged or stored (NF-02).
+   */
+  app.post("/api/setup/login/:flowId/input", async (request, reply) =>
+    envelope(reply, async () => {
+      const { flowId } = z.object({ flowId: z.string().min(1) }).parse(request.params);
+      const { value } = z.object({ value: z.string().min(1).max(4096) }).parse(request.body ?? {});
+      if (!loginFlows.get(flowId)) throw notFound(`login flow not found: ${flowId}`);
+      const sent = loginFlows.submitInput(flowId, value.trim());
+      if (!sent) throw invalid("that login is no longer waiting for an answer");
+      // The event records that an answer was sent, never what it said.
+      repos.events.append({ type: "system", payload: { reason: "login input sent", flowId } });
+      return { flowId, sent };
+    }),
+  );
+
   /** Cancel a login the user walked away from, so the CLI does not sit waiting. */
   app.delete("/api/setup/login/:flowId", async (request, reply) =>
     envelope(reply, async () => {

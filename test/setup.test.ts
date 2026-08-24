@@ -89,6 +89,41 @@ describe("LoginFlows", () => {
     expect(flows.cancel(id)).toBe(false);
   });
 
+  it("streams a prompt the CLI is blocked on and answers it on stdin", async () => {
+    const flows = new LoginFlows(probe(true), {
+      // What `claude auth login` does with stdin on a pipe: print the URL, then wait for the
+      // code the browser page shows. `test` makes the exit code prove what the CLI read.
+      login: {
+        claude: [
+          "sh",
+          "-c",
+          "printf 'Paste code here if prompted > '; read value; test \"$value\" = 'abc#def'",
+        ],
+      },
+    });
+    const id = await flows.start("claude");
+    const seen: FlowEvent[] = [];
+    const events = await new Promise<FlowEvent[]>((resolve) => {
+      flows.subscribe(id, (event) => {
+        seen.push(event);
+        if (event.type === "prompt" && event.label) flows.submitInput(id, "abc#def");
+        if (event.type === "done") resolve(seen);
+      });
+    });
+
+    expect(events.find((e) => e.type === "prompt")).toEqual({
+      type: "prompt",
+      label: "Paste code here if prompted >",
+    });
+    // Exit 0 only happens if the CLI read exactly what was submitted.
+    expect(events.at(-1)).toMatchObject({ type: "done", exitCode: 0 });
+    // The answer is a credential: it must not show up anywhere in the stream (NF-02).
+    expect(JSON.stringify(events)).not.toContain("abc#def");
+    // The field closes again, and a finished flow takes no more input.
+    expect(events.filter((e) => e.type === "prompt").at(-1)).toMatchObject({ label: "" });
+    expect(flows.submitInput(id, "late")).toBe(false);
+  });
+
   it("hands the API key to the CLI on stdin, never in argv", async () => {
     const flows = new LoginFlows(probe(true), {
       key: { claude: ["sh", "-c", "read value; test \"$value\" = 'sk-secret-value'"] },

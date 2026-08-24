@@ -6,6 +6,11 @@
  * the browser. The loopback forwarder of `src/net/forwarder.ts` is armed for the lifetime of the
  * flow so the OAuth callback published on 127.0.0.1:1455 reaches the CLI's listener.
  *
+ * Not every login finishes on that callback. Claude Code with stdin on a pipe redirects to
+ * `platform.claude.com` instead of a loopback port and then blocks asking for the code the
+ * browser page shows, so a flow also streams a `prompt` event and takes one line back through
+ * `submitInput`. The line is written to the child's stdin as typed and never parsed or kept.
+ *
  * Nothing here interprets credentials: the CLI writes them into its own volume and the health
  * probe reports the outcome. That keeps the "never read a secret" promise (NF-02) literal.
  */
@@ -23,6 +28,7 @@ export type FlowEvent =
   | { type: "log"; line: string }
   | { type: "url"; url: string }
   | { type: "code"; code: string }
+  | { type: "prompt"; label: string }
   | { type: "done"; exitCode: number; auth: boolean; authSource: string | null }
   | { type: "error"; message: string };
 
@@ -66,6 +72,11 @@ export type LoginCommands = {
 const URL_RE = /https?:\/\/[^\s"'<>)]+/;
 /** Device codes are printed in several shapes; these are the two both CLIs have used. */
 const CODE_RE = /\b([A-Z0-9]{4}-[A-Z0-9]{4})\b|(?:code|Code)[:\s]+([A-Za-z0-9-]{6,})/;
+/**
+ * A CLI asking for something on stdin. Both halves are required — a word that names what is
+ * wanted and a trailing prompt marker — so an ordinary sentence of output cannot open the field.
+ */
+const PROMPT_RE = /\b(?:paste|enter|type|input|token|authoriz\w*|code)\b[^\n]*?[>:?]\s*$/i;
 
 /** Strip ANSI so a spinner does not end up in the browser. */
 function clean(text: string): string {
@@ -173,6 +184,8 @@ export class LoginFlows {
             this.emit(id, { type: "code", code });
           }
         }
+        // The CLI is blocked on stdin: hand its own wording to the panel so it can offer a field.
+        if (PROMPT_RE.test(trimmed)) this.emit(id, { type: "prompt", label: trimmed });
       }
     };
     child.stdout.on("data", consume);
@@ -231,6 +244,22 @@ export class LoginFlows {
       });
       child.stdin.end(`${key.trim()}\n`);
     });
+  }
+
+  /**
+   * Answer the question the CLI is blocked on (SU-04): one line to the child's stdin, as typed.
+   * The value is neither parsed nor logged — an OAuth code is a credential, and the CLI is the
+   * only thing that needs to read it (NF-02). Returns false if the flow is already finished.
+   */
+  submitInput(flowId: string, value: string): boolean {
+    const child = this.children.get(flowId);
+    const flow = this.flows.get(flowId);
+    if (!child || child.killed || !child.stdin.writable || flow?.finished) return false;
+    child.stdin.write(`${value}\n`);
+    // Clear the field: a fresh prompt from the CLI opens it again, with its own wording.
+    this.emit(flowId, { type: "prompt", label: "" });
+    this.emit(flowId, { type: "log", line: "(answer sent to the CLI)" });
+    return true;
   }
 
   /** Abandon a running flow (the user closed the wizard, or restarted the step). */

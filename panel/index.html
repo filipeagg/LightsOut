@@ -54,7 +54,10 @@ code,.mono{font-family:var(--mono);font-size:13px}
 code{color:var(--fg-2)}
 
 /* ---------- shell ---------- */
-#app{display:grid;grid-template-columns:228px 1fr;min-height:100vh}
+/* minmax(0,1fr) everywhere below, never a bare `1fr`: `1fr` means `minmax(auto,1fr)`, so the track
+   grows to the widest min-content inside it and one unbreakable string — a URL, a long path — drags
+   the whole layout past the viewport. Elements that hold such a string scroll or wrap on their own. */
+#app{display:grid;grid-template-columns:228px minmax(0,1fr);min-height:100vh}
 aside{background:var(--surface);border-right:1px solid var(--line);padding:20px 12px;display:flex;
   flex-direction:column;gap:2px;position:sticky;top:0;height:100vh;overflow:auto}
 .brand{display:flex;align-items:center;gap:9px;padding:6px 10px 24px;font-weight:600;font-size:15px;letter-spacing:-.01em}
@@ -121,7 +124,7 @@ tbody tr{transition:background .15s var(--ease)}
 tbody tr:hover{background:var(--surface-2)}
 .bar{height:4px;border-radius:2px;background:var(--surface-2);overflow:hidden;display:flex;box-shadow:0 0 0 1px var(--line) inset}
 .bar i{display:block;height:100%}
-.kv{display:grid;grid-template-columns:168px 1fr;gap:12px 16px;font-size:14px;margin:0}
+.kv{display:grid;grid-template-columns:168px minmax(0,1fr);gap:12px 16px;font-size:14px;margin:0}
 .kv dt{color:var(--fg-3)}
 .kv dd{margin:0}
 .empty{color:var(--fg-3);text-align:center;padding:48px;font-size:14px}
@@ -148,7 +151,7 @@ tbody tr:hover{background:var(--surface-2)}
 .attnitem .ic svg{width:15px;height:15px}
 
 /* ---------- steps and runs ---------- */
-.phase{display:grid;grid-template-columns:28px 1fr auto;gap:16px;padding:16px 0;border-top:1px solid var(--line);align-items:start}
+.phase{display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:16px;padding:16px 0;border-top:1px solid var(--line);align-items:start}
 .phase:first-child{border-top:none}
 .mark{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:500;
   border:1px solid var(--line-2);color:var(--fg-3);background:var(--surface-2)}

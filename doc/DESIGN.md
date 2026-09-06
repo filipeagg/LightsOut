@@ -1197,6 +1197,82 @@ not clear it, and it stays a person's decision. Verified against the deployed cl
 `scripts/verify-dotenv-7-1f.mjs`, 6/6: the doubt's own command is `network → allow`, while
 printing the secret, reading `.env` from code, and `cat .env` are all still `credentials`.
 
+### 7.1g The class matched vocabulary, not secrets (PE-15, PE-16)
+
+Sections 7.1b, 7.1d and 7.1f each fixed one spelling of one false positive. This section starts
+from the other end: **every `credentials` doubt the system has ever opened, counted.**
+
+Twenty-five of sixty-one. Forty-one per cent of every question this system has asked a person was
+about credentials, and **not one of them touched a secret**:
+
+| what the agent asked for | what the classifier saw |
+|---|---|
+| `cat .env.example && cat .gitignore` | `.env` + a reading tool |
+| `test -f repo/.env && git -C repo check-ignore -q .env` | `.env` + `grep -q` further down the segment |
+| `rg -n "VITE_API_BASE_URL" .env.template src` | `.env` + a reading tool |
+| `node -e "…"` over a page whose script says `'invalid_credentials'` | a quoted token containing `credentials` |
+| `probes/jira_cors.py`, testing `access_control_allow_credentials` | the same, in a CORS header name |
+
+The pattern behind all five is one mistake made three ways: **the class matches vocabulary rather
+than secrets.** `.env` is the prefix of every file that documents `.env` without containing one;
+`credentials` is a word that appears in error codes, header names and test descriptions; and a
+reading tool anywhere in a segment plus a secret-ish word anywhere else in it is treated as the
+tool opening the file.
+
+Three rules, and none of them moves the hard floor.
+
+**A template is not a secret.** `.env.example`, `.env.template`, `.env.sample`, `.env.dist` and
+`.env.defaults` exist to be committed — they are the file that says which keys the real one needs,
+and half the doubts above were an agent doing exactly the reading they were written for. Reading
+one is `project_read`. The real `.env`, and a suffix that is not one of those five (`.env.local`,
+`.env.production`), are untouched.
+
+**Asking whether a file exists is not reading it.** `test -f .env`, `[ -f .env ]`, `ls -la .env`,
+`stat .env` and `git check-ignore .env` name the path and never open it. This is what an agent does
+before deciding whether it has to create one, and it was five separate doubts on `acmeproduct-web-dev`
+alone.
+
+**And a file's keys are not its values.** Seven more were the same agent checking the `.env` it had
+just been asked to write: `grep -q VITE_API_BASE_URL repo/.env`, `cut -d= -f1 repo/.env`,
+`awk -F= '/^VITE_/{print $1}' repo/.env`. A `grep` whose only flags are quiet, count or list emits
+no file content at all; `cut -f1` and `print $1` on a `KEY=VALUE` file emit the key and
+*structurally cannot* emit the value. The line is drawn there and nowhere looser: **a read that
+cannot emit a value is not a credential read.** `cat .env`, `grep -n KEY .env` and `sort .env` all
+still are.
+
+**A credential file looks like a path.** §7.1d already narrowed `credentials` to a quoted token
+without spaces, on the reasoning that a file name has no spaces and a sentence does. Neither does
+`invalid_credentials`. So the token must carry a directory separator or an extension after the
+word — `.aws/credentials`, `credentials.json`, `gcloud/credentials` — and the bare alternative is
+gone from the reading-tools matcher too, where it turned `grep -rn credentials src/` into a
+credential read.
+
+**And the judge is finally told whose secret it is (PE-16).** PE-13's rescue had never once fired.
+`D-19` on `consultant-portal` reached it — `the only secret here is this run's own vault entry
+(PE-13)` is in the doubt's own text — and still woke a person, because `buildJudgePrompt` named
+neither the vault nor the ownership finding, while `permission-judge.yaml` ordered the judge to
+escalate on anything that "reads a file that carries secrets". The judge was asked a question it
+had been instructed to answer wrongly. It now receives an **ownership block** — the evidence kind,
+the variables this run was granted, the hosts those entries declare — and its profile distinguishes
+reading a secret *file* from using a variable the system handed this run on purpose. Printing the
+value, writing it to a file, or sending it to a host the entry does not declare are still a
+person's, and everything the judge cannot read is still escalated.
+
+**What it comes to, measured on the same twenty-five.** Eighteen stop asking outright. Two —
+`D-18` and `D-19` on `consultant-portal`, both the run's own vault entry against its own work —
+become the judge's, which answers in seconds. Five go on asking, and each for a reason that
+survives inspection: `cat .npmrc` is a credential file; `D-12` on `acmeproduct-web-dev` ends with
+`awk '{print}' repo/.env | sha256sum`, which puts the value on a pipe; and `D-4`, `D-5` and `D-11`
+on `consultant-portal` send the GitLab token to `git.example.com` while the vault
+entry declares no `base_url` at all — `vault_foreign`, and the remedy is to declare the host, not
+to loosen the class.
+
+What deliberately did **not** change: `credentials` stays in `NEVER_LEARNED` (PE-10), so a rescue
+is still decided fresh every time; `vault_foreign` still bypasses the judge entirely. Verified by
+`scripts/verify-pe15.mjs`, 34/34, against the twenty-five commands as they were recorded —
+including the three that must still stop, and §7.1d's own leak check, which a "quiet grep prints
+nothing" rule would otherwise have swallowed whole.
+
 ### 7.7 Unattended mode (OR-12)
 
 LightsOut exists to run agents **unattended**. A permission gate that parks a session until a

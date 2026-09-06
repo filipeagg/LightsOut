@@ -372,6 +372,15 @@ export class TaskRunner {
             // PE-13 and OR-12: whether the judge may look at this credentials gate, and whether
             // an unresolved gate refuses instead of waiting (§7.1d, §7.7).
             ...(request.judgeEligible ? { judgeEligible: true } : {}),
+            // PE-16, §7.1g: and *which* credentials made it eligible. Names and hosts, never a
+            // value — the whole point of §18 is that nothing but the adapter's environment holds
+            // one. A judge told only "credentials" escalates, which is what it had been doing.
+            ...(request.judgeEligible && context.vaultEnv
+              ? { vaultVars: Object.keys(context.vaultEnv) }
+              : {}),
+            ...(request.judgeEligible && context.vaultHosts?.length
+              ? { vaultHosts: context.vaultHosts }
+              : {}),
             ...(project.unattended ? { unattended: true } : {}),
           })),
       // SR-09 (§6.8): whatever the person left for this run and the agent has not been handed.

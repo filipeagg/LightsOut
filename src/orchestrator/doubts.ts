@@ -435,6 +435,9 @@ export class DoubtService {
     writeScopes?: string[];
     /** PE-13: a `credentials` gate whose only evidence was this run's own vault entry. */
     judgeEligible?: boolean;
+    /** PE-16: the variable names and declared hosts that made it so, for the judge's prompt. */
+    vaultVars?: string[];
+    vaultHosts?: string[];
     /** OR-12: the project runs unattended, which widens what the judge may settle. */
     unattended?: boolean;
   }): Promise<boolean> {
@@ -466,6 +469,12 @@ export class DoubtService {
       projectPath: input.project.path,
       ...(input.readAreas?.length ? { readAreas: input.readAreas } : {}),
       ...(input.writeScopes?.length ? { writeScopes: input.writeScopes } : {}),
+      // PE-16, §7.1g: the ownership finding travels with the question. Without it the judge is
+      // asked about a secret and told nothing about whose it is, and answers the only way its
+      // profile allows — escalate.
+      ...(input.judgeEligible && input.actionClass === "credentials" ? { vaultOwn: true } : {}),
+      ...(input.vaultVars?.length ? { vaultVars: input.vaultVars } : {}),
+      ...(input.vaultHosts?.length ? { vaultHosts: input.vaultHosts } : {}),
       adapterCommand: this.adapterCommand(profile.engine),
     });
 
@@ -530,6 +539,13 @@ export class DoubtService {
      * resolved, so the judge may look at it (§7.1d).
      */
     judgeEligible?: boolean;
+    /**
+     * PE-16, §7.1g: the variable names this run was granted and the hosts those entries declare,
+     * so the judge can be told whose secret it is. Names only — a value has no route out of the
+     * adapter's environment (§18).
+     */
+    vaultVars?: string[];
+    vaultHosts?: string[];
     /**
      * OR-12: this project's runs must finish without a person (§7.7). Widens the judge's remit to
      * everything off the hard floor and, when nothing clears the gate, refuses the action with the

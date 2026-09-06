@@ -277,7 +277,21 @@ export const DEFAULT_MATCHERS: Record<string, string[]> = {
     // Every reading tool, not just the obvious three: `project_read` now allows the whole
     // family, so a secret file must be sensitive whichever tool opens it.
     // Same distinction as the script body (§7.1f): the file `.env`, never `process.env`.
-    "(^|\\s)(cat|less|more|head|tail|grep|rg|egrep|fgrep|awk|sed|nl|cut|sort|uniq|xxd|od|strings|jq|yq|diff|cmp|base64)\\b.*((?<![A-Za-z0-9_])\\.env(?:\\.[A-Za-z0-9_-]+)?(?![A-Za-z0-9_.])|\\.npmrc|\\.netrc|id_rsa|id_ed25519|credentials|\\.pem|\\.pfx|\\.p12)\\b",
+    //
+    // Three narrowings, each one a false positive that woke a person (PE-15, §7.1g):
+    //
+    //   `[^;&|\n]*` rather than `.*` — the secret has to be an argument of *this* reading
+    //   command. With `.*` a tool anywhere in a segment and a secret-ish word anywhere else in
+    //   it matched, and an agent's opening survey (`sed -n '1,240p' .lightsout/inbox.md; …;
+    //   test -f repo/.env`) arrived at a person as a credential read. Quoting defeats
+    //   `splitSegments`, so the whole survey was one segment.
+    //
+    //   `.env.example` and its four siblings are excluded: a file written to be committed
+    //   carries placeholders, not secrets.
+    //
+    //   `credentials` must look like a path — a separator before it or an extension after it.
+    //   The bare word made `grep -rn credentials src/` a credential read.
+    "(^|\\s)(cat|less|more|head|tail|grep|rg|egrep|fgrep|awk|sed|nl|cut|sort|uniq|xxd|od|strings|jq|yq|diff|cmp|base64)\\b[^;&|\\n]*((?<![A-Za-z0-9_])\\.env(?!\\.(?:example|template|sample|samples|dist|defaults|tpl|placeholder)\\b)(?:\\.[A-Za-z0-9_-]+)?(?![A-Za-z0-9_.])|\\.npmrc|\\.netrc|id_rsa|id_ed25519|[/\\\\][^\\s'\"]*credentials|credentials\\.[A-Za-z0-9]{1,8}|\\.pem|\\.pfx|\\.p12)\\b",
     "^(ssh-keygen|gpg|openssl)\\b",
     "^git\\s+push\\b.*(--force|-f)(\\s|$)",
   ],
@@ -319,8 +333,16 @@ const SCRIPT_HEREDOC_RE = new RegExp(`^${SCRIPT_INTERPRETERS}\\b[^\\n]*<<-?\\s*[
  *
  * A file name is not preceded by an identifier character and not followed by one: `.env` and
  * `.env.local` match, `process.env.X` and `os.environ` do not.
+ *
+ * **And a template is not a secret (PE-15, §7.1g).** `.env.example`, `.env.template`,
+ * `.env.sample`, `.env.dist` and `.env.defaults` exist to be committed: they are the file that
+ * documents which keys the real one needs, with placeholder values in them. Fourteen of the
+ * twenty-five `credentials` doubts this system has ever opened were an agent reading one, or
+ * checking whether the real one existed next to it. A suffix that is not one of those five —
+ * `.env.local`, `.env.production` — is untouched.
  */
-const DOTENV_FILE = String.raw`(?<![A-Za-z0-9_])\.env(?:\.[A-Za-z0-9_-]+)?(?![A-Za-z0-9_.])`;
+const ENV_TEMPLATE_SUFFIX = "example|template|sample|samples|dist|defaults|tpl|placeholder";
+const DOTENV_FILE = String.raw`(?<![A-Za-z0-9_])\.env(?!\.(?:${ENV_TEMPLATE_SUFFIX})\b)(?:\.[A-Za-z0-9_-]+)?(?![A-Za-z0-9_.])`;
 
 /**
  * A quoted **file name** containing "credentials", and not a sentence containing the word.
@@ -332,9 +354,26 @@ const DOTENV_FILE = String.raw`(?<![A-Za-z0-9_])\.env(?:\.[A-Za-z0-9_-]+)?(?![A-
  *
  * — the human-readable description of a test. The whole script became `credentials`, on the hard
  * floor, and the run asked a person six times for the same file because `credentials` is never
- * learned (PE-10). A file name has no spaces in it; a sentence does. That is the whole rule.
+ * learned (PE-10). A file name has no spaces in it; a sentence does.
+ *
+ * **That rule was still too weak, and cost four more doubts (PE-15, §7.1g).** Neither does an
+ * identifier:
+ *
+ *     'invalid_credentials'                 an error code, in a page's own JavaScript
+ *     "access_control_allow_credentials"    a CORS header name, in a probe that tests for it
+ *
+ * A file name has a **path** in it: a directory separator before the word, or an extension after
+ * it. `~/.aws/credentials`, `./credentials`, `credentials.json` — yes. A word with underscores
+ * around it — no. Same shape in the reading-tools matcher below, where the bare alternative made
+ * `grep -rn credentials src/` a credential read.
+ *
+ * The closing quote is deliberately **not** required: inside `python3 -c "open(\"x\")"` the body
+ * arrives with its quotes escaped, so a pattern anchored on both ends never matches the shape it
+ * was written for. The opening quote plus the path shape is enough to tell a file from a word.
  */
-const CREDENTIAL_FILE = String.raw`['"][^'"\s]*credentials[^'"\s]*['"]`;
+const CREDENTIAL_FILE =
+  String.raw`['"][^'"\s]*[/\\][^'"\s]*credentials\b` +
+  String.raw`|['"][^'"\s]*credentials[^'"\s]*\.[A-Za-z0-9]{1,8}\b`;
 
 const SCRIPT_BODY_FAMILIES: [ActionClass, RegExp, string][] = [
   // A secret *file* opened, or a secret *value* printed — not the word "credentials" appearing as
@@ -351,7 +390,6 @@ const SCRIPT_BODY_FAMILIES: [ActionClass, RegExp, string][] = [
     new RegExp(
       `${DOTENV_FILE}|\\.npmrc|\\.netrc|id_rsa|id_ed25519|\\.pem\\b|\\.pfx\\b|\\.p12\\b` +
         `|${CREDENTIAL_FILE}` +
-        `|open\\s*\\(\\s*['"][^'"\\s]*credentials` +
         `|print\\s*\\(\\s*(?:os\\.environ|os\\.getenv)` +
         `|console\\.log\\s*\\(\\s*process\\.env\\.[A-Za-z_]` +
         `|(?:ANTHROPIC_API_KEY|OPENAI_API_KEY|GIT_TOKEN|GITHUB_TOKEN|AWS_SECRET)\\b`,
@@ -482,6 +520,16 @@ export function disqualifiesReadOnly(segment: string): boolean {
  * covered the Python spelling of the same idea. What still counts as a credential read is a value
  * that goes anywhere else: `echo $TOKEN`, a header, a file, another command.
  */
+/**
+ * A secret **value** expanded into the command, as opposed to a key name being looked for. The
+ * key-only rules below must not swallow §7.1d's leak check — `grep -rqF "$LO_VAULT_ACME_PASSWORD"
+ * .` is quiet too, and it is the exact command PE-13 exists to route to the judge. When the match
+ * carries an expanded secret it is left where it is; only a search for a literal key is removed.
+ */
+const EXPANDED_SECRET =
+  /[$%]\{?[A-Za-z_][A-Za-z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_KEY)|LO_VAULT_/i;
+const keyNotValue = (match: string): string => (EXPANDED_SECRET.test(match) ? match : " ");
+
 export function stripPresenceTests(segment: string): string {
   return (
     segment
@@ -491,6 +539,30 @@ export function stripPresenceTests(segment: string): string {
       .replace(/\btest\s+-[nz]\s+("[^"]*"|'[^']*'|\S+)/gi, " ")
       // ${X:+literal} expands to the literal, never to the value
       .replace(/\$\{[A-Za-z_][A-Za-z0-9_]*:\+[^}]*\}/g, " ")
+      // PE-15, §7.1g: asking whether a *file* exists is not reading it. `test -f repo/.env`,
+      // `stat .env`, `ls -la .env` and `git check-ignore .env` name the path and never open it —
+      // which is what an agent does before deciding whether it has to create one. Five separate
+      // doubts on `acmeproduct-web-dev` were this and nothing else.
+      .replace(/\btest\s+-[efsrwdLxh]\s+("[^"]*"|'[^']*'|\S+)/gi, " ")
+      .replace(/(?:^|\s)(?:ls|stat|realpath|readlink|basename|dirname)\s+(?:-\S+\s+)*("[^"]*"|'[^']*'|\S+)/gi, " ")
+      .replace(/\bgit\b[^;&|\n]*?\bcheck-ignore\b[^;&|\n]*/gi, " ")
+      // PE-15, §7.1g: **a file's keys are not its values.** Seven more doubts were an agent
+      // checking the `.env` it had just been asked to write — `grep -q VITE_API_BASE_URL
+      // repo/.env`, `cut -d= -f1 repo/.env`, `awk -F= '{print $1}' repo/.env`. A `grep` whose
+      // only flags are quiet, count or list emits no file content at all; `cut -f1` and
+      // `print $1` on a `KEY=VALUE` file emit the key and structurally cannot emit the value.
+      // A read that cannot emit a value is not a credential read.
+      // A quoted pattern or program is consumed whole before the `[^;&|\n]` stop, because an
+      // alternation inside it — `awk -F= '/^VITE_(A|B)=/{print $1}' repo/.env` — is not a pipe.
+      .replace(
+        /(?:^|\s)(?:grep|egrep|fgrep|rg)\s+(?:--(?:quiet|silent|count|files-with-matches|files-without-match)\b|-[A-Za-z]*[qclL][A-Za-z]*\b)\s*(?:-\S+\s+)*(?:'[^']*'|"[^"]*")?[^;&|\n]*/g,
+        keyNotValue,
+      )
+      .replace(/(?:^|\s)cut\s+(?:-\S+\s+)*-f\s?1\b[^;&|\n]*/g, keyNotValue)
+      .replace(
+        /(?:^|\s)awk\s+(?:-\S+\s+)*(?:'[^']*\bprint\s+\$1\b[^']*'|"[^"]*\bprint\s+\$1\b[^"]*")[^;&|\n]*/g,
+        keyNotValue,
+      )
   );
 }
 

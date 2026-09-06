@@ -61,6 +61,17 @@ export type JudgeInput = {
   readAreas?: string[];
   /** Where this pack allows writes, when it confines them (§19). */
   writeScopes?: string[];
+  /**
+   * PE-16, §7.1g: this gate is here because of a `credentials` match whose whole evidence was a
+   * vault entry **this run resolved**. Without this the judge was asked to rule on a secret and
+   * told nothing about whose it was, and its profile ordered it to escalate on any secret at all —
+   * so PE-13's rescue escalated every single time and rescued nothing.
+   */
+  vaultOwn?: boolean;
+  /** The variable **names** the run was granted. Never a value: §18 has no route that reads one. */
+  vaultVars?: string[];
+  /** The hosts those entries declare. A value going anywhere else is not this run's business. */
+  vaultHosts?: string[];
   adapterCommand: string;
   timeoutMs?: number;
   onStderr?: (line: string) => void;
@@ -108,6 +119,24 @@ export function judgeable(input: {
 export function buildJudgePrompt(input: JudgeInput): string {
   const areas = input.readAreas?.length ? input.readAreas.join(", ") : "none";
   const scopes = input.writeScopes?.length ? input.writeScopes.join(", ") : "the whole project";
+  // PE-16, §7.1g: whose secret is this? The one question the judge was never asked, which is why
+  // every PE-13 rescue escalated. Names and hosts only — a value never leaves the adapter's
+  // environment, and certainly not into a prompt.
+  const ownership = input.vaultOwn
+    ? [
+        "",
+        "## Whose secret this is (PE-13)",
+        "The only reason this was classified `credentials` is that it mentions a credential this",
+        "run was GIVEN. LightsOut resolved these vault entries for this project on purpose and put",
+        "them in the agent's environment; the network for their hosts is granted with them.",
+        `granted_variables: ${input.vaultVars?.length ? input.vaultVars.join(", ") : "(names not recorded)"}`,
+        `hosts_those_entries_declare: ${input.vaultHosts?.length ? input.vaultHosts.join(", ") : "(none declared)"}`,
+        "No secret FILE was found, and no key that belongs to somebody else. Using one of these",
+        "variables for the work this project exists to do is the normal case, not the dangerous one.",
+        "Still escalate if the command PRINTS the value, WRITES it into a file that survives the",
+        "run, or sends it to a host that is not in the list above.",
+      ]
+    : [];
   return [
     "Decide whether this action is safe enough to allow without asking a person.",
     "",
@@ -115,6 +144,7 @@ export function buildJudgePrompt(input: JudgeInput): string {
     `command_or_title: ${input.title}`,
     `classified_as: ${input.actionClass}`,
     `policy_said: ${input.reason}`,
+    ...ownership,
     "",
     "## Where it runs",
     `project_directory: ${input.projectPath}`,

@@ -2,7 +2,6 @@
 # second-opinion sessions of §8.2 use (advisor: true).
 name: Reviewer
 engine: codex
-model: gpt-5-codex
 reasoning: low
 policy: read
 tags: [review, advisor]

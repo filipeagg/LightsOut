@@ -1,5 +1,6 @@
 /** Agent profile schema (AP-01, AP-04, AP-05). */
 import { z } from "zod";
+import { ALL_REASONING_LEVELS } from "./models.js";
 
 export const engineSchema = z.enum(["claude", "codex"]);
 
@@ -20,8 +21,12 @@ export const agentProfileSchema = z
     name: z.string().min(1),
     engine: engineSchema,
     model: z.string().min(1).optional(),
-    /** Engine-specific reasoning effort; passed through untouched. */
-    reasoning: z.enum(["minimal", "low", "medium", "high"]).optional(),
+    /**
+     * Engine-specific reasoning effort. The union of everything any engine has been seen to
+     * accept: this validates the *shape* of a file, and whether this engine accepts this level is
+     * the engine's own catalog (§5.6), not a literal here.
+     */
+    reasoning: z.enum(ALL_REASONING_LEVELS).optional(),
     instructions: z.string().default(""),
     /** Shared fragments included before instructions (AP-04). */
     include: z.array(z.string().min(1)).default([]),

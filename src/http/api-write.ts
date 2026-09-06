@@ -15,6 +15,7 @@ import { DOC_NAMES } from "../control/actions.js";
 import { failure, success, type Envelope } from "../mcp/envelope.js";
 import { slugify } from "../ids.js";
 import { AGENT_CAPABILITIES } from "../agents/schema.js";
+import { ALL_REASONING_LEVELS } from "../agents/models.js";
 
 export type WriteDeps = { actions: Actions };
 
@@ -87,7 +88,8 @@ const everyBody = z.discriminatedUnion("unit", [
   z.object({ unit: z.literal("custom"), cron: z.string().min(1) }),
 ]);
 const engineSchema = z.enum(["claude", "codex"]);
-const reasoningSchema = z.enum(["minimal", "low", "medium", "high"]);
+// The union, for the same reason as the profile schema: per-engine acceptance is §5.6's job.
+const reasoningSchema = z.enum(ALL_REASONING_LEVELS);
 
 const agentBody = z.object({
   name: z.string().min(1).optional(),

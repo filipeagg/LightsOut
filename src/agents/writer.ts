@@ -11,7 +11,7 @@ import { writeFileDurable } from "../workspace/durable.js";
 import path from "node:path";
 import { dump as dumpYaml } from "js-yaml";
 import { agentProfileSchema, type AgentProfile } from "./schema.js";
-import { isKnownModel, modelRejection } from "./models.js";
+import { isKnownModel, isKnownReasoning, modelRejection, reasoningRejection } from "./models.js";
 import { AgentsLoader } from "./loader.js";
 
 export type AgentPatch = Partial<Omit<AgentProfile, "id">> & { id?: string };
@@ -53,12 +53,16 @@ export class AgentWriter {
     });
 
     // AP-08: an unknown model is a rejection with a reason, not a failure at launch. Only
-    // checked when the patch touches the engine or the model, so enabling a profile that
-    // predates an entry in the table still works.
-    if ((patch.model !== undefined || patch.engine !== undefined) && merged.model) {
-      if (!isKnownModel(merged.engine, merged.model)) {
-        throw new Error(modelRejection(merged.engine, merged.model));
-      }
+    // checked when the patch touches the engine, the model or the level, so enabling a profile
+    // whose model the engine has since stopped offering still works — it is reported invalid and
+    // refused at launch (§5.6), which is a better place to find out than a toggle.
+    const touchesChoice =
+      patch.model !== undefined || patch.engine !== undefined || patch.reasoning !== undefined;
+    if (touchesChoice && merged.model && !isKnownModel(merged.engine, merged.model)) {
+      throw new Error(modelRejection(merged.engine, merged.model));
+    }
+    if (touchesChoice && merged.reasoning && !isKnownReasoning(merged.engine, merged.reasoning)) {
+      throw new Error(reasoningRejection(merged.engine, merged.reasoning));
     }
 
     const { id: _id, ...body } = merged;

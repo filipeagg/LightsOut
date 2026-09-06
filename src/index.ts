@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
 import { createBus } from "./bus.js";
 import { HealthProbe } from "./health.js";
+import { EngineCatalogs } from "./agents/catalog.js";
 import { createHttpServer } from "./http/server.js";
 import { checkDatabase, openDb } from "./db/db.js";
 import { migrate } from "./db/migrate.js";
@@ -123,6 +124,26 @@ async function main(): Promise<void> {
         : "NOT authenticated — run scripts/login-" + e.engine + ".sh";
     console.log(`[boot] engine ${e.engine} (${e.adapter}): ${state}`);
   }
+  // 5a. What each engine actually offers (AP-08, §5.6). Asked once at boot, for every engine
+  // that is authenticated: an unauthenticated adapter has nothing to say, and probing it would
+  // only spend a process to learn that again. The panel falls back to the static list and says so.
+  const catalogs = new EngineCatalogs(
+    (engine) => (engine === "claude" ? config.adapterClaude : config.adapterCodex),
+    config.workspace,
+  );
+  for (const e of engines) {
+    if (!e.detected || !e.auth) continue;
+    const catalog = await catalogs.get(e.engine, true);
+    if (catalog.error) {
+      console.warn(`[boot] engine ${e.engine}: catalog unavailable (${catalog.error})`);
+    } else {
+      console.log(
+        `[boot] engine ${e.engine}: ${catalog.model?.values.length ?? 0} models` +
+          (catalog.model?.current ? `, on ${catalog.model.current}` : ""),
+      );
+    }
+  }
+
   if (config.egress !== "proxy") {
     console.warn("[boot] network: unrestricted (egress allowlist disabled, RT-05)");
   }

@@ -26,6 +26,7 @@ import type { ProjectRow, RunRow, TaskRow } from "../db/types.js";
 import type { AgentProfile } from "../agents/schema.js";
 import path from "node:path";
 import { spawnAdapter, type AdapterProcess } from "./adapter.js";
+import { readSelects, type SelectOption } from "../agents/catalog.js";
 import { SCRATCH_REL } from "../policy/classify.js";
 import { toolchainEnv } from "../projects/toolchain.js";
 import { parseResult, type AgentResult, type DoubtPayload } from "./result.js";
@@ -347,6 +348,80 @@ export class RunSession {
   private costUsd: number | undefined;
 
   constructor(private readonly deps: RunSessionDeps) {}
+
+  /**
+   * Apply the resolved model and reasoning level to the ACP session (§6.1, AP-09).
+   *
+   * The two selects come from `session/new` and are matched by category, never by id: the
+   * adapters name the effort option differently (`effort`, `reasoning_effort`). A value the
+   * engine does not offer stops the run here, before the prompt, because running anyway on the
+   * engine's default is exactly what nobody noticed for months — a cheap model quietly standing
+   * in for an expensive one is a result nobody can trust and a bill nobody can read.
+   */
+  private async applySessionChoice(
+    ctx: { request: (method: string, params: unknown) => Promise<unknown> },
+    session: { sessionId: string; newSessionResponse: { configOptions?: unknown } },
+  ): Promise<void> {
+    const { profile, run, repos } = this.deps;
+    const selects = readSelects(session.newSessionResponse.configOptions);
+
+    const apply = async (
+      kind: "model" | "reasoning",
+      option: SelectOption | null,
+      wanted: string | undefined,
+    ): Promise<void> => {
+      // Nothing pinned: the engine stays on its own choice, and the audit records what that was,
+      // so "which model did this work" has an answer either way.
+      if (!wanted) {
+        if (kind === "model" && option?.current) repos.runs.setModel(run.id, option.current);
+        return;
+      }
+      if (!option) {
+        // An adapter that publishes no such select cannot be told; saying so beats pretending.
+        this.event("system", {
+          level: "warn",
+          message: `${profile.engine} adapter offers no ${kind} option; "${wanted}" was not applied`,
+        });
+        return;
+      }
+      if (!option.values.includes(wanted)) {
+        throw new Error(
+          `${profile.engine} does not offer ${kind} "${wanted}" on this account; ` +
+            `it offers: ${option.values.join(", ")}`,
+        );
+      }
+      if (option.current === wanted) {
+        this.event("config.changed", {
+          kind,
+          op: "session",
+          actor: "system",
+          id: run.id,
+          value: wanted,
+          applied: false,
+          note: "engine was already on this value",
+        });
+      } else {
+        await ctx.request(acp.methods.agent.session.setConfigOption, {
+          sessionId: session.sessionId,
+          configId: option.id,
+          value: wanted,
+        });
+        this.event("config.changed", {
+          kind,
+          op: "session",
+          actor: "system",
+          id: run.id,
+          from: option.current,
+          to: wanted,
+          applied: true,
+        });
+      }
+      if (kind === "model") repos.runs.setModel(run.id, wanted);
+    };
+
+    await apply("model", selects.model, profile.model);
+    await apply("reasoning", selects.reasoning, profile.reasoning);
+  }
 
   private event(type: string, payload: unknown): void {
     this.deps.repos.events.append({ runId: this.deps.run.id, type, payload });
@@ -765,6 +840,11 @@ export class RunSession {
               });
             };
             repos.runs.setAcpSession(run.id, session.sessionId);
+
+            // §6.1: the model and the reasoning level this run resolved to, put on the session
+            // before the first prompt. Until this existed they reached the `runs` row and nothing
+            // else, and every run silently used whatever the engine happened to default to.
+            await this.applySessionChoice(ctx, session);
 
             /** One prompt, drained to its stop. The turn is the unit; the run may have several. */
             const turn = async (text: string): Promise<PromptResponse> => {

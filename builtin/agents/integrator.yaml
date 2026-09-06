@@ -2,7 +2,6 @@
 # code that calls it: network, execution, writes anywhere in the project, and the vault.
 name: Integrator
 engine: claude
-model: opus
 reasoning: medium
 policy: build-network
 tags: [integration, api]

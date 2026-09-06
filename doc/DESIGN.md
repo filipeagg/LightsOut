@@ -664,10 +664,16 @@ have accepted: the run-time application (§6.1) is what has the last word.
 **A profile pinning a model the account does not offer is not rewritten.** AP-01 keeps the
 workspace file as the source of truth, so it stays as written, is reported invalid with the reason,
 and is refused at launch with the list of what is available — the same treatment OR-11 gives an
-unauthenticated engine. **Builtin profiles therefore ship without a `model` at all**, meaning "the
-engine's current default": a builtin is distributed to installations whose accounts we know nothing
-about, and `opus[1m]` existing here is no reason to believe it exists there. Pinning a model is a
-decision the user makes, from a list that is real.
+unauthenticated engine.
+
+**A builtin may name a family alias, never a pinned version.** A builtin is distributed to
+installations whose accounts we know nothing about, so it may say `sonnet` or `haiku` — aliases the
+engine keeps pointing at the current member of a family — and it may say nothing at all, meaning
+"the engine's current default". It may not say `claude-opus-5` or `gpt-5-codex`. This is not
+theoretical: the adapter here offers `opus` only as `opus[1m]`, so the four builtins that asked for
+`opus` now ask for nothing and get the account's own default, which is what a user choosing "the
+good model" means anyway. `permission-judge` keeps `haiku` because §6.5b is about it being cheap,
+and an alias is the only portable way to say that.
 
 ## 6. ACP session runner (SR-01..08)
 

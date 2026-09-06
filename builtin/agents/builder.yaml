@@ -2,7 +2,6 @@
 # its instructions are the ones worth the most words.
 name: Builder
 engine: claude
-model: opus
 reasoning: medium
 policy: build
 tags: [implementation]

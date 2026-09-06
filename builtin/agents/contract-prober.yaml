@@ -2,7 +2,6 @@
 # assumptions the other engine will make later.
 name: Contract prober
 engine: codex
-model: gpt-5-codex
 reasoning: medium
 policy: build-network
 writeScopes: [probes, doc]

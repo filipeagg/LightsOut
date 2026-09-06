@@ -1,7 +1,6 @@
 # Example agent profile: reviews and second opinions (AP-01, SR-08).
 name: Reviewer
 engine: codex
-model: gpt-5-codex
 reasoning: low
 policy: strict
 tags: [review, advisor]

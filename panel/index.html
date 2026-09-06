@@ -1606,46 +1606,82 @@ const sourcePill = (source) =>
  * the button says so rather than pretending the shipped file is being edited.
  */
 /**
- * The per-engine catalog of AP-08, with whatever the profile already carries folded in so
- * opening the editor cannot silently move a profile onto a different model. Falls back to the
- * engine list alone if the catalog has not arrived yet.
+ * The per-engine catalog of AP-08 (DESIGN 5.6), which is what the engine itself said it offers.
+ * Whatever the profile already carries is folded in, so opening the editor cannot silently move a
+ * profile onto a different model — a profile pinning something the account no longer offers keeps
+ * showing it, marked, rather than being quietly rewritten by a repaint.
  */
-function modelChoices(engine, current) {
-  const catalog = store.models && store.models.engines ? store.models.engines[engine] : null;
-  const models = catalog ? catalog.models.slice() : [];
-  if (current && !models.includes(current)) models.unshift(current);
-  return models;
+function engineCatalog(engine) {
+  const list = (store.models && store.models.engines) || [];
+  return list.find((e) => e.engine === engine) || null;
 }
 
-function modelOptions(engine, current) {
-  return modelChoices(engine, current)
-    .map((m) => `<option ${m === current ? "selected" : ""}>${esc(m)}</option>`)
+function withCurrent(values, current) {
+  const out = values.slice();
+  if (current && !out.includes(current)) out.unshift(current);
+  return out;
+}
+
+function modelChoices(engine, current) {
+  const catalog = engineCatalog(engine);
+  return withCurrent(catalog ? catalog.models : [], current);
+}
+
+/** Reasoning levels differ per engine: Claude has `default` and no `ultra`, Codex the reverse. */
+function reasoningChoices(engine, current) {
+  const catalog = engineCatalog(engine);
+  return [""].concat(withCurrent(catalog ? catalog.reasoning : [], current));
+}
+
+function optionTags(values, current) {
+  return values
+    .map((v) => `<option ${v === current ? "selected" : ""}>${esc(v)}</option>`)
     .join("");
 }
 
-/** Repaint the model select when the engine changes: the two lists are not interchangeable. */
-function onEngineChange(engineId, modelId) {
+function modelOptions(engine, current) {
+  return optionTags(modelChoices(engine, current), current);
+}
+
+function reasoningOptions(engine, current) {
+  return optionTags(reasoningChoices(engine, current), current);
+}
+
+/** Say so when the list is our fallback rather than the engine's own answer. */
+function catalogNote(engine) {
+  const catalog = engineCatalog(engine);
+  if (!catalog || catalog.source !== "fallback") return "";
+  return `<span class="tiny muted" id="ag-catalog-note">engine could not be asked — fallback list</span>`;
+}
+
+/** Repaint both selects when the engine changes: neither list is interchangeable. */
+function onEngineChange(engineId, modelId, reasoningId) {
   const engine = document.getElementById(engineId).value;
-  const select = document.getElementById(modelId);
-  select.innerHTML = modelOptions(engine, select.value);
+  const model = document.getElementById(modelId);
+  model.innerHTML = modelOptions(engine, model.value);
+  if (reasoningId) {
+    const reasoning = document.getElementById(reasoningId);
+    reasoning.innerHTML = reasoningOptions(engine, reasoning.value);
+  }
+  const note = document.getElementById("ag-catalog-note");
+  if (note) note.outerHTML = catalogNote(engine) || `<span id="ag-catalog-note"></span>`;
 }
 
 function agentEditor(p, packs) {
   const engines = ["claude", "codex"];
-  const reasonings = ["", "minimal", "low", "medium", "high"];
   return `<tr><td colspan="6">
     <div class="card pad" style="margin:8px 0">
       <div class="row wrap" style="gap:16px;margin-bottom:12px">
         <label class="tiny">Name<br><input id="ag-name" value="${esc(p.name || p.id)}"></label>
         <label class="tiny">Engine<br>
-          <select id="ag-engine" onchange="onEngineChange('ag-engine','ag-model')">${engines
+          <select id="ag-engine" onchange="onEngineChange('ag-engine','ag-model','ag-reasoning')">${engines
             .map((e) => `<option ${e === p.engine ? "selected" : ""}>${e}</option>`)
             .join("")}</select></label>
         <label class="tiny">Model<br>
-          <select id="ag-model">${modelOptions(p.engine, p.model || "")}</select></label>
-        <label class="tiny">Reasoning<br><select id="ag-reasoning">${reasonings
-          .map((r) => `<option ${r === (p.reasoning || "") ? "selected" : ""}>${r}</option>`)
-          .join("")}</select></label>
+          <select id="ag-model">${modelOptions(p.engine, p.model || "")}</select>
+          ${catalogNote(p.engine) || `<span id="ag-catalog-note"></span>`}</label>
+        <label class="tiny">Reasoning<br>
+          <select id="ag-reasoning">${reasoningOptions(p.engine, p.reasoning || "")}</select></label>
         <label class="tiny">How far it is trusted<br>${packSelect("ag-policy", packs, p.policy)}</label>
         <label class="tiny">Tags<br><input id="ag-tags" value="${esc((p.tags || []).join(", "))}"></label>
       </div>

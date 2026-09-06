@@ -1,28 +1,38 @@
 /**
- * Accepted model and reasoning values per engine (AP-08).
+ * What each engine accepts as a model and a reasoning level (AP-08, DESIGN §5.6).
  *
- * One table, read by the panel through `GET /api/agents/models` and by the write routes that
- * validate a profile before it is saved, so the list the user picks from and the list the server
- * accepts cannot drift. The panel offers a select and never a free-text box: an unknown model is
- * a rejection with a reason here, not a failure at launch time (AP-08).
+ * The engine is the source. `catalog.ts` asks the adapter — `session/new` answers with a select of
+ * category `model` and one of category `thought_level` — and publishes the answer here, where the
+ * validators the panel, the write routes and the launch check all share can see it. This module
+ * holds two things: that published catalog, and the fallback used when an engine cannot be asked.
  *
- * Both CLIs take either an alias for the current model of a family or a full model name — this is
- * `claude --model` verbatim: "Provide an alias for the latest model (e.g. 'fable', 'opus', or
- * 'sonnet') or a model's full name (e.g. 'claude-fable-5')". Aliases are listed first because
- * they keep working when a family is refreshed; full names are listed for the runs that must stay
- * reproducible. There is no endpoint on either engine that publishes this, so the table is static
- * and reviewed by hand when an engine ships a model.
+ * The fallback is not a promise. It was a hand-written table once, and measuring it against the
+ * real adapters showed it offering `opus`, `claude-opus-5`, `gpt-5-codex` and `o4-mini` when the
+ * adapters offered none of them — nobody noticed because the model never reached the engine at all
+ * (§6.1). It exists so a panel with an unauthenticated engine still shows something, and it says
+ * so: `catalogSource(engine)` returns "fallback" and the panel is expected to mark it.
  *
- * Reasoning is capped at "high" on purpose. Some of the models below accept "xhigh" and "max"
- * (gpt-6-astra, the gpt-5.3-codex family), but `agentProfileSchema.reasoning` does not, and the
- * catalog must never offer a level the write path would then refuse (AP-08). Raising the cap is a
- * change to REASONING_LEVELS and to the three schemas that repeat it, not to this table.
+ * Reasoning levels are per engine. A single global list was a third piece of fiction: it offered
+ * `minimal`, which neither engine accepts, and withheld `xhigh`, `max` and `ultra`, which they do.
  */
 
-/** The reasoning levels the profile schema accepts (`agentProfileSchema.reasoning`). */
-export const REASONING_LEVELS = ["minimal", "low", "medium", "high"] as const;
-
 export type EngineId = "claude" | "codex";
+
+/**
+ * Every level any engine has been seen to accept, for the *shape* check in the profile schema.
+ * Whether a given engine accepts a given level is `isKnownReasoning`, not this.
+ */
+export const ALL_REASONING_LEVELS = [
+  "default",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+] as const;
+
+export type ReasoningLevel = (typeof ALL_REASONING_LEVELS)[number];
 
 export type EngineModels = {
   /** Offered in this order; the first entry is what a new profile starts on. */
@@ -30,57 +40,91 @@ export type EngineModels = {
   reasoning: readonly string[];
 };
 
-export const ENGINE_MODELS: Record<EngineId, EngineModels> = {
+/**
+ * What to answer when the engine cannot be asked. Deliberately short: a longer list is not a
+ * better guess, and every entry here is one the panel may offer and the engine may then refuse.
+ */
+export const FALLBACK_MODELS: Record<EngineId, EngineModels> = {
   claude: {
-    models: [
-      "sonnet",
-      "opus",
-      "haiku",
-      "fable",
-      "claude-sonnet-4-5",
-      "claude-sonnet-5",
-      "claude-opus-5",
-      "claude-haiku-4-5",
-      "claude-fable-5",
-      "claude-fable-5-1",
-    ],
-    reasoning: REASONING_LEVELS,
+    models: ["default", "sonnet", "haiku"],
+    reasoning: ["default", "low", "medium", "high", "xhigh", "max"],
   },
   codex: {
-    models: [
-      "gpt-5-codex",
-      "gpt-5",
-      "gpt-6-astra",
-      "gpt-5.6-sol",
-      "gpt-5.6-terra",
-      "gpt-5.6-luna",
-      "gpt-5.5",
-      "gpt-5.3-codex",
-      "gpt-5.3-codex-spark",
-      "o4-mini",
-      "o3",
-    ],
-    reasoning: REASONING_LEVELS,
+    models: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+    reasoning: ["low", "medium", "high", "xhigh", "max", "ultra"],
   },
 };
 
-export const ENGINE_IDS = Object.keys(ENGINE_MODELS) as EngineId[];
+export const ENGINE_IDS = Object.keys(FALLBACK_MODELS) as EngineId[];
 
-/** The default model for an engine: what the editor selects when nothing is set yet. */
+/** What an engine told us about itself, once `catalog.ts` has asked it. */
+export type PublishedCatalog = EngineModels & {
+  /** The engine's own current selection, which is what a profile naming nothing will run on. */
+  currentModel: string | null;
+  currentReasoning: string | null;
+};
+
+const published = new Map<EngineId, PublishedCatalog>();
+
+/** Called by `catalog.ts` when an engine has answered. */
+export function publishCatalog(engine: EngineId, catalog: PublishedCatalog): void {
+  published.set(engine, catalog);
+}
+
+/** Called when an engine's credentials failed, or in tests: what it said is no longer trusted. */
+export function unpublishCatalog(engine?: EngineId): void {
+  if (engine) published.delete(engine);
+  else published.clear();
+}
+
+/** Did this list come from the engine, or are we guessing? The panel says which. */
+export function catalogSource(engine: EngineId): "engine" | "fallback" {
+  return published.has(engine) ? "engine" : "fallback";
+}
+
+/** The accepted values for an engine: what it told us, else the fallback. */
+export function engineModels(engine: EngineId): EngineModels {
+  return published.get(engine) ?? FALLBACK_MODELS[engine];
+}
+
+/** The engine's own current model, when it has told us; otherwise null. */
+export function currentModel(engine: EngineId): string | null {
+  return published.get(engine)?.currentModel ?? null;
+}
+
+/**
+ * The default model for an engine: what the editor selects when nothing is set yet. The engine's
+ * own current selection when it has one, because that is what a profile naming nothing will run
+ * on, and a default that disagrees with the engine is how the two drift apart again.
+ */
 export function defaultModel(engine: EngineId): string {
-  return ENGINE_MODELS[engine].models[0]!;
+  return currentModel(engine) ?? engineModels(engine).models[0]!;
 }
 
 /**
  * Is this model offered for this engine? A profile carrying something else is not rewritten —
- * the workspace file stays the source of truth (AP-01) — but the panel shows it as its own
- * option so saving cannot silently swap the model out from under a running installation.
+ * the workspace file stays the source of truth (AP-01) — but it is reported invalid and refused
+ * at launch, so nothing silently runs on a model nobody chose.
  */
 export function isKnownModel(engine: EngineId, model: string): boolean {
-  return ENGINE_MODELS[engine].models.includes(model);
+  return engineModels(engine).models.includes(model);
+}
+
+export function isKnownReasoning(engine: EngineId, reasoning: string): boolean {
+  return engineModels(engine).reasoning.includes(reasoning);
 }
 
 /** The message AP-08 asks for: a rejection that says what was expected. */
 export function modelRejection(engine: EngineId, model: string): string {
-  return `${engine} does not accept model "${model}"; choose one of: ${ENGINE_MODELS[engine].models.join(", ")}`;
+  const { models } = engineModels(engine);
+  const caveat =
+    catalogSource(engine) === "fallback"
+      ? " (the engine could not be asked, so this is the fallback list)"
+      : "";
+  return `${engine} does not accept model "${model}"; choose one of: ${models.join(", ")}${caveat}`;
+}
+
+export function reasoningRejection(engine: EngineId, reasoning: string): string {
+  const levels = engineModels(engine).reasoning;
+  return `${engine} does not accept reasoning "${reasoning}"; choose one of: ${levels.join(", ")}`;
 }

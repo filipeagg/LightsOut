@@ -6,14 +6,38 @@
  * record the right one. And that a bad choice is refused with the accepted values in the sentence,
  * because a refusal that does not say what was expected is a second round trip.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   isOverridden,
   modelCatalog,
   resolveProfile,
   validateModelChoice,
 } from "../src/agents/effective.js";
+import { publishCatalog, unpublishCatalog } from "../src/agents/models.js";
 import type { AgentProfile } from "../src/agents/schema.js";
+
+/**
+ * These tests are about the merge and the refusal, not about which models exist this week, so
+ * they publish a catalog of their own (§5.6) exactly as a probed engine would. Asserting against
+ * the fallback table would make them fail every time an engine refreshes a family — which is the
+ * drift the discovered catalog exists to end.
+ */
+beforeEach(() => {
+  publishCatalog("claude", {
+    models: ["default", "sonnet", "haiku", "opus"],
+    reasoning: ["default", "low", "medium", "high", "xhigh", "max"],
+    currentModel: "default",
+    currentReasoning: "default",
+  });
+  publishCatalog("codex", {
+    models: ["gpt-5.6-sol", "gpt-5-codex", "gpt-5"],
+    reasoning: ["low", "medium", "high", "xhigh", "max", "ultra"],
+    currentModel: "gpt-5.6-sol",
+    currentReasoning: "medium",
+  });
+});
+
+afterEach(() => unpublishCatalog());
 
 const builder: AgentProfile = {
   id: "builder",
@@ -97,10 +121,23 @@ describe("validateModelChoice (OR-11)", () => {
     );
   });
 
-  it("refuses an unknown reasoning level", () => {
+  it("refuses an unknown reasoning level, listing the engine's own", () => {
     const problem = validateModelChoice(builder, { reasoning: "extreme" });
     expect(problem).toContain("extreme");
-    expect(problem).toContain("minimal");
+    expect(problem).toContain("xhigh");
+  });
+
+  it("checks reasoning per engine, because the two do not accept the same levels", () => {
+    // Claude has `default` and no `ultra`; Codex the other way round. One global list could only
+    // ever be wrong for one of them, and it was wrong for both.
+    expect(validateModelChoice(builder, { reasoning: "default" })).toBeNull();
+    expect(validateModelChoice(builder, { reasoning: "ultra" })).toContain("claude does not accept");
+    expect(
+      validateModelChoice(builder, { engine: "codex", model: "gpt-5", reasoning: "ultra" }),
+    ).toBeNull();
+    expect(
+      validateModelChoice(builder, { engine: "codex", model: "gpt-5", reasoning: "default" }),
+    ).toContain("codex does not accept");
   });
 });
 

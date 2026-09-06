@@ -21,7 +21,7 @@ import type { TemplatesLoader } from "../templates/loader.js";
 import type { KnowledgeLoader } from "../knowledge/loader.js";
 import type { Vault } from "../vault/vault.js";
 import { agentSource } from "../agents/writer.js";
-import { ENGINE_MODELS } from "../agents/models.js";
+import { modelCatalog } from "../agents/effective.js";
 import { listWorkspaceFolders } from "../knowledge/writer.js";
 import { hostPathFor, listProjectDocs, readProjectDoc } from "../projects/docs-index.js";
 import { narrate } from "../narrate.js";
@@ -242,8 +242,10 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
     }),
   );
 
+  // AP-08: what each engine actually offers, and whether it said so itself (§5.6). The panel
+  // marks a "fallback" list rather than presenting a guess as the truth.
   app.get("/api/agents/models", async (_request, reply) =>
-    envelope(reply, async () => ({ engines: ENGINE_MODELS })),
+    envelope(reply, async () => ({ engines: modelCatalog() })),
   );
 
   // Phase 9 resources (TP, KB, VT). A process without them answers the same empty shape

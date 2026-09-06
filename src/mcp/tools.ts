@@ -24,8 +24,8 @@ import type { Actions } from "../control/actions.js";
 import { askEngine } from "../acp/advisor.js";
 import { guide, TOPIC_ORDER } from "./guide.js";
 import { CAPABILITIES } from "../policy/capabilities.js";
-import { modelCatalog } from "../agents/effective.js";
-import { ENGINE_IDS, REASONING_LEVELS } from "../agents/models.js";
+import { modelCatalog, validateProfileChoice } from "../agents/effective.js";
+import { ENGINE_IDS, ALL_REASONING_LEVELS } from "../agents/models.js";
 import { AGENT_CAPABILITIES } from "../agents/schema.js";
 import { TOOLCHAIN_MANAGERS } from "../projects/toolchain.js";
 import type { Schedule } from "../triggers/schedule.js";
@@ -69,7 +69,7 @@ const modelChoiceSchema = {
     .min(1)
     .optional()
     .describe("Model for this launch only; one of those `list_agents` reports for the engine."),
-  reasoning: z.enum(REASONING_LEVELS).optional(),
+  reasoning: z.enum(ALL_REASONING_LEVELS).optional(),
 };
 
 /**
@@ -337,10 +337,13 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
     return {
       // AP-09: what a launch may pass. Without this the client has to guess, and a guess is a
       // refusal rather than a run.
+      // Per engine, and each entry says whether the engine answered or we are guessing (§5.6).
       models: modelCatalog(),
-      reasoning: [...REASONING_LEVELS],
       agents: [
-        ...[...snapshot.profiles.values()].map((p) => ({
+        ...[...snapshot.profiles.values()].map((p) => {
+        // §5.6: the file parses, but the account may no longer offer what it pins. Computed once.
+        const staleChoice = validateProfileChoice(p);
+        return {
           id: p.id,
           name: p.name,
           engine: p.engine,
@@ -354,8 +357,12 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
           advisor: p.advisor,
           enabled: p.enabled,
           deliverable: p.deliverable ?? null,
-          valid: true,
-        })),
+          // Reported rather than rewritten (AP-01), so the answer to "why did this never run on
+          // the model I chose" is on screen instead of in a log.
+          valid: staleChoice === null,
+          ...(staleChoice ? { error: staleChoice } : {}),
+        };
+        }),
         ...snapshot.rejected.map((r) => ({
           id: r.file.replace(/\.(ya?ml)$/i, ""),
           name: r.file,
@@ -1423,7 +1430,7 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
       name: z.string().min(1).optional(),
       engine: z.enum(["claude", "codex"]).optional(),
       model: z.string().min(1).optional(),
-      reasoning: z.enum(["minimal", "low", "medium", "high"]).optional(),
+      reasoning: z.enum(ALL_REASONING_LEVELS).optional(),
       instructions: z.string().optional(),
       policy: z.string().min(1).optional(),
       /**

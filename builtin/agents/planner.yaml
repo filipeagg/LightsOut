@@ -3,7 +3,6 @@
 # produced 36 kB of specification for a single page.
 name: Planner
 engine: claude
-model: opus
 reasoning: high
 policy: build
 writeScopes: [doc]

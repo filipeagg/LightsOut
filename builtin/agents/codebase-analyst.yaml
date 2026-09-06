@@ -2,7 +2,6 @@
 # base, and only into the one its project owns (KB-05).
 name: Codebase analyst
 engine: claude
-model: opus
 reasoning: high
 policy: build
 writeScopes: [doc]

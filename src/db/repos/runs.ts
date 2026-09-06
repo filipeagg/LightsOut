@@ -92,6 +92,16 @@ export class RunsRepo {
     return this.getOrThrow(id);
   }
 
+  /**
+   * The model the engine is actually on, learned from the session rather than from the profile
+   * (§6.1). A run whose profile named nothing used to record NULL and leave "which model did this
+   * work" unanswerable; the engine's own current selection is the answer.
+   */
+  setModel(id: string, model: string): RunRow {
+    this.db.prepare("UPDATE runs SET model = ? WHERE id = ?").run(model, id);
+    return this.getOrThrow(id);
+  }
+
   setWipCommit(id: string, sha: string): RunRow {
     this.db.prepare("UPDATE runs SET wip_commit = ? WHERE id = ?").run(sha, id);
     return this.getOrThrow(id);

@@ -2,7 +2,6 @@
 # produced is worth more from a different model family.
 name: Software auditor
 engine: codex
-model: gpt-5-codex
 reasoning: high
 policy: build
 writeScopes: [doc]

@@ -4,11 +4,25 @@
  * `ON DELETE CASCADE`, and `foreign_keys` is on, so a missing DELETE is not a leak, it is a
  * failed transaction that leaves the project standing.
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDb, type Db } from "../src/db/db.js";
 import { migrate } from "../src/db/migrate.js";
 import { createRepos, type Repos } from "../src/db/repos/index.js";
-import { isKnownModel, defaultModel, ENGINE_MODELS } from "../src/agents/models.js";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import {
+  ENGINE_IDS,
+  catalogSource,
+  defaultModel,
+  isKnownModel,
+  isKnownReasoning,
+  modelRejection,
+  publishCatalog,
+  unpublishCatalog,
+} from "../src/agents/models.js";
+import { readSelects } from "../src/agents/catalog.js";
+import { validateProfileChoice } from "../src/agents/effective.js";
+import type { AgentProfile } from "../src/agents/schema.js";
 
 let db: Db;
 let repos: Repos;
@@ -212,34 +226,119 @@ describe("deleting a project for good (PM-08)", () => {
   });
 });
 
-describe("the model catalog (AP-08)", () => {
-  it("offers an alias first and knows what each engine accepts", () => {
-    expect(defaultModel("claude")).toBe("sonnet");
-    expect(isKnownModel("claude", "claude-sonnet-4-5")).toBe(true);
-    expect(isKnownModel("claude", "gpt-5-codex")).toBe(false);
-    expect(isKnownModel("codex", "gpt-5-codex")).toBe(true);
-    expect(isKnownModel("codex", "sonnet")).toBe(false);
+describe("the model catalog (AP-08, DESIGN 5.6)", () => {
+  afterEach(() => unpublishCatalog());
+
+  it("falls back when no engine has answered, and says that is what it is doing", () => {
+    unpublishCatalog();
+    expect(catalogSource("claude")).toBe("fallback");
+    expect(isKnownModel("claude", "sonnet")).toBe(true);
+    // The rejection admits the list is a guess, so nobody reads it as the account's real catalog.
+    expect(modelRejection("claude", "nope")).toContain("fallback");
   });
 
-  it("carries the models the engines shipped after the table was first written", () => {
-    // Added by hand, as the header of models.ts says: nothing publishes this list.
-    expect(isKnownModel("claude", "claude-fable-5-1")).toBe(true);
-    expect(isKnownModel("codex", "gpt-6-astra")).toBe(true);
-    expect(isKnownModel("codex", "gpt-5.6-sol")).toBe(true);
-    expect(isKnownModel("codex", "gpt-5.3-codex")).toBe(true);
-    // Still the other engine's, whatever the table grows to.
-    expect(isKnownModel("claude", "gpt-6-astra")).toBe(false);
+  it("prefers what the engine said, over anything written here by hand", () => {
+    publishCatalog("claude", {
+      models: ["default", "opus[1m]", "sonnet"],
+      reasoning: ["default", "low", "high"],
+      currentModel: "default",
+      currentReasoning: "default",
+    });
+    expect(catalogSource("claude")).toBe("engine");
+    expect(isKnownModel("claude", "opus[1m]")).toBe(true);
+    // In the fallback list and not in the engine's: the engine wins, which is the whole point.
+    expect(isKnownModel("claude", "haiku")).toBe(false);
+    expect(modelRejection("claude", "haiku")).not.toContain("fallback");
+    // A new profile starts on what the engine is actually on, not on our first table entry.
+    expect(defaultModel("claude")).toBe("default");
   });
 
-  it("only lists reasoning levels the profile schema accepts", () => {
-    for (const engine of ["claude", "codex"] as const) {
-      expect(ENGINE_MODELS[engine].reasoning).toEqual(["minimal", "low", "medium", "high"]);
+  it("keeps reasoning levels per engine, because the two disagree", () => {
+    // Measured against the real adapters: Claude has `default` and no `ultra`, Codex the reverse,
+    // and neither has ever accepted `minimal`, which the old global list offered.
+    expect(isKnownReasoning("claude", "default")).toBe(true);
+    expect(isKnownReasoning("claude", "ultra")).toBe(false);
+    expect(isKnownReasoning("codex", "ultra")).toBe(true);
+    expect(isKnownReasoning("codex", "default")).toBe(false);
+    for (const engine of ENGINE_IDS) {
+      expect(isKnownReasoning(engine, "minimal")).toBe(false);
     }
   });
 
-  it("covers the model every builtin profile ships with", () => {
-    // A builtin whose model is not in the catalog would be a profile the editor cannot save.
-    expect(isKnownModel("claude", "claude-sonnet-4-5")).toBe(true);
-    expect(isKnownModel("codex", "gpt-5-codex")).toBe(true);
+  it("reports a profile whose model the account does not offer, without rewriting it (AP-01)", () => {
+    publishCatalog("codex", {
+      models: ["gpt-5.6-sol"],
+      reasoning: ["low", "medium", "high"],
+      currentModel: "gpt-5.6-sol",
+      currentReasoning: "medium",
+    });
+    const stale = {
+      id: "market-gatherer",
+      name: "Gatherer",
+      engine: "codex",
+      model: "o4-mini",
+      reasoning: "low",
+    } as AgentProfile;
+    const problem = validateProfileChoice(stale);
+    expect(problem).toContain("o4-mini");
+    expect(problem).toContain("gpt-5.6-sol");
+    // The profile object is untouched: the workspace file stays the source of truth.
+    expect(stale.model).toBe("o4-mini");
+  });
+});
+
+describe("reading the engine's own selects (DESIGN 5.6)", () => {
+  const configOptions = [
+    { id: "mode", category: "mode", type: "select", currentValue: "default", options: [{ value: "default" }] },
+    {
+      id: "model",
+      category: "model",
+      type: "select",
+      currentValue: "sonnet",
+      options: [{ value: "sonnet" }, { value: "haiku" }],
+    },
+    {
+      // Codex calls it `reasoning_effort`, Claude calls it `effort`. Matching by id would find
+      // one adapter and miss the other, which is why the category is what is matched.
+      id: "reasoning_effort",
+      category: "thought_level",
+      type: "select",
+      currentValue: "medium",
+      options: [{ value: "low" }, { value: "medium" }, { value: "high" }],
+    },
+  ];
+
+  it("finds both selects by category and keeps the adapter's own id for setting them", () => {
+    const selects = readSelects(configOptions);
+    expect(selects.model).toEqual({ id: "model", values: ["sonnet", "haiku"], current: "sonnet" });
+    expect(selects.reasoning?.id).toBe("reasoning_effort");
+    expect(selects.reasoning?.values).toContain("high");
+  });
+
+  it("answers null rather than guessing when the adapter offers nothing usable", () => {
+    expect(readSelects(undefined).model).toBeNull();
+    expect(readSelects([]).reasoning).toBeNull();
+    // Present but empty, or not a select: neither is a catalog.
+    expect(readSelects([{ id: "model", category: "model", type: "select", options: [] }]).model).toBeNull();
+    expect(
+      readSelects([{ id: "model", category: "model", type: "text", currentValue: "x" }]).model,
+    ).toBeNull();
+  });
+});
+
+describe("what the builtin library is allowed to pin (DESIGN 5.6)", () => {
+  // A builtin is distributed to accounts we know nothing about. A family alias survives a refresh;
+  // a pinned version is a profile that cannot run on somebody else's account.
+  const PORTABLE = new Set(["sonnet", "haiku", "opus", "fable"]);
+
+  it("names a family alias or nothing at all", () => {
+    const dir = path.join(process.cwd(), "builtin", "agents");
+    const files = readdirSync(dir).filter((f) => f.endsWith(".yaml"));
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      const model = /^model:\s*(\S+)\s*$/m.exec(readFileSync(path.join(dir, file), "utf8"))?.[1];
+      if (model === undefined) continue;
+      expect(PORTABLE.has(model), `${file} pins "${model}"`).toBe(true);
+    }
   });
 });

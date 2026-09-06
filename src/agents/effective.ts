@@ -15,10 +15,13 @@
 import type { AgentProfile } from "./schema.js";
 import {
   ENGINE_IDS,
-  ENGINE_MODELS,
-  REASONING_LEVELS,
+  catalogSource,
+  currentModel,
+  engineModels,
   isKnownModel,
+  isKnownReasoning,
   modelRejection,
+  reasoningRejection,
   type EngineId,
 } from "./models.js";
 
@@ -98,18 +101,51 @@ export function validateModelChoice(
     }
   }
 
-  if (reasoning != null && !REASONING_LEVELS.includes(reasoning as (typeof REASONING_LEVELS)[number])) {
-    return `unknown reasoning level "${reasoning}"; choose one of: ${REASONING_LEVELS.join(", ")}`;
+  // Per engine, because they differ: Claude accepts `default` and not `ultra`, Codex the other
+  // way round. One global list offered `minimal`, which neither of them has ever accepted.
+  if (reasoning != null && !isKnownReasoning(resolvedEngine, reasoning)) {
+    return reasoningRejection(resolvedEngine, reasoning);
   }
 
   return null;
 }
 
+/**
+ * Check a profile as it stands, for the panel and `list_agents` (AP-08). A profile that pins a
+ * model the account does not offer is not rewritten — AP-01 keeps the file as the source of truth
+ * — but it is reported, so "why did this never run on the model I chose" has an answer on screen
+ * instead of in a log.
+ */
+export function validateProfileChoice(profile: AgentProfile): string | null {
+  if (profile.model != null && !isKnownModel(profile.engine, profile.model)) {
+    return modelRejection(profile.engine, profile.model);
+  }
+  if (profile.reasoning != null && !isKnownReasoning(profile.engine, profile.reasoning)) {
+    return reasoningRejection(profile.engine, profile.reasoning);
+  }
+  return null;
+}
+
+export type EngineCatalogView = {
+  engine: EngineId;
+  models: string[];
+  reasoning: string[];
+  /** What a profile naming no model will actually run on, when the engine has told us. */
+  current: string | null;
+  /** "engine" when the adapter answered, "fallback" when we are guessing (§5.6). */
+  source: "engine" | "fallback";
+};
+
 /** The catalog, in the shape `list_agents` and the panel serve it (AP-08, AP-09). */
-export function modelCatalog(): { engine: EngineId; models: string[]; reasoning: string[] }[] {
-  return ENGINE_IDS.map((engine) => ({
-    engine,
-    models: [...ENGINE_MODELS[engine].models],
-    reasoning: [...ENGINE_MODELS[engine].reasoning],
-  }));
+export function modelCatalog(): EngineCatalogView[] {
+  return ENGINE_IDS.map((engine) => {
+    const { models, reasoning } = engineModels(engine);
+    return {
+      engine,
+      models: [...models],
+      reasoning: [...reasoning],
+      current: currentModel(engine),
+      source: catalogSource(engine),
+    };
+  });
 }

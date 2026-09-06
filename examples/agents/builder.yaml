@@ -1,7 +1,6 @@
 # Example agent profile (AP-01). Copied into the workspace on first boot.
 name: Builder
 engine: claude
-model: claude-sonnet-4-5
 reasoning: medium
 policy: default
 tags: [implementation]

@@ -98,6 +98,11 @@ const INTERNAL = new Set([
   "need",
   "project",
   "changed",
+  // PM-13: the declaration is a mirror of the database, rewritten after the actions that change
+  // what it states. Not an action of its own, and nothing calls it from outside.
+  "syncDeclaration",
+  // VT-09: which vault entries a project depends on, by id. Feeds the declaration and the bundle.
+  "vaultIds",
   "requireNotArchived",
   "requireLaunchable",
   "requireCapabilities",

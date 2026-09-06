@@ -35,6 +35,7 @@ import type { Orchestrator } from "../orchestrator/orchestrator.js";
 import type { PhaseService, LaunchPhaseResult } from "../orchestrator/phases.js";
 import { createProject, type CreateProjectInput } from "../projects/scaffold.js";
 import { readProjectConfig } from "../projects/config.js";
+import { buildDeclaration, writeDeclaration } from "../projects/declaration.js";
 import type { ProjectPhaseRow, ProjectRow, TaskLevel } from "../db/types.js";
 import { existsSync } from "node:fs";
 import { activeRunFor } from "../views.js";
@@ -168,6 +169,57 @@ export class Actions {
     });
   }
 
+  /**
+   * Rewrite the project's declaration from the database (PM-13, §9.7.1).
+   *
+   * Called after every change that touches what `lightsout.yaml` states. Best effort on purpose:
+   * the database is the source of truth while the project lives here, so a directory that is
+   * momentarily unwritable must not be able to reject a change that is already committed. The
+   * failure is recorded rather than thrown, and the next change writes the whole file again.
+   */
+  private async syncDeclaration(projectId: string): Promise<void> {
+    const project = this.deps.repos.projects.get(projectId);
+    if (!project) return;
+    try {
+      await writeDeclaration(
+        project.path,
+        buildDeclaration({
+          project,
+          phases: this.deps.repos.phases.list(project.id),
+          areas: this.deps.repos.areas.list(project.id),
+          knowledge: this.deps.repos.projectKnowledge.list(project.id).map((row) => row.base_id),
+          vault: await this.vaultIds(project.id),
+        }),
+      );
+    } catch (error) {
+      this.deps.repos.events.append({
+        type: "system",
+        payload: {
+          reason: "project declaration not written",
+          projectId: project.id,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  /**
+   * Which vault entries this project depends on (VT-09), by id and never by value.
+   *
+   * Two sources, because neither alone is right. An entry whose `scope` names the project is a
+   * declared dependency. An entry scoped `*` is a workspace-wide convenience, and listing every
+   * one of those in every repository would be noise — but one this project's runs have actually
+   * read is a dependency by evidence, and `vault_audit` has recorded exactly that since VT-05.
+   */
+  private async vaultIds(projectId: string): Promise<string[]> {
+    const audited = this.deps.repos.vaultAudit.entriesForProject(projectId);
+    if (!this.deps.vault) return audited;
+    const scoped = (await this.deps.vault.readAll())
+      .filter((entry) => entry.scope.includes(projectId))
+      .map((entry) => entry.id);
+    return [...new Set([...scoped, ...audited])].sort();
+  }
+
   // --- Projects and phases -------------------------------------------------
 
   async createProject(
@@ -180,6 +232,7 @@ export class Actions {
       ...(this.deps.phases ? { phases: this.deps.phases } : {}),
     });
     this.changed("project", result.project.id, actor);
+    await this.syncDeclaration(result.project.id);
     return result;
   }
 
@@ -1416,17 +1469,17 @@ export class Actions {
    * workspace root, agents/, templates/, vault.yaml, knowledge/ and another project are refused
    * before access is even looked at.
    */
-  addArea(
+  async addArea(
     actor: Actor,
     projectId: string,
     input: { path: string; access?: AreaAccess; note?: string },
-  ): {
+  ): Promise<{
     projectId: string;
     path: string;
     access: AreaAccess;
     absolute: string;
     hostPath: string | null;
-  } {
+  }> {
     const project = this.project(projectId);
     const { config } = this.deps;
     const target = validateArea(config.workspace, project.path, input.path);
@@ -1448,6 +1501,7 @@ export class Actions {
         actor,
       },
     });
+    await this.syncDeclaration(project.id);
     return {
       projectId: project.id,
       path: target.relative,
@@ -1457,11 +1511,11 @@ export class Actions {
     };
   }
 
-  removeArea(
+  async removeArea(
     actor: Actor,
     projectId: string,
     pathOrId: string,
-  ): { projectId: string; removed: string } {
+  ): Promise<{ projectId: string; removed: string }> {
     const project = this.project(projectId);
     const normalised = pathOrId.trim().replace(/\\/g, "/").replace(/\/+$/, "");
     const row =
@@ -1472,6 +1526,7 @@ export class Actions {
       type: "config.changed",
       payload: { kind: "area", id: `${project.id}:${row.path}`, op: "remove", actor },
     });
+    await this.syncDeclaration(project.id);
     return { projectId: project.id, removed: row.path };
   }
 
@@ -1544,11 +1599,11 @@ export class Actions {
    * Rewrite the project's context brief (PM-09). The one field a project cannot be without, and
    * the one most likely to need correcting once the work has started.
    */
-  setProjectContext(
+  async setProjectContext(
     actor: Actor,
     projectId: string,
     context: string,
-  ): { projectId: string; context: string } {
+  ): Promise<{ projectId: string; context: string }> {
     const project = this.project(projectId);
     if (!context.trim()) {
       throw new Error("the context brief cannot be empty (PM-09)");
@@ -1558,6 +1613,7 @@ export class Actions {
       type: "config.changed",
       payload: { kind: "project", id: project.id, op: "context", actor },
     });
+    await this.syncDeclaration(project.id);
     return { projectId: updated.id, context: updated.context };
   }
 
@@ -1584,12 +1640,12 @@ export class Actions {
 
   // --- Knowledge attachment ------------------------------------------------
 
-  attachKnowledge(
+  async attachKnowledge(
     actor: Actor,
     projectId: string,
     baseId: string,
     writable = false,
-  ): { baseId: string; writable: boolean } {
+  ): Promise<{ baseId: string; writable: boolean }> {
     const project = this.project(projectId);
     const base = this.need(this.deps.knowledge, "knowledge").getOrThrow(baseId);
     if (writable) {
@@ -1622,10 +1678,15 @@ export class Actions {
       type: "knowledge.attached",
       payload: { projectId: project.id, baseId, kind: base.manifest.kind, writable, actor },
     });
+    await this.syncDeclaration(project.id);
     return { baseId, writable };
   }
 
-  detachKnowledge(actor: Actor, projectId: string, baseId: string): { detached: boolean } {
+  async detachKnowledge(
+    actor: Actor,
+    projectId: string,
+    baseId: string,
+  ): Promise<{ detached: boolean }> {
     const project = this.project(projectId);
     const detached = this.deps.repos.projectKnowledge.detach(project.id, baseId);
     if (detached) {
@@ -1633,6 +1694,7 @@ export class Actions {
         type: "knowledge.detached",
         payload: { projectId: project.id, baseId, actor },
       });
+      await this.syncDeclaration(project.id);
     }
     return { detached };
   }

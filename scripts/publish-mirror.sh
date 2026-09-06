@@ -60,10 +60,20 @@ filter_repo --force \
 # is the documentation, it has to be published, and its failure narratives name real systems.
 # Fixing a name in the current tree is not enough either — filter-repo strips paths, not content,
 # so the superseded commit would still carry it.
-echo "Redacting internal names from every blob and message ..."
-filter_repo --force \
-  --replace-text "$here/scripts/publish-mirror-redact.txt" \
-  --replace-message "$here/scripts/publish-mirror-redact.txt"
+#
+# The list is stripped of comments and blank lines first, and this is not cosmetic:
+# --replace-text has no comment syntax. Every non-blank line is a rule, and a line with no `==>`
+# means "replace this with ***REMOVED***" — so a commented list replaces `#` itself, and every
+# comment in every file of the repository becomes ***REMOVED***. That is not a hypothetical; it
+# was force-pushed once.
+redact="$work/redact.txt"
+grep -v '^#' "$here/scripts/publish-mirror-redact.txt" | grep -v '^[[:space:]]*$' > "$redact"
+if [ ! -s "$redact" ]; then
+  echo "ERROR: the redaction list has no rules in it." >&2
+  exit 1
+fi
+echo "Redacting internal names from every blob and message ($(wc -l < "$redact") rules) ..."
+filter_repo --force --replace-text "$redact" --replace-message "$redact"
 
 # Belt and braces: if an excluded path is ever re-added by hand after this point, it stays
 # untracked in the mirror rather than silently slipping into the next push.
@@ -81,8 +91,7 @@ git -c user.email="mirror@local" -c user.name="publish-mirror" \
 # A redaction rule that quietly stops matching is worse than no rule at all, because the list
 # reads like a guarantee.
 echo "Verifying that nothing redacted survived ..."
-patterns="$(grep -v '^#' "$here/scripts/publish-mirror-redact.txt" | grep -v '^[[:space:]]*$' \
-  | sed -e 's/==>.*$//' -e 's/^literal://' -e 's/^glob://' -e 's/^regex://')"
+patterns="$(sed -e 's/==>.*$//' -e 's/^literal://' -e 's/^glob://' -e 's/^regex://' "$redact")"
 survivors=0
 while IFS= read -r pattern; do
   [ -z "$pattern" ] && continue
@@ -101,6 +110,15 @@ if [ "$survivors" -ne 0 ]; then
   echo "ERROR: refusing to push. Fix the redaction list, or the text it no longer matches." >&2
   exit 1
 fi
+
+# The other direction, and the one that matters more: a redaction that fired where it should not
+# have. `***REMOVED***` is what --replace-text writes when a rule has no `==>` side, so its
+# presence anywhere means the rule list was misread — the failure that shipped once.
+if git grep -I -l -F -e '***REMOVED***' $(git rev-list --all) -- . >/dev/null 2>&1; then
+  echo "ERROR: refusing to push: ***REMOVED*** appears in the filtered history, so a redaction" >&2
+  echo "  rule was read as a bare match. Check scripts/publish-mirror-redact.txt." >&2
+  exit 1
+fi
 echo "  clean."
 
 if [ -n "${DRY_RUN:-}" ]; then
@@ -110,6 +128,8 @@ if [ -n "${DRY_RUN:-}" ]; then
   echo "--- excluded paths still present (should be none) ---"
   git ls-files | grep -E '^(doc/(STATE|DECISIONS|PROJECT-INSTRUCTIONS)\.md|scripts/publish-mirror-redact\.txt)$' \
     || echo "  none"
+  echo "--- the release workflow, which a bad redaction silently breaks ---"
+  git show HEAD:.github/workflows/release.yml | sed -n '1p;22,26p'
   echo "--- what the redaction turned the DESIGN example into ---"
   git grep -n -E 'example\.com|acmeproduct' -- doc/DESIGN.md | head -8 || true
   exit 0

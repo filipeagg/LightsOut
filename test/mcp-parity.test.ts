@@ -103,6 +103,9 @@ const INTERNAL = new Set([
   "syncDeclaration",
   // VT-09: which vault entries a project depends on, by id. Feeds the declaration and the bundle.
   "vaultIds",
+  // PM-13: the boot backfill, so a project written before the declaration existed has one. Boot
+  // wiring like attachScheduler, not something a person asks for.
+  "syncDeclarations",
   "requireNotArchived",
   "requireLaunchable",
   "requireCapabilities",

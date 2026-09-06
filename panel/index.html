@@ -768,6 +768,106 @@ function newProjectForm() {
   </div>`;
 }
 
+/**
+ * Take on a project that already exists (PM-12).
+ *
+ * Separate from "New project" on purpose: the two look alike and do opposite things, and the one
+ * mistake worth designing against is a person reaching for Create on a repository somebody else
+ * owns and getting a scaffold written into it.
+ */
+function adoptProjectForm() {
+  return `<div class="card pad" style="margin-bottom:16px">
+    <div class="row wrap" style="gap:16px">
+      <label class="tiny">Project id<br><input id="ad-id" placeholder="consultant-portal">
+        <span class="tiny muted">The folder name under projects/.</span></label>
+      <label class="tiny" style="flex:1 1 40ch">Remote (optional)<br>
+        <input id="ad-remote" style="width:100%" placeholder="git@github.com:acme/consultant-portal.git">
+        <span class="tiny muted">Given one, it is cloned first. Leave empty if the folder is
+          already there.</span></label>
+    </div>
+    <p class="tiny muted" style="margin-top:8px">Nothing is written into the project: it is read
+      from its own <code>lightsout.yaml</code> — the brief, the phases, the areas and what it needs
+      (PM-13). The answer says what this machine is still missing.</p>
+    <div class="row" style="gap:8px;margin-top:12px">
+      <button class="btn primary" onclick="adoptProjectFromPanel()">Adopt</button>
+      <button class="btn" onclick="editing=null;paint()">Cancel</button>
+    </div>
+  </div>`;
+}
+
+async function adoptProjectFromPanel() {
+  const id = field("ad-id");
+  if (!id) { store.error = "the project id is the folder name under projects/"; return paint(); }
+  const payload = { id };
+  if (field("ad-remote")) payload.remote = field("ad-remote");
+  await act("POST", "/api/projects/adopt", payload);
+}
+
+/** Install what a bundle carries, then adopt the project it describes (PM-14). */
+function importBundleForm() {
+  return `<div class="card pad" style="margin-bottom:16px">
+    <div class="row wrap" style="gap:16px">
+      <label class="tiny" style="flex:1 1 40ch">Bundle file<br>
+        <input type="file" id="ib-file" accept=".lobundle,.zip"></label>
+      <label class="tiny" style="flex:1 1 40ch">Remote (optional)<br>
+        <input id="ib-remote" style="width:100%" placeholder="only if the bundle names none">
+      </label>
+    </div>
+    <p class="tiny muted" style="margin-top:8px">Knowledge bases, agent profiles and templates that
+      are already here are never overwritten. The credentials the bundle names are created empty,
+      for you to fill in under Vault (VT-09).</p>
+    <div class="row" style="gap:8px;margin-top:12px">
+      <button class="btn primary" onclick="importBundleFromPanel()">Import</button>
+      <button class="btn" onclick="editing=null;paint()">Cancel</button>
+    </div>
+  </div>`;
+}
+
+async function importBundleFromPanel() {
+  const input = document.getElementById("ib-file");
+  const file = input && input.files ? input.files[0] : null;
+  if (!file) { store.error = "choose a .lobundle file"; return paint(); }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  // In chunks: String.fromCharCode with a whole megabyte of arguments blows the call stack.
+  for (let i = 0; i < bytes.length; i += 8192) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  }
+  const payload = { dataBase64: btoa(binary) };
+  if (field("ib-remote")) payload.remote = field("ib-remote");
+  await act("POST", "/api/import/bundle", payload);
+}
+
+/**
+ * Download the project's bundle (PM-14).
+ *
+ * Not `act()`: what comes back is an archive, not an envelope, so the response is turned into a
+ * download here and the copy the server keeps in the workspace's exports/ folder is mentioned,
+ * because that is the one a person can send to somebody without finding their Downloads folder.
+ */
+async function exportBundle(id) {
+  store.error = "";
+  store.notice = "";
+  try {
+    const response = await fetch(`/api/export/bundle/${encodeURIComponent(id)}`, { method: "POST" });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body && body.error ? body.error.message : `export failed (${response.status})`);
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${id}.lobundle`;
+    link.click();
+    URL.revokeObjectURL(url);
+    store.notice = `Exported ${id}.lobundle — also saved in the workspace under exports/.`;
+  } catch (err) {
+    store.error = err.message;
+  }
+  paint();
+}
+
 async function createProjectFromPanel() {
   const name = field("pr-name");
   if (!name) { store.error = "a name is required"; return paint(); }
@@ -797,10 +897,14 @@ function viewProjects() {
   const header = `<h1>Projects <em>${o.projects.length}</em></h1>
     <div class="row" style="margin-bottom:16px">
       <button class="btn primary" onclick="editing='new-project';paint()">New project</button>
+      <button class="btn" onclick="editing='adopt-project';paint()">Adopt existing</button>
+      <button class="btn" onclick="editing='import-bundle';paint()">Import bundle</button>
       <button class="btn" onclick="showArchived=!showArchived;load()">
         ${showArchived ? "Hide archived" : "Show archived"}</button>
     </div>
-    ${editing === "new-project" ? newProjectForm() : ""}`;
+    ${editing === "new-project" ? newProjectForm() : ""}
+    ${editing === "adopt-project" ? adoptProjectForm() : ""}
+    ${editing === "import-bundle" ? importBundleForm() : ""}`;
   if (o.projects.length === 0) {
     return `${header}<div class="card"><div class="empty">
       No projects yet. Create one above, from <a href="/setup.html">Setup</a>, or through Claude Desktop.
@@ -1473,8 +1577,11 @@ function viewProject() {
       <button class="btn sm" onclick="archiveProject('${esc(p.id)}',${p.archived ? "false" : "true"})">
         ${p.archived ? "Unarchive" : "Archive"}</button>
       <button class="btn sm danger" onclick="deleteProject('${esc(p.id)}')">Delete this project</button>
+      <button class="btn sm" onclick="exportBundle('${esc(p.id)}')">Export bundle</button>
       <span class="tiny muted">Archiving hides it and keeps everything. Deleting removes its
-        history, and its folder too unless you say otherwise (PM-08).</span>
+        history, and its folder too unless you say otherwise (PM-08). The bundle is what a
+        colleague needs that <code>git clone</code> cannot give him: the knowledge bases, the
+        agent profiles, and the names of the credentials to fill in (PM-14).</span>
     </div>
     ${editing === `delete:${p.id}` ? deleteProjectCard(p) : ""}
     ${s.run ? runCard(s.run) : stoppedCard(s)}

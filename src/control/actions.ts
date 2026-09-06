@@ -218,6 +218,25 @@ export class Actions {
   }
 
   /**
+   * Write every live project's declaration once, at boot (PM-13).
+   *
+   * Without this, a project that predates the requirement keeps a `lightsout.yaml` that says how
+   * it runs and nothing about what it is — until somebody happens to edit its brief. The whole
+   * point of the file is that a colleague can clone the repository and have the project, and
+   * "after the next unrelated change" is not when that becomes true. Archived projects are left
+   * alone: they are not being worked on, and touching their directory would be noise in a diff.
+   */
+  async syncDeclarations(): Promise<number> {
+    let written = 0;
+    for (const project of this.deps.repos.projects.list()) {
+      if (project.archived === 1) continue;
+      await this.syncDeclaration(project.id);
+      written++;
+    }
+    return written;
+  }
+
+  /**
    * Which vault entries this project depends on (VT-09), by id and never by value.
    *
    * Two sources, because neither alone is right. An entry whose `scope` names the project is a

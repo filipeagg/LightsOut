@@ -227,6 +227,13 @@ async function main(): Promise<void> {
   const scheduler = new Scheduler(repos, actions, bus);
   // TR-09: and back, so a person can fire one by hand through the same path the clock takes.
   actions.attachScheduler(scheduler);
+  // PM-13: the declaration is what a second machine adopts from, so every live project has one
+  // from boot rather than from the next time somebody edits its brief.
+  const declarations = await actions.syncDeclarations();
+  if (declarations > 0) {
+    console.log(`[boot] ${declarations} project declaration(s) written (PM-13)`);
+  }
+
   const caughtUp = await scheduler.catchUp();
   for (const outcome of caughtUp) {
     console.log(`[boot] trigger ${outcome.triggerId}: ${outcome.result}`);

@@ -25,6 +25,7 @@ export const TOPIC_ORDER = [
   "doubts",
   "policies",
   "documents",
+  "sharing",
   "troubleshooting",
 ];
 

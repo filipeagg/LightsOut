@@ -63,9 +63,9 @@ filter_repo --force \
 #
 # The list is stripped of comments and blank lines first, and this is not cosmetic:
 # --replace-text has no comment syntax. Every non-blank line is a rule, and a line with no `==>`
-# means "replace this with ***REMOVED***" — so a commented list replaces `#` itself, and every
-# comment in every file of the repository becomes ***REMOVED***. That is not a hypothetical; it
-# was force-pushed once.
+# means "replace this with filter-repo's default marker" — so a commented list replaces `#`
+# itself, and every comment in every file of the repository becomes that marker. Not a
+# hypothetical: it was force-pushed once, and it broke the release workflow's YAML.
 redact="$work/redact.txt"
 grep -v '^#' "$here/scripts/publish-mirror-redact.txt" | grep -v '^[[:space:]]*$' > "$redact"
 if [ ! -s "$redact" ]; then
@@ -112,11 +112,15 @@ if [ "$survivors" -ne 0 ]; then
 fi
 
 # The other direction, and the one that matters more: a redaction that fired where it should not
-# have. `***REMOVED***` is what --replace-text writes when a rule has no `==>` side, so its
-# presence anywhere means the rule list was misread — the failure that shipped once.
-if git grep -I -l -F -e '***REMOVED***' $(git rev-list --all) -- . >/dev/null 2>&1; then
-  echo "ERROR: refusing to push: ***REMOVED*** appears in the filtered history, so a redaction" >&2
-  echo "  rule was read as a bare match. Check scripts/publish-mirror-redact.txt." >&2
+# have. filter-repo writes a fixed marker wherever a rule has no `==>` side, so that marker
+# appearing in a blob means the rule list was misread — the failure that shipped once.
+#
+# The marker is assembled here rather than written out, because this script is itself published:
+# spelling it literally would make the check match its own source on every run.
+marker="$(printf '%s%s%s' '***' 'REMOVED' '***')"
+if git grep -I -l -F -e "$marker" $(git rev-list --all) -- . >/dev/null 2>&1; then
+  echo "ERROR: refusing to push: filter-repo's redaction marker appears in the filtered" >&2
+  echo "  history, so a rule was read as a bare match. Check publish-mirror-redact.txt." >&2
   exit 1
 fi
 echo "  clean."

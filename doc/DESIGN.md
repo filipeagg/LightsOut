@@ -708,6 +708,14 @@ Three rules, and they are the point:
 - **Setting the option is recorded**, so the timeline distinguishes "asked for X" from "engine was
   already on X".
 
+**The selects are not fixed for the life of the session**, which is the part that had to be
+measured rather than assumed: setting one rebuilds the others. Choosing `haiku` on
+claude-agent-acp makes the `effort` option disappear entirely, and asking for it afterwards
+answers `Unknown config option: effort`. So the model goes first, each response's own
+`configOptions` replaces the list we were working from, and a level asked for on a model that has
+no such control is a warning on the timeline rather than a dead run — the model was the decision,
+and it was honoured.
+
 ### 6.2 Prompt composition (PM-03)
 
 The prompt for a run is assembled from seven blocks, in order:

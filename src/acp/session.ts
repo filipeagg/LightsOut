@@ -26,7 +26,7 @@ import type { ProjectRow, RunRow, TaskRow } from "../db/types.js";
 import type { AgentProfile } from "../agents/schema.js";
 import path from "node:path";
 import { spawnAdapter, type AdapterProcess } from "./adapter.js";
-import { readSelects, type SelectOption } from "../agents/catalog.js";
+import { readSelects } from "../agents/catalog.js";
 import { SCRATCH_REL } from "../policy/classify.js";
 import { toolchainEnv } from "../projects/toolchain.js";
 import { parseResult, type AgentResult, type DoubtPayload } from "./result.js";
@@ -357,19 +357,27 @@ export class RunSession {
    * engine does not offer stops the run here, before the prompt, because running anyway on the
    * engine's default is exactly what nobody noticed for months — a cheap model quietly standing
    * in for an expensive one is a result nobody can trust and a bill nobody can read.
+   *
+   * **The selects are not fixed for the life of the session.** Setting one rebuilds the others:
+   * measured against claude-agent-acp, choosing `haiku` makes the `effort` option disappear
+   * entirely, and asking for it then answers "Unknown config option: effort". So the model is
+   * applied first, the response's own list replaces the one we had, and a level asked for on a
+   * model that has no such control is a warning rather than a dead run — the model was the
+   * decision, and it was honoured.
    */
   private async applySessionChoice(
     ctx: { request: (method: string, params: unknown) => Promise<unknown> },
     session: { sessionId: string; newSessionResponse: { configOptions?: unknown } },
   ): Promise<void> {
     const { profile, run, repos } = this.deps;
-    const selects = readSelects(session.newSessionResponse.configOptions);
+    let options: unknown = session.newSessionResponse.configOptions;
 
     const apply = async (
       kind: "model" | "reasoning",
-      option: SelectOption | null,
       wanted: string | undefined,
     ): Promise<void> => {
+      const option = readSelects(options)[kind];
+
       // Nothing pinned: the engine stays on its own choice, and the audit records what that was,
       // so "which model did this work" has an answer either way.
       if (!wanted) {
@@ -377,10 +385,14 @@ export class RunSession {
         return;
       }
       if (!option) {
-        // An adapter that publishes no such select cannot be told; saying so beats pretending.
+        // Either the adapter never offered it, or choosing the model took it away. Both are worth
+        // saying out loud, and neither is worth throwing away a run the user is waiting for.
         this.event("system", {
           level: "warn",
-          message: `${profile.engine} adapter offers no ${kind} option; "${wanted}" was not applied`,
+          message:
+            `${profile.engine} offers no ${kind} control` +
+            (kind === "reasoning" && profile.model ? ` for model "${profile.model}"` : "") +
+            `; "${wanted}" was not applied`,
         });
         return;
       }
@@ -401,11 +413,14 @@ export class RunSession {
           note: "engine was already on this value",
         });
       } else {
-        await ctx.request(acp.methods.agent.session.setConfigOption, {
+        const response = (await ctx.request(acp.methods.agent.session.setConfigOption, {
           sessionId: session.sessionId,
           configId: option.id,
           value: wanted,
-        });
+        })) as { configOptions?: unknown } | null | undefined;
+        // The adapter answers with the options as they now stand; that list is the truth for the
+        // next call, not the one `session/new` gave us.
+        if (response?.configOptions !== undefined) options = response.configOptions;
         this.event("config.changed", {
           kind,
           op: "session",
@@ -419,8 +434,8 @@ export class RunSession {
       if (kind === "model") repos.runs.setModel(run.id, wanted);
     };
 
-    await apply("model", selects.model, profile.model);
-    await apply("reasoning", selects.reasoning, profile.reasoning);
+    await apply("model", profile.model);
+    await apply("reasoning", profile.reasoning);
   }
 
   private event(type: string, payload: unknown): void {

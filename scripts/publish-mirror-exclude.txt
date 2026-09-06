@@ -25,6 +25,7 @@ scripts/probe-events.mjs
 scripts/probe-summary.mjs
 scripts/probe-xlsx.py
 scripts/probe-mapa-gates.mjs
+scripts/probe-hosts.mjs
 scripts/status.mjs
 scripts/time-folder-walk.mjs
 scripts/verify-2607.mjs
@@ -35,5 +36,14 @@ scripts/verify-docs-context.mjs
 scripts/verify-judge.mjs
 scripts/verify-migration3.mjs
 scripts/verify-pe13.mjs
+scripts/verify-pe15.mjs
 scripts/verify-resume.mjs
 scripts/verify-dotenv-7-1f.mjs
+
+# Belt and braces: this list was hand-maintained and two probe scripts reached the public repo
+# because nobody remembered to add them. Every one-off probe/inspect script matches one of these,
+# so a new one is stripped whether or not it is named above. The phase gates live in
+# scripts/verify/*.sh, a directory, and are untouched by these patterns.
+glob:scripts/probe-*
+glob:scripts/inspect-*
+glob:scripts/verify-*.mjs

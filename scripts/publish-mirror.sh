@@ -53,7 +53,11 @@ filter_repo --force \
 
 # Belt and braces: if an excluded path is ever re-added by hand after this point, it stays
 # untracked in the mirror rather than silently slipping into the next push.
-grep -v '^#' "$here/scripts/publish-mirror-exclude.txt" | grep -v '^\s*$' >> .gitignore
+# The exclude file may use filter-repo's `glob:` / `literal:` prefixes; .gitignore understands the
+# bare pattern, so strip the prefix on the way in (and drop `regex:` lines, which have no
+# .gitignore equivalent).
+grep -v '^#' "$here/scripts/publish-mirror-exclude.txt" | grep -v '^\s*$' \
+  | grep -v '^regex:' | sed -e 's/^glob://' -e 's/^literal://' >> .gitignore
 git add .gitignore
 git -c user.email="mirror@local" -c user.name="publish-mirror" \
   commit -q -m "chore: exclude internal-only docs from the public mirror" || true

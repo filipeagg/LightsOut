@@ -5,6 +5,10 @@
 doc/STATE.md
 doc/DECISIONS.md
 
+# The redaction list itself: it is a list of the real names, which is exactly what must not be
+# published. The mechanism that uses it stays public in publish-mirror.sh; the names do not.
+scripts/publish-mirror-redact.txt
+
 # Meta-instructions for this exact Claude Desktop setup, not needed to run LightsOut.
 doc/PROJECT-INSTRUCTIONS.md
 doc/tester-project-instructions.md

@@ -15,6 +15,10 @@
 #
 # Usage:
 #   ./scripts/publish-mirror.sh git@github.com:<owner>/LightsOut.git
+#   DRY_RUN=1 ./scripts/publish-mirror.sh <same>   # filter and check, then stop before pushing
+#
+# The redaction list this reads (scripts/publish-mirror-redact.txt) is itself excluded from the
+# mirror: it is a list of the names that must not be published.
 #
 # Safe to re-run: it always starts from a fresh clone of the current HEAD, so it can never carry
 # over a previous mirror's state, and the push is forced because filter-repo rewrites every
@@ -51,6 +55,16 @@ echo "Stripping internal-only paths from every commit ..."
 filter_repo --force \
   --paths-from-file "$here/scripts/publish-mirror-exclude.txt" --invert-paths
 
+# And rewriting the names that must not travel, in every blob and every commit message.
+# Separate from the path list because the answer for doc/DESIGN.md is not to remove the file: it
+# is the documentation, it has to be published, and its failure narratives name real systems.
+# Fixing a name in the current tree is not enough either — filter-repo strips paths, not content,
+# so the superseded commit would still carry it.
+echo "Redacting internal names from every blob and message ..."
+filter_repo --force \
+  --replace-text "$here/scripts/publish-mirror-redact.txt" \
+  --replace-message "$here/scripts/publish-mirror-redact.txt"
+
 # Belt and braces: if an excluded path is ever re-added by hand after this point, it stays
 # untracked in the mirror rather than silently slipping into the next push.
 # The exclude file may use filter-repo's `glob:` / `literal:` prefixes; .gitignore understands the
@@ -61,6 +75,45 @@ grep -v '^#' "$here/scripts/publish-mirror-exclude.txt" | grep -v '^\s*$' \
 git add .gitignore
 git -c user.email="mirror@local" -c user.name="publish-mirror" \
   commit -q -m "chore: exclude internal-only docs from the public mirror" || true
+
+# The check, not the promise: every pattern is looked for again across the whole rewritten
+# history — blobs and messages — and a survivor stops the push before a remote is even added.
+# A redaction rule that quietly stops matching is worse than no rule at all, because the list
+# reads like a guarantee.
+echo "Verifying that nothing redacted survived ..."
+patterns="$(grep -v '^#' "$here/scripts/publish-mirror-redact.txt" | grep -v '^[[:space:]]*$' \
+  | sed -e 's/==>.*$//' -e 's/^literal://' -e 's/^glob://' -e 's/^regex://')"
+survivors=0
+while IFS= read -r pattern; do
+  [ -z "$pattern" ] && continue
+  if git grep -I -l -F -e "$pattern" $(git rev-list --all) -- . >/dev/null 2>&1; then
+    echo "  STILL PRESENT in a blob: $pattern" >&2
+    survivors=1
+  fi
+  if git log --all --format='%B' | grep -q -F -e "$pattern"; then
+    echo "  STILL PRESENT in a commit message: $pattern" >&2
+    survivors=1
+  fi
+done <<EOF
+$patterns
+EOF
+if [ "$survivors" -ne 0 ]; then
+  echo "ERROR: refusing to push. Fix the redaction list, or the text it no longer matches." >&2
+  exit 1
+fi
+echo "  clean."
+
+if [ -n "${DRY_RUN:-}" ]; then
+  echo "DRY_RUN set: stopping before the push. What the mirror would have been:"
+  echo "--- last commits ---"
+  git log --oneline -6
+  echo "--- excluded paths still present (should be none) ---"
+  git ls-files | grep -E '^(doc/(STATE|DECISIONS|PROJECT-INSTRUCTIONS)\.md|scripts/publish-mirror-redact\.txt)$' \
+    || echo "  none"
+  echo "--- what the redaction turned the DESIGN example into ---"
+  git grep -n -E 'example\.com|acmeproduct' -- doc/DESIGN.md | head -8 || true
+  exit 0
+fi
 
 echo "Pushing to $remote (forced: history is rebuilt on every run) ..."
 git remote add public "$remote"

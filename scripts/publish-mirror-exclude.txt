@@ -47,3 +47,9 @@ scripts/verify-dotenv-7-1f.mjs
 glob:scripts/probe-*
 glob:scripts/inspect-*
 glob:scripts/verify-*.mjs
+
+# The Windows wrappers for those same one-off scripts: each one hard-codes an absolute path on the
+# machine it was written on, and some of them call a script that no longer exists in the mirror.
+# The numbered entry points (1-Start-LightsOut.bat and friends) are the product and stay.
+glob:scripts/windows/run-*.cmd
+glob:scripts/windows/deploy-*.cmd

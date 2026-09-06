@@ -8,8 +8,12 @@
  *
  * Scope on purpose: no zip64, no encryption, no directory entries. Anything large enough to
  * need zip64 is a project that should be cloned, not downloaded.
+ *
+ * Reading was added for the project bundle (PM-14): an archive this system writes is an archive
+ * it has to be able to read back, and the same 1989 format read by hand is a smaller surface than
+ * a dependency that also does encryption, zip64 and symlinks — none of which a bundle may contain.
  */
-import { deflateRawSync } from "node:zlib";
+import { deflateRawSync, inflateRawSync } from "node:zlib";
 
 export type ZipEntry = {
   /** Path inside the archive, forward slashes, no leading slash. */
@@ -106,4 +110,80 @@ export function buildZip(entries: ZipEntry[]): Buffer {
   end.writeUInt32LE(offset, 16);
 
   return Buffer.concat([...locals, centralBuf, end]);
+}
+
+/** What `readZip` refuses, as one exception type, so a caller can say which archive was bad. */
+export class ZipError extends Error {}
+
+/**
+ * Read an archive back into its entries.
+ *
+ * Driven by the central directory rather than by scanning for local headers: the central
+ * directory is the authority on what an archive contains, and a reader that trusts local headers
+ * can be shown entries the directory never listed. Refusals are deliberate and total — an
+ * encrypted entry, an unknown compression method, a zip64 archive and a size that disagrees with
+ * the stored CRC are each an error, never a best effort, because the caller is about to write
+ * these bytes into somebody's workspace.
+ */
+export function readZip(buffer: Buffer): ZipEntry[] {
+  const eocd = findEndOfCentralDirectory(buffer);
+  const count = buffer.readUInt16LE(eocd + 10);
+  let offset = buffer.readUInt32LE(eocd + 16);
+  if (offset === 0xffffffff) throw new ZipError("zip64 archives are not read here");
+
+  const entries: ZipEntry[] = [];
+  for (let i = 0; i < count; i++) {
+    if (buffer.readUInt32LE(offset) !== 0x02014b50) {
+      throw new ZipError("central directory entry not found where the archive says it is");
+    }
+    const flags = buffer.readUInt16LE(offset + 8);
+    if (flags & 0x0001) throw new ZipError("encrypted entries are not read here");
+    const method = buffer.readUInt16LE(offset + 10);
+    const crc = buffer.readUInt32LE(offset + 16);
+    const compressedSize = buffer.readUInt32LE(offset + 20);
+    const uncompressedSize = buffer.readUInt32LE(offset + 24);
+    const nameLength = buffer.readUInt16LE(offset + 28);
+    const extraLength = buffer.readUInt16LE(offset + 30);
+    const commentLength = buffer.readUInt16LE(offset + 32);
+    const localOffset = buffer.readUInt32LE(offset + 42);
+    const name = buffer.toString("utf8", offset + 46, offset + 46 + nameLength);
+
+    if (buffer.readUInt32LE(localOffset) !== 0x04034b50) {
+      throw new ZipError(`local header missing for ${name}`);
+    }
+    const localNameLength = buffer.readUInt16LE(localOffset + 26);
+    const localExtraLength = buffer.readUInt16LE(localOffset + 28);
+    const start = localOffset + 30 + localNameLength + localExtraLength;
+    const body = buffer.subarray(start, start + compressedSize);
+
+    let data: Buffer;
+    if (method === 0) data = Buffer.from(body);
+    else if (method === 8) data = inflateRawSync(body);
+    else throw new ZipError(`unsupported compression method ${method} for ${name}`);
+
+    if (data.length !== uncompressedSize) {
+      throw new ZipError(`${name} does not have the size the archive claims`);
+    }
+    if (crc32(data) !== crc) throw new ZipError(`${name} fails its checksum`);
+
+    entries.push({ name, data });
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+  return entries;
+}
+
+/**
+ * The end-of-central-directory record, found by scanning backwards.
+ *
+ * It has no fixed position because it carries a variable-length comment, and a comment may
+ * legally contain the signature — so the record is only accepted when the length it declares
+ * agrees with where it was found.
+ */
+function findEndOfCentralDirectory(buffer: Buffer): number {
+  const min = Math.max(0, buffer.length - 22 - 0xffff);
+  for (let i = buffer.length - 22; i >= min; i--) {
+    if (buffer.readUInt32LE(i) !== 0x06054b50) continue;
+    if (i + 22 + buffer.readUInt16LE(i + 20) === buffer.length) return i;
+  }
+  throw new ZipError("not a zip archive: no end-of-central-directory record");
 }

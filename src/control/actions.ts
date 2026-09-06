@@ -39,6 +39,13 @@ import {
   type AdoptProjectInput,
   type AdoptProjectResult,
 } from "../projects/adopt.js";
+import {
+  exportBundle,
+  importBundle,
+  type BundleManifest,
+  type ImportBundleResult,
+} from "../projects/bundle.js";
+import { vaultAuthSchema } from "../vault/schema.js";
 import { readProjectConfig } from "../projects/config.js";
 import { buildDeclaration, writeDeclaration } from "../projects/declaration.js";
 import type { ProjectPhaseRow, ProjectRow, TaskLevel } from "../db/types.js";
@@ -105,6 +112,8 @@ export type ActionDeps = {
    * does not make that check.
    */
   health?: { engines(): Promise<{ engine: string; detected: boolean; auth: boolean }[]> };
+  /** This install's version, stamped into an exported bundle (PM-14). */
+  version?: string;
   /** Development servers a person can open (PV-01); absent in a process that runs none. */
   previews?: PreviewManager;
   /**
@@ -257,6 +266,164 @@ export class Actions {
     });
     if (result.adopted) this.changed("project", result.project.id, actor);
     return result;
+  }
+
+
+  // --- The project bundle (PM-14, §9.7.3) ----------------------------------
+
+  /**
+   * Everything the project needs that its repository cannot carry, as one file.
+   *
+   * The archive is both returned (the panel downloads it) and written to `<workspace>/exports/`,
+   * because the other surface is a conversation and a person cannot download anything through it:
+   * MCP answers with the path on their own machine (MC-08) and they pick it up from there.
+   */
+  async exportBundle(
+    actor: Actor,
+    projectId: string,
+  ): Promise<{
+    filename: string;
+    data: Buffer;
+    manifest: BundleManifest;
+    path: string;
+    hostPath: string | null;
+  }> {
+    const project = this.project(projectId);
+    const phases = this.deps.repos.phases.list(project.id);
+    const bundle = await exportBundle(
+      {
+        project,
+        agentIds: [...new Set(phases.map((phase) => phase.agent_id))],
+        knowledgeIds: this.deps.repos.projectKnowledge
+          .list(project.id)
+          .map((row) => row.base_id),
+        vaultIds: await this.vaultIds(project.id),
+      },
+      {
+        workspace: this.deps.config.workspace,
+        agents: this.deps.agents,
+        ...(this.deps.knowledge ? { knowledge: this.deps.knowledge } : {}),
+        ...(this.deps.templates ? { templates: this.deps.templates } : {}),
+        ...(this.deps.vault
+          ? { vaultEntries: () => this.need(this.deps.vault, "vault").readAll() }
+          : {}),
+        version: this.deps.version ?? "0.0.0",
+      },
+    );
+
+    const dir = path.join(this.deps.config.workspace, "exports");
+    await mkdir(dir, { recursive: true });
+    const file = path.join(dir, bundle.filename);
+    await writeFile(file, bundle.data);
+
+    this.deps.repos.events.append({
+      type: "system",
+      payload: {
+        reason: "project bundle exported",
+        projectId: project.id,
+        bytes: bundle.data.length,
+        knowledge: bundle.manifest.requires.knowledge.map((base) => base.id),
+        vault: bundle.manifest.requires.vault.map((entry) => entry.id),
+        actor,
+      },
+    });
+
+    return {
+      ...bundle,
+      path: file,
+      hostPath: hostPathFor(this.deps.config.workspace, this.deps.config.workspaceHost, file),
+    };
+  }
+
+  /**
+   * Install what a bundle carries, then adopt the project it describes (PM-14, PM-12).
+   *
+   * Order matters and is the order of the table in §9.7.3: the dependencies first, so that when
+   * adoption reports what is missing, it is reporting what this file could not supply rather than
+   * what it has not got to yet.
+   */
+  async importBundle(
+    actor: Actor,
+    source: Buffer | { path: string },
+    opts: { remote?: string; adopt?: boolean } = {},
+  ): Promise<
+    ImportBundleResult & {
+      project?: { id: string; path: string };
+      adopted: boolean;
+      phases?: number;
+      missing?: AdoptProjectResult["missing"];
+      note?: string;
+    }
+  > {
+    // A path rather than bytes is the MCP case, and a person there types the path they can see
+    // on their own machine (MC-08), so it is translated before it is opened.
+    const data = Buffer.isBuffer(source)
+      ? source
+      : await readFile(this.resolvePath({ path: source.path }).container ?? source.path);
+
+    const imported = await importBundle(data, {
+      workspace: this.deps.config.workspace,
+      agents: this.deps.agents,
+      ...(this.deps.knowledge ? { knowledge: this.deps.knowledge } : {}),
+      ...(this.deps.templates ? { templates: this.deps.templates } : {}),
+      ...(this.deps.vault
+        ? {
+            vaultViews: () => this.need(this.deps.vault, "vault").listViews(),
+            createVaultEntry: async (entry) => {
+              const auth = vaultAuthSchema.safeParse(entry.auth);
+              await this.need(this.deps.vault, "vault").put(entry.id, {
+                label: entry.label,
+                auth: auth.success ? auth.data : "none",
+                ...(entry.base_url ? { base_url: entry.base_url } : {}),
+                test_only: entry.test_only,
+                scope: entry.scope,
+                // Empty, deliberately (VT-09): the entry is a form in the panel, and an empty
+                // field is what makes it obvious which one still has to be filled in.
+                fields: Object.fromEntries(entry.fields.map((name) => [name, ""])),
+              });
+            },
+          }
+        : {}),
+    });
+
+    this.deps.repos.events.append({
+      type: "system",
+      payload: {
+        reason: "project bundle imported",
+        projectId: imported.manifest.project.id,
+        knowledge: imported.knowledge.written,
+        vault: imported.vault.created,
+        actor,
+      },
+    });
+
+    if (opts.adopt === false) return { ...imported, adopted: false };
+
+    const id = imported.manifest.project.id;
+    const dir = path.join(this.deps.config.workspace, "projects", id);
+    const remote = opts.remote ?? imported.manifest.project.remote;
+    const onDisk = existsSync(dir);
+    if (!onDisk && !remote) {
+      return {
+        ...imported,
+        adopted: false,
+        note:
+          `the dependencies are installed, but there is no clone of ${id} to adopt and the ` +
+          "bundle names no remote. Clone the project into projects/ and call adopt_project",
+      };
+    }
+
+    const adoptedResult = await this.adoptProject(actor, {
+      id,
+      ...(onDisk ? {} : { remote }),
+    });
+    return {
+      ...imported,
+      project: { id: adoptedResult.project.id, path: adoptedResult.project.path },
+      adopted: adoptedResult.adopted,
+      phases: adoptedResult.phases,
+      missing: adoptedResult.missing,
+    };
   }
 
   /**

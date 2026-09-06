@@ -1915,7 +1915,15 @@ profiles its phases name that are not builtins, its workspace template, and the 
 in `requires.vault` — reading `{id, label, auth, base_url, fields: names}` and nothing else. The
 writer then **checks its own output**: every entry it is about to place is scanned for the stored
 values of the vault, and a match aborts the export rather than warning about it. VT-09 is a
-property of the file, not a promise about the code that writes it.
+property of the file, not a promise about the code that writes it. (Values shorter than eight
+characters are not scanned for: a two-character "secret" matches somewhere in every archive, and a
+check that aborts on coincidence is a check people route around.)
+
+The archive is written into `<workspace>/exports/<projectId>.lobundle` as well as returned. The
+panel downloads what is returned; MCP answers with the path on the user's own machine (MC-08),
+because the other surface is a conversation and nobody downloads a file through one. Import takes
+the same two shapes: a path, or the bytes as base64 in the JSON body — multipart would be a
+dependency (ST-03) for one form field.
 
 **Import** (`import_bundle {archive, remote?}`) is the mirror, and each step is a refusal before
 it is an action:

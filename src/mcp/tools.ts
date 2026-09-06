@@ -328,6 +328,55 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
   );
 
   tool(
+    "export_bundle",
+    "Everything a second machine needs to work on this project that its git repository cannot " +
+      "carry (PM-14): the knowledge bases, the workspace agent profiles and template, and the " +
+      "names of the vault entries it expects. Writes one .lobundle file into the workspace's " +
+      "exports/ folder and answers with its path on this machine. It holds no file of the " +
+      "project itself — the code travels by git — and no credential value, ever.",
+    { projectId: z.string().min(1) },
+    async ({ projectId }) => {
+      const bundle = await actions.exportBundle("mcp", projectId);
+      return {
+        filename: bundle.filename,
+        path: bundle.path,
+        hostPath: bundle.hostPath,
+        bytes: bundle.data.length,
+        requires: bundle.manifest.requires,
+      };
+    },
+  );
+
+  tool(
+    "import_bundle",
+    "Install what a project bundle carries and then adopt the project (PM-14). Point it at a " +
+      ".lobundle file — the path on this machine is fine. Knowledge bases, agent profiles and " +
+      "templates that are already here are never overwritten, and the vault entries it names are " +
+      "created with empty fields for a person to fill in on the panel. The answer says what was " +
+      "written, what was left alone, and what still has to be configured before a run works.",
+    {
+      path: z.string().min(1).describe("Path to the .lobundle file, on this machine or in the container."),
+      remote: z
+        .string()
+        .optional()
+        .describe("Clone the project from here when it is not in projects/ yet. Defaults to the remote the bundle names."),
+      adopt: z
+        .boolean()
+        .optional()
+        .describe("False to install the dependencies only and not create the project."),
+    },
+    async ({ path: file, remote, adopt }) =>
+      actions.importBundle(
+        "mcp",
+        { path: file },
+        {
+          ...(remote !== undefined ? { remote } : {}),
+          ...(adopt !== undefined ? { adopt } : {}),
+        },
+      ) as unknown as Promise<Record<string, unknown>>,
+  );
+
+  tool(
     "project_status",
     "Everything about one project in a single call: chain, current run, doubts and state (MC-06).",
     { projectId: z.string().min(1) },

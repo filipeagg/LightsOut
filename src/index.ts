@@ -218,6 +218,8 @@ async function main(): Promise<void> {
     // OR-11: so a launch onto an engine that is not authenticated is refused, not attempted.
     health,
     previews,
+    // PM-14: stamped into an exported bundle, so a version mismatch is visible in the file.
+    version,
   });
 
   // 5f. Triggers (TR-01..07): launches with a clock on them. Catch-up first, so a slot missed

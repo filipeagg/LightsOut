@@ -672,6 +672,51 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
     }),
   );
 
+  // The project bundle (PM-14, §9.7.3): everything the repository cannot carry, as one file.
+  // Not enveloped, because what comes back is the archive itself.
+  app.post("/api/export/bundle/:id", async (request, reply) => {
+    const { id } = idParam.parse(request.params);
+    try {
+      const bundle = await actions.exportBundle("panel", id);
+      return reply
+        .type("application/zip")
+        .header("content-disposition", `attachment; filename="${bundle.filename}"`)
+        .header("content-length", String(bundle.data.length))
+        .send(bundle.data);
+    } catch (err) {
+      reply.code(409);
+      return failure(readable(err));
+    }
+  });
+
+  // Importing one. The browser has the bytes and the conversation has a path, so both are
+  // accepted; base64 rather than multipart keeps this a JSON API with no new dependency (ST-03).
+  app.post("/api/import/bundle", async (request, reply) =>
+    envelope(reply, async () => {
+      const input = body(
+        z
+          .object({
+            path: z.string().min(1).optional(),
+            dataBase64: z.string().min(1).optional(),
+            remote: z.string().optional(),
+            adopt: z.boolean().optional(),
+          })
+          .refine((value) => !!value.path !== !!value.dataBase64, {
+            message: "give either a path to the bundle or its bytes as dataBase64, not both",
+          }),
+        request.body,
+      );
+      const source = input.dataBase64
+        ? Buffer.from(input.dataBase64, "base64")
+        : { path: input.path! };
+      const result = await actions.importBundle("panel", source, {
+        ...(input.remote !== undefined ? { remote: input.remote } : {}),
+        ...(input.adopt !== undefined ? { adopt: input.adopt } : {}),
+      });
+      return result as unknown as Record<string, unknown>;
+    }),
+  );
+
   // Adoption (PM-12): a project that already exists somewhere else. Declared before the
   // `/api/projects/:id/...` family so the literal path is never read as an id.
   app.post("/api/projects/adopt", async (request, reply) =>

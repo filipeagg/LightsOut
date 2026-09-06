@@ -38,11 +38,17 @@ On macOS or Linux, or if you prefer a command:
 ```bash
 docker run -d --name lightsout --restart unless-stopped \
   -p 127.0.0.1:8484:8484 -p 127.0.0.1:1455:1455 \
+  -p 127.0.0.1:5170-5189:5170-5189 \
   -v lightsout-db:/data -v "$HOME/LightsOut:/workspace" \
+  -v lightsout-toolchains:/toolchains \
   -v claude-auth:/home/app/.claude -v codex-auth:/home/app/.codex \
-  -e LO_WORKSPACE_MODE=host \
+  -e LO_WORKSPACE_MODE=host -e LO_WORKSPACE_HOST="$HOME/LightsOut" \
   ghcr.io/filipeagg/lightsout:latest
 ```
+
+The port range is the preview pool (PV-01) and `lightsout-toolchains` holds the per-project
+development environments (ST-07); both must match `docker-compose.yml`, or a preview is allocated
+on a port the browser cannot open and every update rebuilds the toolchains from nothing.
 
 The image is public and multi-arch (linux/amd64 and linux/arm64), so no registry login is needed.
 Pass `lightsout:local` instead to run a build made on that machine.

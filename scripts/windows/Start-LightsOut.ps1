@@ -81,14 +81,25 @@ if ($running -eq $container -and -not $Recreate) {
   }
 
   Write-Host "Starting LightsOut..." -ForegroundColor Cyan
+  # Every port and volume here must match docker-compose.yml: this script is the same
+  # installation by another route, and a difference shows up as a feature that works for whoever
+  # runs compose and not for whoever double-clicks the .bat.
+  #   1455        engine OAuth callback (SU-04)
+  #   5170-5189   the preview pool (PV-01). Published but unreachable is the same as missing:
+  #               the allocator hands out a port the browser cannot open.
+  #   /toolchains the per-project development environments (ST-07). A managed volume, so they
+  #               survive the rm -f + run that every update performs.
   & $docker run -d --name $container --restart unless-stopped `
     -p "127.0.0.1:${Port}:8484" `
     -p "127.0.0.1:1455:1455" `
+    -p "127.0.0.1:5170-5189:5170-5189" `
     -v lightsout-db:/data `
     -v "${Workspace}:/workspace" `
+    -v lightsout-toolchains:/toolchains `
     -v claude-auth:/home/app/.claude `
     -v codex-auth:/home/app/.codex `
     -e LO_WORKSPACE_MODE=host `
+    -e "LO_WORKSPACE_HOST=${Workspace}" `
     $Image | Out-Null
   if ($LASTEXITCODE -ne 0) { Write-Host "The container did not start." -ForegroundColor Red; exit 1 }
 }

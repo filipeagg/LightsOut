@@ -117,8 +117,12 @@ fi
 #
 # The marker is assembled here rather than written out, because this script is itself published:
 # spelling it literally would make the check match its own source on every run.
+#
+# HEAD only, and deliberately: a misread rule list rewrites *every* commit, so the current tree
+# always shows it. Searching all of history instead makes the check permanent once any commit has
+# ever mentioned the marker in prose — which is what the commit fixing this failure does.
 marker="$(printf '%s%s%s' '***' 'REMOVED' '***')"
-if git grep -I -l -F -e "$marker" $(git rev-list --all) -- . >/dev/null 2>&1; then
+if git grep -I -l -F -e "$marker" HEAD -- . >/dev/null 2>&1; then
   echo "ERROR: refusing to push: filter-repo's redaction marker appears in the filtered" >&2
   echo "  history, so a rule was read as a bare match. Check publish-mirror-redact.txt." >&2
   exit 1

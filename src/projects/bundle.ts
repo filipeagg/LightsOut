@@ -49,8 +49,15 @@ export const bundleKnowledgeSchema = z
     bundled: z.boolean().default(true),
     documents: z.number().int().nonnegative().default(0),
     sha256: z.string().optional(),
-    /** Workspace-relative folder the base reads from, when it is not bundled (KB-08). */
+    /** Workspace-relative folder the base reads its documents from, when it has one (KB-08). */
     source: z.string().optional(),
+    /**
+     * The workspace-relative directories carried for this base, in the archive under exactly
+     * these names. Normally one — `knowledge/<id>` — and two when the base reads its documents
+     * from elsewhere inside `knowledge/`, because then the manifest and the documents are two
+     * trees and `source:` only resolves if both arrive.
+     */
+    paths: z.array(z.string().min(1)).default([]),
     note: z.string().optional(),
   })
   .strict();
@@ -145,6 +152,15 @@ async function readDirRecursive(dir: string, prefix = ""): Promise<{ rel: string
   return out;
 }
 
+/** A workspace-relative path with forward slashes, which is how the archive names everything. */
+function relativeTo(workspace: string, target: string): string {
+  return path.relative(workspace, target).split(path.sep).join("/");
+}
+
+function normaliseTree(value: string): string {
+  return value.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
+}
+
 /** A fingerprint over the sorted file list and its content, so a difference is detectable. */
 export function fingerprint(files: { rel: string; data: Buffer }[]): string {
   const hash = createHash("sha256");
@@ -185,35 +201,53 @@ export async function exportBundle(
         kind: "other",
         bundled: false,
         documents: 0,
+        paths: [],
         note: "declared by the project but not installed on the machine that exported it",
       });
       continue;
     }
-    if (base.source) {
-      // KB-14: the documents belong to a folder, not to the base. Naming the folder is the whole
-      // of what can honestly be transferred; copying it would redistribute someone else's tree.
+    // KB-14: what decides this is ownership, not whether the base has a `source`. A base reading
+    // `knowledge/acme/technical` is inside the knowledge area and is the system's to carry; one
+    // reading `sources/acme-export` is a view over somebody's own tree and is only ever named.
+    // The first version of this file used `base.source` for the test, and quietly left eighteen
+    // documents of a real base behind on the machine that exported them.
+    if (!deps.knowledge?.ownsItsDocuments(baseId)) {
       manifest.requires.knowledge.push({
         id: baseId,
         kind: base.manifest.kind,
         bundled: false,
         documents: base.documents.length,
-        source: base.source,
-        note: `not bundled: its documents are read from ${base.source}, which belongs to the workspace, not to the base`,
+        ...(base.source ? { source: base.source } : {}),
+        paths: [],
+        note: base.source
+          ? `not bundled: its documents are read from ${base.source}, which is outside knowledge/ and belongs to the workspace`
+          : "not bundled: its documents are outside the knowledge area",
       });
       continue;
     }
-    const files = await readDirRecursive(base.dir);
-    const loaded = await Promise.all(
-      files.map(async (file) => ({ rel: file.rel, data: await readFile(file.abs) })),
-    );
+
+    // Carried under their own workspace-relative names, so the archive is a slice of the
+    // workspace and `source:` resolves on the other machine without being rewritten.
+    const trees = [...new Set([relativeTo(deps.workspace, base.dir), ...(base.source ? [normaliseTree(base.source)] : [])])];
+    const loaded: { rel: string; data: Buffer }[] = [];
+    for (const tree of trees) {
+      const files = await readDirRecursive(path.join(deps.workspace, tree));
+      for (const file of files) {
+        const data = await readFile(file.abs);
+        loaded.push({ rel: `${tree}/${file.rel}`, data });
+      }
+    }
     for (const file of loaded) {
-      entries.push({ name: `knowledge/${baseId}/${file.rel}`, data: file.data });
+      if (entries.some((entry) => entry.name === file.rel)) continue;
+      entries.push({ name: file.rel, data: file.data });
     }
     manifest.requires.knowledge.push({
       id: baseId,
       kind: base.manifest.kind,
       bundled: true,
       documents: base.documents.length,
+      ...(base.source ? { source: base.source } : {}),
+      paths: trees,
       sha256: fingerprint(loaded),
     });
   }
@@ -392,26 +426,36 @@ export async function importBundle(
       });
       continue;
     }
-    const prefix = `knowledge/${required.id}/`;
-    const carried = [...files.entries()].filter(([name]) => name.startsWith(prefix));
+    // Older bundles named no trees; one base, one directory, is what they meant.
+    const trees = required.paths.length > 0 ? required.paths : [`knowledge/${required.id}`];
+    const carried = [...files.entries()].filter(([name]) =>
+      trees.some((tree) => name.startsWith(`${tree}/`)),
+    );
     if (carried.length === 0) {
       knowledge.declared.push({ id: required.id, note: "the manifest names it but the archive does not carry it" });
       continue;
     }
-    const dir = path.join(deps.workspace, "knowledge", required.id);
-    if (await pathExists(dir)) {
-      // KB-14: an existing base is never overwritten by an archive. Saying whether it differs is
-      // the difference between "nothing to do" and "you two have diverged".
-      const existing = await readDirRecursive(dir);
-      const loaded = await Promise.all(
-        existing.map(async (file) => ({ rel: file.rel, data: await readFile(file.abs) })),
-      );
-      const differs = required.sha256 !== undefined && fingerprint(loaded) !== required.sha256;
+
+    // KB-14: an existing base is never overwritten by an archive. Saying whether it differs is
+    // the difference between "nothing to do" and "you two have diverged".
+    const present: { rel: string; data: Buffer }[] = [];
+    let anyPresent = false;
+    for (const tree of trees) {
+      const dir = path.join(deps.workspace, tree);
+      if (!(await pathExists(dir))) continue;
+      anyPresent = true;
+      for (const file of await readDirRecursive(dir)) {
+        present.push({ rel: `${tree}/${file.rel}`, data: await readFile(file.abs) });
+      }
+    }
+    if (anyPresent) {
+      const differs = required.sha256 !== undefined && fingerprint(present) !== required.sha256;
       knowledge.skipped.push({ id: required.id, differs });
       continue;
     }
+
     for (const [name, content] of carried) {
-      const target = path.join(dir, name.slice(prefix.length));
+      const target = path.join(deps.workspace, name);
       await mkdir(path.dirname(target), { recursive: true });
       await writeFile(target, content);
     }

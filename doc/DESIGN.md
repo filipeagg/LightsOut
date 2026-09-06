@@ -1785,7 +1785,7 @@ areas. The missing half is added, and written by the system rather than by hand:
 name: Consultant Portal
 verify: "npm test && npm run lint"
 push: manual
-remote: git@github.com:acme/consultant-portal.git
+remote: git@git.example.com:acme/consultant-portal.git
 default_agent: full-stack
 
 context: |                         # the brief (PM-09), verbatim
@@ -1811,8 +1811,8 @@ areas:                             # PE-09
     note: "the customer's export, read-only"
 
 requires:
-  knowledge: [ acmeproduct-web, acme-house-style ]
-  vault: [ jira, acmeproduct-back ]     # ids only; §9.7.3 says what the bundle adds
+  knowledge: [ acme-core, house-style ]
+  vault: [ jira, acme-api ]        # ids only; §9.7.3 says what the bundle adds
 ```
 
 Three rules make this safe to trust:
@@ -1869,10 +1869,21 @@ extended there with a reader, so no dependency is added (ST-03).
 ```
 consultant-portal.lobundle
 ├── bundle.yaml
-├── knowledge/<baseId>/…        every document of an owned base, manifest included
+├── knowledge/<baseId>/…        the manifest and index of an owned base
+├── knowledge/<any>/<path>/…    the folder it reads its documents from, when that is elsewhere
 ├── agents/<id>.yaml            workspace profiles the phases name
 └── templates/<id>.yaml         the workspace template it came from, when it is not a builtin
 ```
+
+Every `knowledge/…` entry is named by its **workspace-relative path**, so the archive is a slice
+of the workspace and lands on the other machine unchanged. That matters because of KB-05 amended
+(§17.1b): a base may keep its documents somewhere else under `knowledge/`, and then the base is
+two trees — the manifest in `knowledge/<id>/` and the documents in `knowledge/acme/technical/`. Both
+are carried, under their own names, because `source:` in the manifest resolves against the
+workspace and a rewritten path would resolve to nothing. What decides whether a base is carried at
+all is **ownership, not whether it has a `source`**: inside `knowledge/` it is the system's;
+outside it is a view over somebody's own tree and is only ever named. The first version of this
+tested `base.source` and quietly left eighteen documents behind.
 
 ```yaml
 format: 1
@@ -1882,16 +1893,18 @@ exported:
 project:
   id: consultant-portal
   name: Consultant Portal
-  remote: git@github.com:acme/consultant-portal.git
+  remote: git@git.example.com:acme/consultant-portal.git
   declaration: |                 # lightsout.yaml verbatim, for a project cloned without one
     …
 requires:
   knowledge:
-    - id: acmeproduct-web
+    - id: acme-core
       kind: technical
       bundled: true
       documents: 14
       sha256: 3f2a…            # over the sorted document list, so a difference is detectable
+      paths: [ knowledge/acme-core, knowledge/acme/technical ]
+      source: knowledge/acme/technical
     - id: acme-sources
       bundled: false           # KB-08: reads a folder that belongs to the user
       source: sources/acme-export

@@ -170,7 +170,51 @@ describe("what the bundle carries (PM-14)", () => {
     ).toThrow(BundleLeakError);
   });
 
-  it("declares a linked base instead of copying somebody's folder (KB-14)", async () => {
+  it("carries a base that reads a folder inside knowledge/, documents and all (KB-14)", async () => {
+    // The case that broke the first live export: a `source:` under `knowledge/` is still the
+    // knowledge area, so the base is the system's to carry — and it is two trees, not one.
+    await mkdir(path.join(workspace, "knowledge", "company", "tech"), { recursive: true });
+    await writeFile(path.join(workspace, "knowledge", "company", "tech", "a.md"), "# A", "utf8");
+    const dir = path.join(workspace, "knowledge", "nested");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      path.join(dir, "knowledge.yaml"),
+      "id: nested\nname: Nested\nkind: technical\nsource: knowledge/company/tech\n",
+      "utf8",
+    );
+    const deps = await loaders();
+
+    const bundle = await exportBundle(
+      { project: project(), agentIds: [], knowledgeIds: ["nested"], vaultIds: [] },
+      { workspace, ...deps, version: "0.2.2" },
+    );
+
+    const declared = bundle.manifest.requires.knowledge[0]!;
+    expect(declared.bundled).toBe(true);
+    expect(declared.paths.sort()).toEqual(["knowledge/company/tech", "knowledge/nested"]);
+    const names = readZip(bundle.data).map((entry) => entry.name);
+    expect(names).toContain("knowledge/nested/knowledge.yaml");
+    expect(names).toContain("knowledge/company/tech/a.md");
+
+    // And it lands on the other machine as the same two trees, so `source:` still resolves.
+    const other = await mkdtemp(path.join(tmpdir(), "lo-bundle-nested-"));
+    try {
+      const agents = new AgentsLoader(other);
+      const knowledge = new KnowledgeLoader(other);
+      await agents.load();
+      await knowledge.load();
+      const result = await importBundle(bundle.data, { workspace: other, agents, knowledge });
+      expect(result.knowledge.written).toEqual(["nested"]);
+      expect(await readFile(path.join(other, "knowledge", "company", "tech", "a.md"), "utf8")).toBe(
+        "# A",
+      );
+      expect(knowledge.get("nested")?.documents).toHaveLength(1);
+    } finally {
+      await rm(other, { recursive: true, force: true });
+    }
+  });
+
+  it("declares a base reading a folder outside knowledge/ instead of copying it (KB-14)", async () => {
     await mkdir(path.join(workspace, "docs", "platform"), { recursive: true });
     await writeFile(path.join(workspace, "docs", "platform", "a.md"), "# A", "utf8");
     const dir = path.join(workspace, "knowledge", "linked");

@@ -849,7 +849,13 @@ async function exportBundle(id) {
   store.error = "";
   store.notice = "";
   try {
-    const response = await fetch(`/api/export/bundle/${encodeURIComponent(id)}`, { method: "POST" });
+    // An empty body needs a content type all the same: fastify answers a POST without one with
+    // 415 before any handler runs, which is how this button failed the first time it was pressed.
+    const response = await fetch(`/api/export/bundle/${encodeURIComponent(id)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
     if (!response.ok) {
       const body = await response.json().catch(() => null);
       throw new Error(body && body.error ? body.error.message : `export failed (${response.status})`);

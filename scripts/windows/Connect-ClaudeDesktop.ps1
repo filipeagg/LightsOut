@@ -1,5 +1,9 @@
 # Register LightsOut as an MCP server in Claude Desktop (MC-01, SU-09).
 #
+# Legacy path, kept deliberately (DESIGN 14.3b): recent builds manage MCP servers through
+# extensions and never read this file, and for them the answer is installing lightsout.mcpb.
+# This script is for the builds that do still read it.
+#
 # Claude Desktop rewrites claude_desktop_config.json with its own preferences when it exits, so
 # editing that file while the app is running silently loses the change. This script waits for the
 # app to close, patches the file, keeps a .bak, and offers to start it again.

@@ -24,6 +24,17 @@ export class ProjectGit {
     return this.git;
   }
 
+  /**
+   * Clone a remote into an empty directory (PM-12).
+   *
+   * Static because there is no project yet: the directory this class is normally constructed
+   * around is what the clone creates. Depth is deliberately full — the checkpoint tags a
+   * provisional decision leaves behind (PM-04) are history the second machine needs.
+   */
+  static async clone(remote: string, target: string): Promise<void> {
+    await simpleGit({ maxConcurrentProcesses: 1 }).clone(remote, target);
+  }
+
   async isRepo(): Promise<boolean> {
     try {
       return await this.git.checkIsRepo();

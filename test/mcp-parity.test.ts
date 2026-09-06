@@ -139,6 +139,7 @@ const PANEL_ONLY = new Map([
  */
 const ROUTE_FOR: Record<string, string> = {
   createProject: "/api/projects",
+  adoptProject: "/api/projects/adopt",
   archiveProject: "/api/projects/:id/archived",
   deleteProject: "/api/projects/:id",
   launchPhase: "/api/phases/:phaseId/launch",
@@ -189,6 +190,7 @@ const ROUTE_FOR: Record<string, string> = {
 /** action name -> the tool that reaches it. */
 const TOOL_FOR: Record<string, string> = {
   createProject: "create_project",
+  adoptProject: "adopt_project",
   archiveProject: "archive_project",
   deleteProject: "delete_project",
   launchPhase: "launch_phase",

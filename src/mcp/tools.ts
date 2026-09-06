@@ -292,6 +292,42 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
   );
 
   tool(
+    "adopt_project",
+    "Take on a project that already exists (PM-12): a directory under projects/ that was cloned " +
+      "from its remote, or the remote itself, which is cloned first. It reads the project's " +
+      "lightsout.yaml — the brief, the phases, the areas, the knowledge and vault entries it " +
+      "needs — and creates the project from that, writing nothing into the directory. Use this, " +
+      "not create_project, when the project already exists somewhere else: create_project would " +
+      "scaffold a second one. The answer lists what this machine is still missing.",
+    {
+      id: z
+        .string()
+        .min(1)
+        .describe("The directory name under projects/, which becomes the project id."),
+      remote: z
+        .string()
+        .optional()
+        .describe(
+          "Clone this into projects/<id> first. Refused when that directory already exists and " +
+            "is not empty.",
+        ),
+    },
+    async ({ id, remote }) => {
+      const result = await actions.adoptProject("mcp", {
+        id,
+        ...(remote !== undefined ? { remote } : {}),
+      });
+      return {
+        project: { id: result.project.id, path: result.project.path },
+        adopted: result.adopted,
+        phases: result.phases,
+        knowledge: result.knowledge,
+        missing: result.missing,
+      };
+    },
+  );
+
+  tool(
     "project_status",
     "Everything about one project in a single call: chain, current run, doubts and state (MC-06).",
     { projectId: z.string().min(1) },

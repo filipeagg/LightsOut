@@ -1847,8 +1847,11 @@ adopt_project { id, remote? }      →  { project, adopted, phases, missing }
   template** (TP-05 says phases are frozen at creation; re-materialising from a template that has
   since changed would silently give the second machine a different project), declares the areas,
   and attaches the knowledge bases that exist.
-- **It writes nothing into the directory.** Not the scaffold, not `lightsout.yaml`, not an initial
-  commit. The clone is somebody's repository and adoption is a read.
+- **It writes no content into the directory.** Not the scaffold, not `lightsout.yaml`, not an
+  initial commit: the clone is somebody's repository and adoption is a read. The one thing it
+  creates is `.lightsout/tmp/` with its self-ignoring `.gitignore` — scratch the runner requires,
+  which git already ignores (PE-08) — and the project's toolchain directory, which lives outside
+  the project entirely (ST-07).
 - **Idempotent.** A project whose row already exists returns `adopted: false` and the same
   summary, like `createProject` does today.
 - `missing` is the point of the return value: bases named in `requires.knowledge` that are not

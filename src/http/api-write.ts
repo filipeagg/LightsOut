@@ -672,6 +672,21 @@ export function registerWriteRoutes(app: FastifyInstance, deps: WriteDeps): void
     }),
   );
 
+  // Adoption (PM-12): a project that already exists somewhere else. Declared before the
+  // `/api/projects/:id/...` family so the literal path is never read as an id.
+  app.post("/api/projects/adopt", async (request, reply) =>
+    envelope(reply, async () => {
+      const input = body(
+        z.object({ id: z.string().min(1), remote: z.string().optional() }),
+        request.body,
+      );
+      return actions.adoptProject("panel", {
+        id: input.id,
+        ...(input.remote !== undefined ? { remote: input.remote } : {}),
+      });
+    }),
+  );
+
   // The context brief (PM-09): the one field a project cannot be without, and the one most
   // likely to need correcting once the work has started.
   app.post("/api/projects/:id/context", async (request, reply) =>

@@ -34,6 +34,11 @@ import type { VaultEntry, VaultEntryView } from "../vault/schema.js";
 import type { Orchestrator } from "../orchestrator/orchestrator.js";
 import type { PhaseService, LaunchPhaseResult } from "../orchestrator/phases.js";
 import { createProject, type CreateProjectInput } from "../projects/scaffold.js";
+import {
+  adoptProject,
+  type AdoptProjectInput,
+  type AdoptProjectResult,
+} from "../projects/adopt.js";
 import { readProjectConfig } from "../projects/config.js";
 import { buildDeclaration, writeDeclaration } from "../projects/declaration.js";
 import type { ProjectPhaseRow, ProjectRow, TaskLevel } from "../db/types.js";
@@ -233,6 +238,24 @@ export class Actions {
     });
     this.changed("project", result.project.id, actor);
     await this.syncDeclaration(result.project.id);
+    return result;
+  }
+
+  /**
+   * Adopt a project that already exists on disk, cloning it first when a remote is given
+   * (PM-12, §9.7.2).
+   *
+   * Deliberately **not** followed by `syncDeclaration`: the file is what adoption just read, it
+   * belongs to the repository, and rewriting it here would put this machine's idea of the project
+   * into somebody's working tree before a single run had happened.
+   */
+  async adoptProject(actor: Actor, input: AdoptProjectInput): Promise<AdoptProjectResult> {
+    const result = await adoptProject(this.deps.repos, this.deps.config.workspace, input, {
+      agents: this.deps.agents,
+      ...(this.deps.knowledge ? { knowledge: this.deps.knowledge } : {}),
+      ...(this.deps.vault ? { vaultViews: () => this.need(this.deps.vault, "vault").listViews() } : {}),
+    });
+    if (result.adopted) this.changed("project", result.project.id, actor);
     return result;
   }
 

@@ -1258,14 +1258,18 @@ reading a secret *file* from using a variable the system handed this run on purp
 value, writing it to a file, or sending it to a host the entry does not declare are still a
 person's, and everything the judge cannot read is still escalated.
 
-**What it comes to, measured on the same twenty-five.** Eighteen stop asking outright. Two —
-`D-18` and `D-19` on `consultant-portal`, both the run's own vault entry against its own work —
-become the judge's, which answers in seconds. Five go on asking, and each for a reason that
-survives inspection: `cat .npmrc` is a credential file; `D-12` on `acmeproduct-web-dev` ends with
-`awk '{print}' repo/.env | sha256sum`, which puts the value on a pipe; and `D-4`, `D-5` and `D-11`
-on `consultant-portal` send the GitLab token to `git.example.com` while the vault
-entry declares no `base_url` at all — `vault_foreign`, and the remedy is to declare the host, not
-to loosen the class.
+**What it comes to, measured on the same twenty-five, against the vault as it is configured
+today.** Nineteen stop being credential gates at all — seventeen are simply allowed, and the two
+heredoc cases (`D-13`, `D-18`) fall to `other`, which the judge may settle and PE-10 remembers.
+Four — `D-4`, `D-5`, `D-11` and `D-19` on `consultant-portal`, all the GitLab token against the
+host `gitlab-portal-consultor` declares — are `vault_own` and now reach a judge that has been told
+so. **Two go on asking, and both should**: `cat .npmrc` is a credential file, and `D-12` on
+`acmeproduct-web-dev` ends with `awk '{print}' repo/.env | sha256sum`, which puts the value on a pipe.
+
+`D-4` and `D-5` were recorded as `vault_foreign` at the time; they are `vault_own` now because the
+entry has since been given its `base_url`. That is the mechanism working, and the reason
+`vault_foreign` is left untouched: when a value really is going somewhere the entry does not name,
+the remedy is to declare the host, not to loosen the class.
 
 What deliberately did **not** change: `credentials` stays in `NEVER_LEARNED` (PE-10), so a rescue
 is still decided fresh every time; `vault_foreign` still bypasses the judge entirely. Verified by

@@ -67,7 +67,8 @@ lightsout/
 │   ├── agents/
 │   │   ├── loader.ts             # load + watch agents/*.yaml, layered over builtin/ (AP-01..03, BA-01)
 │   │   ├── writer.ts             # panel-driven profile create/edit → YAML (AP-06..08)
-│   │   ├── models.ts             # accepted model + reasoning values per engine (AP-08)
+│   │   ├── catalog.ts            # the models/levels the engine itself advertises (AP-08, §5.6)
+│   │   ├── models.ts             # fallback table for when the engine cannot be asked (AP-08)
 │   │   └── schema.ts             # zod schema for profiles
 │   ├── templates/
 │   │   ├── loader.ts             # load + watch templates/*.yaml, layered over builtin/ (TP-01..04)
@@ -602,8 +603,8 @@ must keep following its agent when the agent changes, and a copied value would f
 | what is wrong | the answer |
 |---|---|
 | engine is not `claude` or `codex` | refused, naming both |
-| the model is not in `ENGINE_MODELS[engine]` | `modelRejection()` — the same sentence AP-08 gives the panel, listing the accepted models |
-| reasoning is not one of `REASONING_LEVELS` | refused, listing them |
+| the model is not in the engine's catalog (§5.6) | `modelRejection()` — the same sentence AP-08 gives the panel, listing the accepted models |
+| reasoning is not one of the engine's levels (§5.6) | refused, listing them |
 | a model given with no engine and the profile's engine does not accept it | refused, saying which engine was assumed |
 | the resolved engine is not authenticated | refused, pointing at the reconnect flow (§14.4) |
 
@@ -617,10 +618,56 @@ from a launch rather than the profile the run also gets
 the panel and `status_card` mark the run "model chosen at launch". A run whose model nobody can
 account for is a cost nobody can explain.
 
-**Discovery.** `list_agents` gains a `models` block — the catalog of `src/agents/models.ts`, per
-engine, with the default first — because the MCP client has no other way to learn what it may
-pass, and guessing produces the refusal above instead of a run. The `agents` section of `guide`
+**Discovery.** `list_agents` gains a `models` block — the catalog of §5.6, per engine, with the
+engine's current model first — because the MCP client has no other way to learn what it may pass,
+and guessing produces the refusal above instead of a run. The `agents` section of `guide`
 documents the override with a worked example.
+
+### 5.6 The catalog comes from the engine, not from a table (AP-08)
+
+`src/agents/models.ts` used to be the answer to "which models may I choose": a table written by
+hand, reviewed when an engine shipped something. It cannot be right, and measuring it showed how
+wrong it was. Both ACP adapters answer `session/new` with `configOptions`, and among them is a
+`select` of category `model` whose values are **the models this installation, on this account, with
+this adapter version, may actually use**. Against that, the hand-written table was mostly fiction:
+it offered `opus`, `claude-opus-5`, `gpt-5-codex` and `o4-mini`, and the adapters offered none of
+them. A run that named one did not fail — the model never reached the engine (§6.1), so the engine
+quietly used its own default. The table described a choice nobody was making.
+
+**So the engine is the source, and `models.ts` is only what to say when it cannot be asked.**
+
+```
+session/new → configOptions[] → { id, name, category, type:"select", currentValue, options[] }
+                                  category "model"         → the models this account may use
+                                  category "thought_level" → the reasoning levels it accepts
+```
+
+Matched by **category, never by id**: the two adapters name the effort option differently
+(`effort` on Claude, `reasoning_effort` on Codex) and the category is what the protocol defines.
+
+**`src/agents/catalog.ts`** owns discovery: spawn the adapter as a run would, `initialize`,
+`session/new` in a harmless cwd, read the two selects, stop the adapter. No prompt is ever sent, so
+a probe costs a process and no tokens. The result is cached per engine beside the health cache and
+invalidated for the same reasons (§11.3): an engine whose credentials just failed has nothing
+trustworthy to say about its catalog either.
+
+**Reasoning levels are per engine, and always were.** One global `REASONING_LEVELS` was a third
+piece of fiction: it offered `minimal`, which neither engine accepts, and withheld `xhigh`, `max`
+and `ultra`, which they do. The profile schema keeps a union — it validates the *shape* of a file —
+and what an engine accepts is checked against that engine's catalog, where it belongs.
+
+**When the engine cannot be asked** — not installed, not authenticated, adapter failing — the
+fallback table answers instead, and the catalog says `source: "fallback"` so the panel can say the
+list is a guess rather than pretending. A fallback list never blocks a launch that the engine would
+have accepted: the run-time application (§6.1) is what has the last word.
+
+**A profile pinning a model the account does not offer is not rewritten.** AP-01 keeps the
+workspace file as the source of truth, so it stays as written, is reported invalid with the reason,
+and is refused at launch with the list of what is available — the same treatment OR-11 gives an
+unauthenticated engine. **Builtin profiles therefore ship without a `model` at all**, meaning "the
+engine's current default": a builtin is distributed to installations whose accounts we know nothing
+about, and `opus[1m]` existing here is no reason to believe it exists there. Pinning a model is a
+decision the user makes, from a list that is real.
 
 ## 6. ACP session runner (SR-01..08)
 
@@ -633,6 +680,27 @@ spawn(LO_ADAPTER_CLAUDE | LO_ADAPTER_CODEX, [], { cwd: project.path, env: scrubb
 ```
 
 `scrubbedEnv` passes only what the adapter needs (PATH, HOME, proxy vars, engine config dirs); no LightsOut secrets (NF-02). Communication is JSON-RPC 2.0 over stdio per the ACP spec: `initialize` handshake (declare client fs/terminal capabilities), then `session/new { cwd, mcpServers: [] }`, then `session/prompt`.
+
+**The resolved model and reasoning are applied between `session/new` and the first prompt**, and
+this is the step whose absence made AP-09 decorative: the adapter command carries no model, the
+environment carries no model, and until this existed `profile.model` reached the `runs` row and
+nothing else. For each of the two selects the session found (§5.6), when the resolved profile names
+a value and it differs from `currentValue`:
+
+```
+session/set_config_option { sessionId, configId: <the option's own id>, value }
+```
+
+Three rules, and they are the point:
+
+- **A value the engine does not offer stops the run before the prompt**, with a failure naming what
+  the engine does offer. Running anyway on the engine's default is what the system did for months
+  and it is the reason nobody noticed; a cheap model silently substituted for an expensive one is a
+  result nobody can trust and a bill nobody can read.
+- **A profile that names nothing leaves the engine on its default**, and the default the engine
+  reported is recorded on the run, so the audit still answers "which model did this work".
+- **Setting the option is recorded**, so the timeline distinguishes "asked for X" from "engine was
+  already on X".
 
 ### 6.2 Prompt composition (PM-03)
 

@@ -1755,6 +1755,203 @@ format. It said nothing about where files go, nothing about credentials, and not
 The general rule this settles: a behaviour every agent must have belongs in the protocol block,
 where it is stated once and versioned, not in thirteen profiles where it drifts.
 
+### 9.7 The same project on a second machine (PM-12, PM-13, PM-14, KB-14, VT-09, MC-16)
+
+**The question this answers.** A colleague has LightsOut installed and has push access to the
+project's remote. What does he do to work on `consultant-portal`? The instinct is an
+exporter/importer of the project, and it is the wrong instinct: most of a project is already in a
+git repository that he can clone, and the part that is not — runs, events, costs, the permission
+audit — is the history of one machine, full of ulids that mean nothing anywhere else. Copying it
+would produce two databases quietly disagreeing about the same work.
+
+So a project is split three ways, by who is able to carry each part:
+
+| | carried by | why |
+|---|---|---|
+| code, `doc/`, `lightsout.yaml` | **git** | it is a repository; that is what a repository is for |
+| brief, template, phases, areas, required knowledge and vault ids | **`lightsout.yaml`**, in git | facts about the project, so they belong with the project |
+| knowledge bases, workspace agent profiles and templates | **the bundle** | they live in `knowledge/`, `agents/`, `templates/` — outside the repository, and git will never reach them |
+| vault values | **nobody** | NF-02; the bundle names them and stops there |
+| runs, events, `permission_audit`, costs, learned allows | **nobody** | one machine's history, and merging it is how two databases start lying |
+
+#### 9.7.1 `lightsout.yaml`, grown into a declaration (PM-13)
+
+The file already existed and was already read at run time (`readProjectConfig`, used by the
+orchestrator for the verify gate and the inline policy pack). It described how the project is
+*run* and nothing about what it *is*, so a full clone was not the project: no brief, no phases, no
+areas. The missing half is added, and written by the system rather than by hand:
+
+```yaml
+name: Consultant Portal
+verify: "npm test && npm run lint"
+push: manual
+remote: git@github.com:acme/consultant-portal.git
+default_agent: full-stack
+
+context: |                         # the brief (PM-09), verbatim
+  Portal de consultor sobre Jira. …
+
+template: full-development         # or `template: none` with the reason below
+template_reason: ""
+
+phases:                            # frozen at creation (TP-05); position is the list order
+  - id: analysis
+    title: Read the system until you understand it
+    agent: analyst
+    instructions: |
+      …
+    deliverable: doc/ANALYSIS.md
+    gate: auto
+    optional: false
+    repeatable: false
+
+areas:                             # PE-09
+  - path: sources/acme-export
+    access: read
+    note: "the customer's export, read-only"
+
+requires:
+  knowledge: [ acmeproduct-web, acme-house-style ]
+  vault: [ jira, acmeproduct-back ]     # ids only; §9.7.3 says what the bundle adds
+```
+
+Three rules make this safe to trust:
+
+- **The system writes it, on every change that touches it.** Creating a project, editing the
+  brief, declaring or removing an area, attaching or detaching a base: each one rewrites the file
+  from the database. A file that has to be maintained by hand is a file that is wrong by the
+  second week.
+- **The database stays the source of truth while the project exists on this machine.** The file is
+  the declaration read at adoption, not a second place to look at run time. Where they disagree on
+  a live project, the row wins and the file is rewritten; `readProjectConfig` keeps returning
+  exactly what it returns today for everything the orchestrator already used it for.
+- **No value, ever.** `requires.vault` holds ids. The field names live in the bundle, not here,
+  because a repository is pushed to a remote that more people can read than can run the project.
+
+#### 9.7.2 `adopt_project` (PM-12)
+
+Symmetric to `adopt_knowledge` (KB-10), and for the same reason: pointing at something that is
+already there should be enough.
+
+```
+adopt_project { id, remote? }      →  { project, adopted, phases, missing }
+```
+
+- With `remote`, it clones into `<workspace>/projects/<id>` first. Refused if the directory
+  already exists and is not empty — a clone that lands on top of something is not a clone.
+- Without it, the directory must already exist and hold a `lightsout.yaml`. A directory without
+  one is **refused, naming `create_project`**: adoption reads a declaration, and inventing one on
+  the caller's behalf is how you end up with a project whose brief says "provisional" forever.
+- It reads the declaration, creates the row with `context`, `template_id`, `push_policy`,
+  `verify_cmd` and `repo_remote`, materialises the phases **from the file rather than from the
+  template** (TP-05 says phases are frozen at creation; re-materialising from a template that has
+  since changed would silently give the second machine a different project), declares the areas,
+  and attaches the knowledge bases that exist.
+- **It writes nothing into the directory.** Not the scaffold, not `lightsout.yaml`, not an initial
+  commit. The clone is somebody's repository and adoption is a read.
+- **Idempotent.** A project whose row already exists returns `adopted: false` and the same
+  summary, like `createProject` does today.
+- `missing` is the point of the return value: bases named in `requires.knowledge` that are not
+  installed, agent profiles the phases name that do not exist, vault entries that are absent or
+  empty. An adoption with a non-empty `missing` still succeeds — the project is real and readable —
+  but a launch of a phase whose agent is missing already fails (AP-07), and PE-12 already refuses a
+  task whose preconditions are unmet. Saying it at adoption turns that into a list instead of a
+  surprise.
+
+#### 9.7.3 The bundle (PM-14, KB-14, VT-09)
+
+`<projectId>.lobundle` is a zip — the format `src/http/zip.ts` already writes by hand for SU-06,
+extended there with a reader, so no dependency is added (ST-03).
+
+```
+consultant-portal.lobundle
+├── bundle.yaml
+├── knowledge/<baseId>/…        every document of an owned base, manifest included
+├── agents/<id>.yaml            workspace profiles the phases name
+└── templates/<id>.yaml         the workspace template it came from, when it is not a builtin
+```
+
+```yaml
+format: 1
+exported:
+  at: 2026-09-06T18:40:00Z
+  lightsout: 0.2.2
+project:
+  id: consultant-portal
+  name: Consultant Portal
+  remote: git@github.com:acme/consultant-portal.git
+  declaration: |                 # lightsout.yaml verbatim, for a project cloned without one
+    …
+requires:
+  knowledge:
+    - id: acmeproduct-web
+      kind: technical
+      bundled: true
+      documents: 14
+      sha256: 3f2a…            # over the sorted document list, so a difference is detectable
+    - id: acme-sources
+      bundled: false           # KB-08: reads a folder that belongs to the user
+      source: sources/acme-export
+      note: "not bundled: its documents belong to a folder outside knowledge/"
+  agents: [ full-stack, analyst ]
+  vault:
+    - id: jira
+      label: Jira
+      auth: bearer
+      base_url: https://jira.example.com
+      fields: [ email, token ]   # names, never values
+```
+
+**There is no project file in it.** No `src/`, no `doc/`, not even `lightsout.yaml` as a file —
+only its text inside `bundle.yaml`, for the case where the importer has no clone yet. This is the
+whole reason the bundle is safe to hand around: it cannot be a stale copy of the code, because it
+never holds the code.
+
+**Export** (`export_bundle {projectId}`) collects the bases attached to the project, the agent
+profiles its phases name that are not builtins, its workspace template, and the vault entries
+in `requires.vault` — reading `{id, label, auth, base_url, fields: names}` and nothing else. The
+writer then **checks its own output**: every entry it is about to place is scanned for the stored
+values of the vault, and a match aborts the export rather than warning about it. VT-09 is a
+property of the file, not a promise about the code that writes it.
+
+**Import** (`import_bundle {archive, remote?}`) is the mirror, and each step is a refusal before
+it is an action:
+
+| step | what it does | what it refuses |
+|---|---|---|
+| read | parses `bundle.yaml`, checks `format` | an unknown `format`, a path escaping the archive, an entry outside the four known prefixes |
+| knowledge | writes each bundled base that is **absent** | never overwrites; an existing base is reported with `differs: true/false` from its sha |
+| agents, templates | same rule | same |
+| vault | creates the named entries with **empty fields** | never touches an entry that exists — a field with a value is not overwritten by an import, ever |
+| project | clones `remote` when given and the directory is absent, then `adopt_project` | everything `adopt_project` refuses |
+
+It returns what adoption returns plus what it wrote, and `missing` now means what a person still
+has to do: fill these vault fields, provide this linked base's folder, log in to this engine.
+
+**Why empty vault entries rather than a list.** The user's call, and the reason is that the list
+is a thing to lose: an entry visible in the panel with three empty fields is a form, and a form
+gets filled in. The risk it introduces — an abandoned import leaves half-configured entries — is
+visible in the same place and deleting one is one click, which is a better failure than a
+credential the person forgot was needed until a run stopped on it.
+
+#### 9.7.4 What still has to be done by hand, and is meant to be
+
+Engine login (SU-04) is his own account. The toolchain volume (ST-07) is build output and rebuilds
+itself. Learned allows (PE-10) are the record of decisions *he* has not taken yet. None of these
+is a gap in the transfer; each is a thing that would be wrong to copy.
+
+#### 9.7.5 Two machines, one remote
+
+Nothing above makes concurrent work safe, and the design should say so rather than imply it. The
+locks that stop two runs colliding (SR-07, OR-08) are locks inside one process; a second machine
+does not see them. What the system guarantees is only that it never pushes on its own: `push` is
+`manual` by default and `auto` requires a green verify in the same task cycle (PM-05). The rest is
+a working agreement between two people — a branch each, or a branch per chain, merged by pull
+request — and the honest statement is that LightsOut orchestrates agents, not teams. A run started
+on the same branch as another machine's run will produce a conflict, and it will be an ordinary
+git conflict, resolved the ordinary way.
+
+
 ## 10. MCP server (MC-01..06)
 
 ### 10.0 A server that teaches its own use (MC-09)
@@ -2020,6 +2217,9 @@ POST   /api/setup/login/:engine      → start the interactive login, returns {f
 GET    /api/setup/login/:flowId      → SSE: url, code, progress, final auth state
 POST   /api/setup/login/:engine/key  → store an API key through the engine CLI (NF-03)
 POST   /api/export/project/:id       → zip download (SU-06)
+POST   /api/export/bundle/:id        → project bundle download, dependencies only (PM-14)
+POST   /api/import/bundle            → import a bundle: knowledge, agents, vault names, then adopt (PM-14)
+POST   /api/projects/adopt           → adopt a directory under projects/, or clone a remote first (PM-12)
 
 # Agents (AP-06..08)
 POST   /api/agents                   → create a profile, or clone a builtin into the workspace

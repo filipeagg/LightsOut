@@ -12,6 +12,11 @@
  * they keep working when a family is refreshed; full names are listed for the runs that must stay
  * reproducible. There is no endpoint on either engine that publishes this, so the table is static
  * and reviewed by hand when an engine ships a model.
+ *
+ * Reasoning is capped at "high" on purpose. Some of the models below accept "xhigh" and "max"
+ * (gpt-6-astra, the gpt-5.3-codex family), but `agentProfileSchema.reasoning` does not, and the
+ * catalog must never offer a level the write path would then refuse (AP-08). Raising the cap is a
+ * change to REASONING_LEVELS and to the three schemas that repeat it, not to this table.
  */
 
 /** The reasoning levels the profile schema accepts (`agentProfileSchema.reasoning`). */
@@ -37,11 +42,24 @@ export const ENGINE_MODELS: Record<EngineId, EngineModels> = {
       "claude-opus-5",
       "claude-haiku-4-5",
       "claude-fable-5",
+      "claude-fable-5-1",
     ],
     reasoning: REASONING_LEVELS,
   },
   codex: {
-    models: ["gpt-5-codex", "gpt-5", "o4-mini", "o3"],
+    models: [
+      "gpt-5-codex",
+      "gpt-5",
+      "gpt-6-astra",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "gpt-5.5",
+      "gpt-5.3-codex",
+      "gpt-5.3-codex-spark",
+      "o4-mini",
+      "o3",
+    ],
     reasoning: REASONING_LEVELS,
   },
 };

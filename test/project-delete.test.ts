@@ -221,6 +221,16 @@ describe("the model catalog (AP-08)", () => {
     expect(isKnownModel("codex", "sonnet")).toBe(false);
   });
 
+  it("carries the models the engines shipped after the table was first written", () => {
+    // Added by hand, as the header of models.ts says: nothing publishes this list.
+    expect(isKnownModel("claude", "claude-fable-5-1")).toBe(true);
+    expect(isKnownModel("codex", "gpt-6-astra")).toBe(true);
+    expect(isKnownModel("codex", "gpt-5.6-sol")).toBe(true);
+    expect(isKnownModel("codex", "gpt-5.3-codex")).toBe(true);
+    // Still the other engine's, whatever the table grows to.
+    expect(isKnownModel("claude", "gpt-6-astra")).toBe(false);
+  });
+
   it("only lists reasoning levels the profile schema accepts", () => {
     for (const engine of ["claude", "codex"] as const) {
       expect(ENGINE_MODELS[engine].reasoning).toEqual(["minimal", "low", "medium", "high"]);

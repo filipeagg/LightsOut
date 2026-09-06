@@ -66,10 +66,10 @@ RUN set -eu; \
 # npm also serves ST-07's toolchain installs at runtime, so it stays at the version that installs
 # native optional dependencies correctly.
 RUN npm install -g --no-audit --no-fund \
-      @anthropic-ai/claude-code@2.1.219 \
-      @openai/codex@0.145.0 \
-      @agentclientprotocol/claude-agent-acp@0.62.0 \
-      @agentclientprotocol/codex-acp@1.1.7
+      @anthropic-ai/claude-code@2.1.263 \
+      @openai/codex@0.153.4 \
+      @agentclientprotocol/claude-agent-acp@0.75.1 \
+      @agentclientprotocol/codex-acp@1.10.0
 
 # node:22-slim already ships a uid 1000 user named "node"; rename it to app with
 # home /home/app so the credential volumes mount where the design expects (RT-03).

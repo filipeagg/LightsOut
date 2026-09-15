@@ -317,6 +317,28 @@ export function overviewView(
         ageMin: 0,
         severity: "red" as const,
       })),
+    // A provider that is logged in and cannot work is its own item (§11.3b). It was invisible
+    // before: `auth` was true, nothing was in the strip, and the only symptom anybody could
+    // describe was that runs died in their first ten seconds.
+    ...engines
+      .filter((e) => e.detected && e.auth && e.state !== "ok" && e.state !== "unknown")
+      .map((e) => ({
+        kind: "engine" as const,
+        projectId: null,
+        ref: e.engine,
+        title:
+          e.state === "no_credit"
+            ? `${e.engine} has no credit left`
+            : `${e.engine} is rate-limited`,
+        detail: [
+          e.stateDetail ?? "The provider refused the last run.",
+          e.retryAfter ? `It asked to be tried again after ${e.retryAfter}.` : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
+        ageMin: e.stateSince ? ageMinutes(e.stateSince) : 0,
+        severity: (e.state === "no_credit" ? "red" : "amber") as "red" | "amber",
+      })),
   ].sort((a, b) => b.ageMin - a.ageMin);
 
   return {
@@ -337,6 +359,11 @@ export function overviewView(
       auth: e.auth,
       authSource: e.authSource,
       authError: e.authError ?? null,
+      // §11.3b: what the provider can do, not only whether it holds a credential.
+      state: e.state,
+      stateDetail: e.stateDetail ?? null,
+      stateSince: e.stateSince ?? null,
+      retryAfter: e.retryAfter ?? null,
       checkedAt: e.checkedAt,
     })),
     network: deps.config.egress,

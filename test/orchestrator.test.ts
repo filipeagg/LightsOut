@@ -412,6 +412,70 @@ describe("chain loop", () => {
     expect(repos.chains.getOrThrow(launch.chainId).status).toBe("completed");
   });
 
+  /**
+   * §6.9: a provider that was merely busy has not failed the task. Before this, the refresh-lock
+   * message paused the chain and spent the task's turn on something the agent never did.
+   */
+  it("waits out a transient provider failure and finishes the chain", async () => {
+    const { Orchestrator } = await import("../src/orchestrator/orchestrator.js");
+    const { loadConfig } = await import("../src/config.js");
+    const { createBus } = await import("../src/bus.js");
+    const config = loadConfig({
+      LO_WORKSPACE: dir,
+      LO_DB: ":memory:",
+      LO_TRANSIENT_RETRIES: "2",
+    });
+    const project = repos.projects.create({ id: "flaky", name: "Flaky", path: dir, verifyCmd: "" });
+    const attempts: string[] = [];
+    const flakyRunner = {
+      run: async (input: { task: { id: string } }) => {
+        attempts.push(input.task.id);
+        const run = repos.runs.start({ taskId: input.task.id, engine: "claude" });
+        if (attempts.filter((t) => t === input.task.id).length === 1) {
+          repos.runs.finish(run.id, { status: "error", summary: "" });
+          return {
+            runId: run.id,
+            outcome: {
+              status: "error" as const,
+              summary: "",
+              exitReason: "TRANSIENT: refreshing it or exited mid-refresh",
+              failureKind: "transient" as const,
+              retryAfterMs: 5,
+              sentinelMissing: true,
+            },
+          };
+        }
+        repos.runs.finish(run.id, { status: "ok", summary: "done" });
+        repos.tasks.setStatus(input.task.id, "ok");
+        return {
+          runId: run.id,
+          outcome: {
+            status: "ok" as const,
+            summary: "done",
+            exitReason: "finished",
+            sentinelMissing: false,
+          },
+        };
+      },
+    };
+    const orch = new Orchestrator(
+      config,
+      repos,
+      createBus(),
+      { profileOrThrow: () => undefined } as never,
+      flakyRunner as never,
+    );
+    const launch = orch.launchChain({
+      projectId: project.id,
+      title: "flaky",
+      tasks: [{ title: "a", spec: "a", agentId: "builder", expects: "the work done" }],
+    });
+    await orch.idle();
+
+    expect(attempts).toHaveLength(2);
+    expect(repos.chains.getOrThrow(launch.chainId).status).toBe("completed");
+  });
+
   it("pauses the chain when the verify gate fails and never starts the next task (OR-04, OR-05)", async () => {
     const ran: string[] = [];
     const { project, orch } = await orchestrator("exit 3", ran);

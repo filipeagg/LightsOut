@@ -260,6 +260,9 @@ Pilot mechanism: an egress HTTP(S) proxy sidecar (tinyproxy) with an allowlist f
 | `LO_INACTIVITY_MIN` | `8` | Inactivity watchdog (SR-04) |
 | `LO_PERMISSION_WAIT_HOURS` | `24` | Max wait on a human-gated permission before cancel (§8.4) |
 | `LO_ADVISOR_CONFIDENCE` | `0.7` | Threshold for auto-continue on second opinion (DO-02) |
+| `LO_TRANSIENT_RETRIES` | `2` | Repeats allowed after a failure that waiting fixes (§6.9) |
+| `LO_TRANSIENT_BACKOFF_SEC` | `60` | Wait before such a repeat, unless the provider named one (§6.9) |
+| `LO_ENGINE_START_STAGGER_MS` | `4000` | How long a run holds its engine's start slot (§6.9) |
 | `LO_SCRIPT_SCAN_BYTES` | `65536` | Max bytes of a script body read to classify it; larger scripts are never `script_exec` (PE-07, §7.1) |
 | `LO_ADAPTER_CLAUDE` | `claude-agent-acp` | Command to spawn the Claude ACP adapter |
 | `LO_ADAPTER_CODEX` | `codex-acp` | Command to spawn the Codex ACP adapter |
@@ -856,6 +859,48 @@ an event, `run.steered`, and appears in the panel's timeline as a decision.
 permission. A run waiting on a human is waiting on `answer_doubt`; a note left on it is delivered
 when the run is running again.
 
+### 6.9 Not every failure is the agent's (`failures.ts`)
+
+Three `claude` runs died on the SDK's own words — *"Failed to refresh OAuth token: another Claude
+Code process is refreshing it or exited mid-refresh. This is usually transient; retry in a
+minute"* — and all three were recorded as a plain `error`. The task was blamed, the chain paused,
+and the single instruction in the message was the only thing nobody did. A failure message that
+tells you what to do is worth reading, so `classifyFailure()` reads it, into five kinds:
+
+| kind | what it means | what happens |
+| --- | --- | --- |
+| `auth` | the credential is gone or refused | run `error`, engine `auth_required`, a person reconnects (§11.3) |
+| `no_credit` | the account has nothing left to spend | run `error`, engine `no_credit`, chain pauses saying so (§11.3b) |
+| `rate_limited` | refused for now, usually with a clock | retried after the delay the provider named |
+| `transient` | waiting fixes it | task requeued, chain stays active, nothing charged to the agent |
+| `error` | everything else | exactly as before |
+
+**The order of the tests is the subtle part, and it is not the order of that table.** `transient`
+is tested before `auth`, because the refresh-lock sentence mentions OAuth tokens and signing in:
+read by the auth patterns it looks like a dead credential, and a person is sent to reconnect an
+engine that was never broken. The narrow reading wins over the broad one. The `transient` patterns
+are deliberately specific for the same reason in reverse — anything vague there turns a real bug
+into a retry loop, which is a worse failure than the one it hides.
+
+**Retries are bounded three ways**, because an unbounded retry is how an orchestrator spends a
+night achieving nothing: `LO_TRANSIENT_RETRIES` attempts per task (2), held in memory so a restart
+gives the provider an honest fresh chance; the provider's own `retry-after` when it named one, and
+`LO_TRANSIENT_BACKOFF_SEC` (60 s) when it did not; and a hard ceiling of ten minutes on any single
+wait. A rate limit measured in hours is news in its own right, so it pauses the chain and says so
+rather than sitting on a project lock nobody else can take.
+
+**One process at a time into the refresh window.** Every `claude-agent-acp` in the container shares
+`~/.claude/.credentials.json`, and the engine renews an expired token behind a lock of its own;
+with `LO_MAX_PARALLEL` runs plus an advisor session, several can reach for that lock in the same
+second and the losers die. `EngineStartGate` is a **stagger**, not a mutex: a run waits its turn to
+*start* on an engine and hands the turn on `LO_ENGINE_START_STAGGER_MS` (4 s) later, once spawn,
+handshake and any renewal are behind it. Runs overlap for everything except the moments that
+actually contend, so the parallelism the orchestrator exists for survives.
+
+The engine's lock is the engine's: LightsOut never deletes it. When a refresh failure will not
+clear, the lock directory left behind by a process that died mid-refresh is the first place to
+look — `~/.claude/.oauth_refresh.lock`, and its age is the tell.
+
 ## 7. Policy engine (PE-01..06)
 
 ### 7.1 Action classes (`classify.ts`)
@@ -1157,6 +1202,35 @@ a second veto that produced four hours of debugging and one deleted project.
 A `config.toml` without the managed marker belongs to a person and is **never** overwritten. Boot
 logs what it found, and warns when the file confines the engine below what LightsOut expects, so
 the next hour is not spent in the classifier again.
+
+**The same rule, belatedly, for the other engine.** Nothing did the equivalent for `claude`, and
+an agent eventually reported the obvious: the sandbox will not start. Measured inside the running
+container rather than guessed —
+
+```
+$ which bwrap                  → not found
+$ grep CapEff /proc/self/status → 0000000000000000
+$ unshare -Ur true             → unshare failed: Operation not permitted
+```
+
+— bubblewrap is not in the image at all, the process runs as a non-root user with every capability
+dropped, and the default seccomp profile refuses the user namespace it would need anyway. There is
+no configuration of this container in which that sandbox starts. `ensureClaudeConfig()` therefore
+writes `{"sandbox": {"enabled": false}}` at boot: the engine is told once, cleanly, not to try.
+
+**Installing bubblewrap and opening the container was considered and rejected.** It would mean
+`CAP_SYS_ADMIN` or a relaxed seccomp profile — weakening the boundary that actually holds (RT-01,
+RT-05) to strengthen one inside it that LightsOut can neither see nor audit. That is §7.8's own
+argument, pointing the other way; the container is the sandbox.
+
+The marker does not live in `settings.json`. That file's schema belongs to the engine, so a key of
+ours could become its problem at some future version; a sidecar holding exactly what we wrote
+answers "is this ours" without putting anything of ours inside it.
+
+**What this does not explain.** The agent attributed a broken file-patching tool to the same
+cause, and per the engine's documentation the sandbox covers Bash subprocesses only — file edits
+go through the permission system, not the sandbox. So a patch failure is a separate question, and
+if it recurs the honest place to look is §7.1e and the policy engine, not here.
 
 ### 7.1f `process.env` is not `.env`
 
@@ -1500,6 +1574,13 @@ prompt  = context + options + "Answer ONLY with JSON:
 A permission doubt has no recommendation from the agent that raised it — the gate exists because the policy had no answer, not because someone proposed one. It is nevertheless given a **derived recommendation** of "allow" when its action class is reversible and is not `deps_install`, so the advisor can settle it like any other doubt. `deps_install` is excluded on purpose: a dependency changes the lockfile and the build environment for every later run (ST-03), which is a human call even when it is technically reversible. Because an allow derived this way was proposed by nobody, it is held to a stricter bar: `max(LO_ADVISOR_CONFIDENCE, 0.8)`. Everything else about the flow is unchanged — checkpoint tag, `provisional` decision row, and the `MAX_AUTO_CONTINUE` cap per task.
 
 Decision rule: `advisor.choice == doubt.recommendation && advisor.confidence >= LO_ADVISOR_CONFIDENCE` → **auto-continue**: decision row (`kind='provisional'`), git checkpoint tag `lightsout/cp/<taskId>-<n>`, DECISIONS.md entry, then resume (functional: `session/prompt` continuation or new run with the decision prepended; permission: respond allow). Otherwise → open the doubt, attaching `second_opinion` so the human sees both positions (DO-03). Advisor failure/timeout (60 s) → open the doubt (fail toward the human, never toward silence). Irreversible classes skip the advisor entirely.
+
+**`agrees` has three values, not two.** `true` agrees, `false` objects, and **`null` means the
+advisor could not answer at all**. Recording a failed consultation as `false` is how a timeline
+came to read *"second opinion from codex: disagrees"* about a consultation that never happened,
+and a doubt was opened on the strength of it. The behaviour is unchanged — an advisor that cannot
+answer still opens the doubt — but what the human is shown is now the truth: "could not answer",
+with the error, in both the panel timeline and the `QUESTIONS.md` mirror.
 
 ### 8.3 Doubt persistence and mirroring (DO-01)
 
@@ -2125,7 +2206,7 @@ two surfaces are skins, and a skin that is missing a control is a fork in slow m
 
 | tool | input | output (`ok:true` +) | notes |
 |---|---|---|---|
-| `health` | `{}` | `{db, engines:{claude:{installed,auth},codex:{…}}, network, activeRuns, version}` | RT-06 |
+| `health` | `{}` | `{db, engines:{claude:{installed,auth,authSource,state,stateDetail?,stateSince?,retryAfter?},codex:{…}}, network, activeRuns, workspace, version}` | RT-06, §11.3b |
 | `list_projects` | `{archived?:bool}` | `{projects:[{id,name,status,activeRun?,openDoubts,lastActivity}]}` | |
 | `archive_project` | `{projectId, archived?:bool}` | `{project:{id,archived}}` | reversible; hides it and refuses new launches (PM-08) |
 | `delete_project` | `{projectId, confirm, keepFiles?:bool}` | `{deleted:true, filesRemoved:bool}` | irreversible; `confirm` must equal `projectId`, refused while a run is active (PM-08) |
@@ -2190,6 +2271,49 @@ This is written down because the alternative was observed — an `EPIPE` on an a
 ### 11.3 Auth expiry mid-run
 
 Adapter auth errors are recognized by the ACP error surface → run `error` with `exit_reason='AUTH_REQUIRED'`, engine health flips to `auth:false`, panel shows it in the attention strip (OB-03), `health` tool reports it, and the fix is reconnecting the engine from the panel (§14.4), with `scripts/login-*.sh` as the fallback (RT-04).
+
+Which failures count as auth is decided by `classifyFailure` (§6.9), not by an independent list:
+the same sentence has to answer "is this the credential", "is this worth retrying" and "what does
+the panel say", and three separate readings of it is how they disagree.
+
+### 11.3b What a provider can actually do (`state`)
+
+`auth` answers one question — is there a credential — and a fortnight of sessions showed how
+little that proves. `/health` reported both engines authenticated while runs died in their first
+seconds, so the operator's working test became *"does it get past ten seconds"*: a real signal
+that no surface carried. An account in good standing with no credit left is not the same thing as
+an account that is not connected, and until now they were indistinguishable.
+
+So every engine carries a **state** beside its `auth`:
+
+| state | meaning |
+| --- | --- |
+| `ok` | a run finished on this provider; the only proof that counts |
+| `unknown` | nothing has been observed yet — the honest answer, deliberately not `ok` |
+| `auth_required` | the credential is gone; reconnect (§11.3) |
+| `no_credit` | logged in, nothing left to spend; a person pays, and no reconnect will help |
+| `rate_limited` | refused for now, with `retryAfter` when the provider named one |
+
+**Where it comes from.** Not from a status command: neither engine confesses an empty balance to
+one, and both only reveal it by failing a real request. So the state is *observed* — set from a
+run's classified failure (§6.9), cleared by a run that finishes — and carries `stateSince` so a
+stale reading is visibly stale. `HealthProbe` already worked this way for auth; this widens the
+same mechanism rather than adding a second one beside it.
+
+**Only `auth_required` clears `auth`.** An account out of credit is authenticated, and reporting
+it as logged out sends the operator to a login page to fix a billing problem.
+
+**Three surfaces, one source.** The panel shows the state per engine and raises an attention item
+for it (OB-03); the MCP `health` tool returns `state`, `stateDetail`, `stateSince` and
+`retryAfter` (§10.2), so a session driving LightsOut through MCP learns it without a human opening
+the panel; and `/health` is `degraded` while any provider is in `no_credit`.
+
+**The orchestrator acts on it.** A chain that fails on `no_credit` pauses with `no_credit` as its
+reason rather than the generic outcome status — the distinction the operator needs, since no
+amount of resuming will help until somebody pays. It does **not** fall through to the other
+engine: which engine runs a task is a decision the agent profile made (AP-09), and quietly
+substituting one for the other because of a billing state would make a run's results untraceable
+to anything a person chose.
 
 ## 12. HTTP API, SSE and panel (WP-01..11)
 

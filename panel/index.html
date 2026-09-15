@@ -710,15 +710,39 @@ function viewOverview() {
       ? `<div class="grid">${o.activeRuns.map(runCard).join("")}</div>`
       : `<div class="card"><div class="empty">Nothing is running.</div></div>`}
     <h2>Engines</h2>
-    <div class="card"><table><thead><tr><th>Engine</th><th>Adapter</th><th>Detected</th><th>Auth</th><th>Checked</th></tr></thead>
+    <div class="card"><table><thead><tr><th>Engine</th><th>Adapter</th><th>Detected</th><th>Auth</th><th>State</th><th>Checked</th></tr></thead>
       <tbody>${o.engines.map((e) => `<tr>
         <td><b>${esc(e.engine)}</b></td>
         <td><code>${esc(e.adapter)}</code></td>
         <td>${e.detected ? `<span class="pill green"><span class="sdot"></span>yes</span>` : `<span class="pill red"><span class="sdot"></span>no</span>`}</td>
         <td>${e.auth ? `<span class="pill green"><span class="sdot"></span>${esc(e.authSource || "yes")}</span>` : `<span class="pill red"><span class="sdot"></span>not connected</span>`}</td>
+        <td>${engineStatePill(e)}</td>
         <td class="tiny muted">${esc(sinceIso(e.checkedAt))}</td>
       </tr>`).join("")}</tbody></table></div>
     <p class="tiny muted" style="margin-top:16px">Network: <code>${esc(o.network)}</code></p>`;
+}
+
+/**
+ * What the provider can actually do right now (§11.3b, OB-03).
+ *
+ * "Auth" answers whether a credential exists, and a whole afternoon went into learning how
+ * little that proves: both engines read as authenticated while every run died in its first
+ * seconds. An account in good standing with no credit left is a different thing from one that
+ * is not connected, and it now has somewhere to say so.
+ */
+function engineStatePill(e) {
+  const state = e.state || "unknown";
+  const shape = {
+    ok: ["green", "ok"],
+    unknown: ["", "not tried yet"],
+    auth_required: ["red", "reconnect"],
+    no_credit: ["red", "no credit"],
+    rate_limited: ["amber", "rate-limited"],
+  }[state] || ["", state];
+  const detail = [e.stateDetail || "", e.retryAfter ? `retry after ${e.retryAfter}` : ""]
+    .filter(Boolean)
+    .join(" — ");
+  return `<span class="pill ${shape[0]}" title="${esc(detail)}"><span class="sdot"></span>${esc(shape[1])}</span>`;
 }
 
 /** Create a project from a template, with knowledge attached (TP-05, KB-03). */

@@ -67,12 +67,49 @@ export type LaunchResult = {
   queued: boolean;
 };
 
+/**
+ * The longest a retryable failure may hold a project's chain (§6.9). Beyond this the wait is
+ * news in its own right — a rate limit measured in hours — and the chain pauses saying so
+ * instead of sitting on a lock that nothing else can take.
+ */
+const MAX_TRANSIENT_WAIT_MS = 10 * 60 * 1000;
+
 export class Orchestrator {
   private readonly locks: RunLocks;
   private readonly runner: TaskRunnerLike;
   private readonly doubts: DoubtService;
   /** In-flight chain drivers, so shutdown can wait for them. */
   private readonly driving = new Map<string, Promise<void>>();
+  /**
+   * How many times each task has already been repeated after a failure that waiting fixes
+   * (§6.9). In memory on purpose: it is a property of this attempt at the chain, not of the
+   * task, and a restart is exactly the moment to give the provider another honest chance.
+   */
+  private readonly transientRetries = new Map<string, number>();
+
+  /**
+   * Should this failure be waited out rather than blamed on the task, and for how long (§6.9)?
+   *
+   * Returns nothing — meaning "treat it as a failure" — when the kind is not retryable, when the
+   * budget is spent, or when the provider asked for longer than this is willing to hold a
+   * project's chain. That last case matters: a rate limit measured in hours is real news, and
+   * sitting on it silently would be worse than pausing and saying so.
+   */
+  private transientRetry(
+    taskId: string,
+    outcome: RunTaskResult["outcome"],
+  ): { attempt: number; waitMs: number } | undefined {
+    const kind = outcome.failureKind;
+    if (!kind || (kind !== "transient" && kind !== "rate_limited")) return undefined;
+    const already = this.transientRetries.get(taskId) ?? 0;
+    if (already >= this.config.transientRetries) return undefined;
+
+    const waitMs = outcome.retryAfterMs ?? this.config.transientBackoffSec * 1000;
+    if (waitMs > MAX_TRANSIENT_WAIT_MS) return undefined;
+
+    this.transientRetries.set(taskId, already + 1);
+    return { attempt: already + 1, waitMs };
+  }
 
   constructor(
     private readonly config: Config,
@@ -422,7 +459,33 @@ export class Orchestrator {
       return true;
     }
 
+    // §6.9: a provider that is merely busy has not failed the task. The task goes back in the
+    // queue with its place in the chain intact, nothing is charged to the agent, and the chain
+    // stays active — bounded by LO_TRANSIENT_RETRIES, because a retry loop against something
+    // genuinely broken is a worse failure than the one it hides.
+    const retry = this.transientRetry(task.id, outcome);
+    if (retry) {
+      this.repos.events.append({
+        runId,
+        type: "system.retry",
+        payload: {
+          taskId: task.id,
+          kind: outcome.failureKind,
+          attempt: retry.attempt,
+          of: this.config.transientRetries,
+          waitMs: retry.waitMs,
+          detail: outcome.exitReason,
+        },
+      });
+      this.repos.tasks.setStatus(task.id, "queued");
+      await docs.updateState(chain);
+      this.bus.emit("overview");
+      await new Promise((resolve) => setTimeout(resolve, retry.waitMs));
+      return true;
+    }
+
     if (outcome.status !== "ok") {
+      this.transientRetries.delete(task.id);
       // doubt keeps the chain active but waiting (§8); everything else pauses it (OR-05). One
       // exception: a chain the user aborted is already in its final state, and the aborted task's
       // outcome arrives after that decision — pausing it would erase what the user asked for
@@ -432,7 +495,14 @@ export class Orchestrator {
         this.repos.chains.setStatus(chain.id, "paused");
         this.repos.events.append({
           type: "chain.state",
-          payload: { chainId: chain.id, status: "paused", reason: outcome.status },
+          payload: {
+            chainId: chain.id,
+            status: "paused",
+            // A provider with nothing left is not "the task errored", and a chain paused for
+            // that reason must say so or the operator debugs the wrong thing (§11.3b).
+            reason: outcome.failureKind ?? outcome.status,
+            ...(outcome.failureKind ? { detail: outcome.exitReason } : {}),
+          },
         });
       }
       await docs.syncPlan(chain);
@@ -442,6 +512,9 @@ export class Orchestrator {
       this.bus.emit("overview");
       return false;
     }
+
+    // The task got through: whatever the provider was doing earlier is over (§6.9).
+    this.transientRetries.delete(task.id);
 
     // Task ok: consolidate git, then the verify gate, then push policy (DESIGN §5.2).
     if (await git.isRepo()) {

@@ -36,6 +36,19 @@ const schema = z.object({
    */
   unattendedWaitMin: intFromEnv(30, 1),
   advisorConfidence: z.coerce.number().min(0).max(1).default(0.7),
+  /**
+   * How many times a run may be repeated after a failure that waiting fixes (§6.9). Two, because
+   * the provider's own advice is "retry in a minute" and a third attempt against something still
+   * broken is how a retry loop starts. Zero turns the behaviour off.
+   */
+  transientRetries: intFromEnv(2, 0),
+  /** How long to wait before such a retry, unless the provider named its own delay (§6.9). */
+  transientBackoffSec: intFromEnv(60, 1),
+  /**
+   * How long a run holds its engine's start slot, so two processes do not enter the credential
+   * refresh window at once (§6.9). Zero disables the stagger entirely.
+   */
+  engineStartStaggerMs: intFromEnv(4000, 0),
   /** How much curated knowledge one prompt may carry (KB-06, DESIGN §17.2). */
   knowledgeBudgetChars: intFromEnv(120000, 0),
   /**
@@ -79,6 +92,9 @@ function raw(env: NodeJS.ProcessEnv) {
     permissionWaitHours: env.LO_PERMISSION_WAIT_HOURS,
     unattendedWaitMin: env.LO_UNATTENDED_WAIT_MIN,
     advisorConfidence: env.LO_ADVISOR_CONFIDENCE,
+    transientRetries: env.LO_TRANSIENT_RETRIES,
+    transientBackoffSec: env.LO_TRANSIENT_BACKOFF_SEC,
+    engineStartStaggerMs: env.LO_ENGINE_START_STAGGER_MS,
     knowledgeBudgetChars: env.LO_KNOWLEDGE_BUDGET_CHARS,
     scriptScanBytes: env.LO_SCRIPT_SCAN_BYTES,
     eventRetentionDays: env.LO_EVENT_RETENTION_DAYS,

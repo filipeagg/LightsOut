@@ -14,6 +14,8 @@ import { PolicyEngine } from "../policy/engine.js";
 import type { PolicyPack } from "../policy/schema.js";
 import type { ProjectRow, TaskRow } from "../db/types.js";
 import { RunSession, type HumanGate, type RunOutcome } from "./session.js";
+import { classifyFailure, type FailureKind } from "./failures.js";
+import { EngineStartGate } from "./engine-gate.js";
 import { LiveRuns } from "./live.js";
 import { compactionBlock, deliverablePath, lintDocument } from "../projects/deliverable.js";
 import { grantPack, isCapability, type Capability } from "../policy/capabilities.js";
@@ -56,10 +58,28 @@ export type RunTaskResult = {
 export type HealthInvalidator = {
   noteAuthFailure: (engine: "claude" | "codex", detail: string) => void;
   clearAuthFailure: (engine: "claude" | "codex") => void;
+  /** Widened in §11.3b; optional so a phase 3 stub still satisfies the type. */
+  noteFailure?: (
+    engine: "claude" | "codex",
+    state: "auth_required" | "no_credit" | "rate_limited",
+    detail: string,
+    retryAfterMs?: number,
+  ) => void;
+};
+
+/** The provider states a failure kind puts an engine into (§11.3b). */
+const ENGINE_STATE_FOR: Partial<
+  Record<FailureKind, "auth_required" | "no_credit" | "rate_limited">
+> = {
+  auth: "auth_required",
+  no_credit: "no_credit",
+  rate_limited: "rate_limited",
 };
 
 export class TaskRunner {
   private readonly doubts: DoubtService;
+  /** §6.9: one process at a time into an engine's credential-refresh window. */
+  private readonly startGate: EngineStartGate;
 
   constructor(
     private readonly config: Config,
@@ -81,6 +101,7 @@ export class TaskRunner {
     readonly live: LiveRuns = new LiveRuns(),
   ) {
     this.doubts = doubts ?? new DoubtService(config, repos, bus, agents);
+    this.startGate = new EngineStartGate(config.engineStartStaggerMs);
   }
 
   /**
@@ -412,8 +433,16 @@ export class TaskRunner {
     });
 
     let outcome: RunOutcome;
+    // §6.9: wait for this engine's turn to start, and hand the turn on once the first seconds —
+    // spawn, handshake, and any token renewal they trigger — are behind us. The run itself is
+    // not serialized; only its opening moments, which are the only part that contends.
+    const leaveStartGate = await this.startGate.enter(profile.engine);
     try {
-      outcome = await session.start();
+      const started = session.start();
+      if (this.startGate.holdMs > 0) {
+        setTimeout(leaveStartGate, this.startGate.holdMs).unref?.();
+      }
+      outcome = await started;
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       this.repos.events.append({
@@ -421,14 +450,20 @@ export class TaskRunner {
         type: "system",
         payload: { reason: "adapter failure", detail },
       });
+      // An adapter that dies on the way up fails for the same reasons a turn does — a refused
+      // credential, a provider with nothing left, a socket — so it is read the same way (§6.9).
+      const kind = classifyFailure(detail);
       outcome = {
         status: "error",
         summary: "",
         exitReason: `adapter failure: ${detail}`,
+        failureKind: kind,
+        ...(kind === "auth" ? { authRequired: true } : {}),
         sentinelMissing: true,
         ...(session.acpSession ? { acpSession: session.acpSession } : {}),
       };
     } finally {
+      leaveStartGate();
       this.live.unregister(run.id);
       // DO-08: the per-run permission memory dies with the run, which is what makes it safe for
       // classes that must never be remembered across runs.
@@ -459,12 +494,30 @@ export class TaskRunner {
     // Credentials died mid-run (§11.3): drop the cached probe so the next read reports the
     // engine as unauthenticated, and record it as a system.auth event so the panel's attention
     // strip and the history both say "reconnect the engine" instead of "the task failed".
-    if (outcome.authRequired) {
-      this.health?.noteAuthFailure(profile.engine, outcome.exitReason);
+    const engineState = outcome.failureKind ? ENGINE_STATE_FOR[outcome.failureKind] : undefined;
+    if (engineState) {
+      // What the provider can do right now, in the words it used (§11.3b). `noteAuthFailure`
+      // stays the path for a dead credential so a stub that only knows that keeps working.
+      if (this.health?.noteFailure) {
+        this.health.noteFailure(
+          profile.engine,
+          engineState,
+          outcome.exitReason,
+          outcome.retryAfterMs,
+        );
+      } else if (engineState === "auth_required") {
+        this.health?.noteAuthFailure(profile.engine, outcome.exitReason);
+      }
       this.repos.events.append({
         runId: run.id,
-        type: "system.auth",
-        payload: { engine: profile.engine, reason: "AUTH_REQUIRED", detail: outcome.exitReason },
+        type: engineState === "auth_required" ? "system.auth" : "system.engine",
+        payload: {
+          engine: profile.engine,
+          reason: outcome.failureKind,
+          state: engineState,
+          detail: outcome.exitReason,
+          ...(outcome.retryAfterMs ? { retryAfterMs: outcome.retryAfterMs } : {}),
+        },
       });
       this.bus.emit("health");
     } else if (outcome.status === "ok") {

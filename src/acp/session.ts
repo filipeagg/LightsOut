@@ -31,6 +31,14 @@ import { SCRATCH_REL } from "../policy/classify.js";
 import { toolchainEnv } from "../projects/toolchain.js";
 import { parseResult, type AgentResult, type DoubtPayload } from "./result.js";
 import { composePrompt, composeSteering, readDocContext } from "./prompt.js";
+import { classifyFailure, retryAfterMs, type FailureKind } from "./failures.js";
+
+/**
+ * Failure classification moved to `failures.ts` (§6.9): the same sentence decides whether a human
+ * is needed, whether the run is worth repeating, and what the panel says about the engine.
+ * Re-exported under its old name because §11.3 and everything that reads it speak of auth.
+ */
+export { isAuthFailure } from "./failures.js";
 
 export type SessionLimits = {
   /** Hard timeout in minutes (SR-04). */
@@ -115,6 +123,13 @@ export type RunOutcome = {
   sentinelMissing: boolean;
   /** The run died because the engine's credentials are gone or expired (§11.3). */
   authRequired?: boolean;
+  /**
+   * What kind of failure ended the run (§6.9). Absent on every outcome that is not a failure,
+   * so a reader never has to ask whether `error` means the classifier or the agent.
+   */
+  failureKind?: FailureKind;
+  /** How long the provider asked us to wait before trying again, when it said (§6.9). */
+  retryAfterMs?: number;
 };
 
 const MESSAGE_FLUSH_MS = 2000;
@@ -127,26 +142,6 @@ const CANCEL_GRACE_MS = 10_000;
  * works cannot keep a run alive for ever.
  */
 const MAX_STEERING_TURNS = 3;
-
-/**
- * Recognise an authentication failure in whatever shape the adapter passed it through (§11.3).
- * Both CLIs surface the provider's own words, so this matches on the words rather than a code:
- * a 401, an expired OAuth token, or a plain "not logged in".
- */
-const AUTH_PATTERNS = [
-  /\b401\b/,
-  /oauth[^.]*token[^.]*(expired|invalid|revoked)/i,
-  /failed to authenticate/i,
-  /authentication[_ -]?(error|failed|required)/i,
-  /\bunauthorized\b/i,
-  /not logged in/i,
-  /invalid[_ -]api[_ -]key/i,
-  /re-?authenticate/i,
-];
-
-export function isAuthFailure(message: string): boolean {
-  return AUTH_PATTERNS.some((pattern) => pattern.test(message));
-}
 
 /** Pick the option whose kind matches the verdict; adapters name them differently. */
 function chooseOption(
@@ -948,15 +943,25 @@ export class RunSession {
       };
     }
     if (failure) {
-      // Expired or missing credentials are not a task failure: nothing the agent did caused
-      // them and retrying the task will not fix them. Tagging the reason is what lets the
-      // panel's attention strip and the health tool say "reconnect the engine" (§11.3, OB-03).
-      const auth = isAuthFailure(failure);
+      // None of these are task failures: nothing the agent did caused them, and re-running the
+      // task fixes only one of them. Naming the kind is what lets the runner decide between
+      // waiting, pausing the chain and telling a person to reconnect the engine (§6.9, §11.3).
+      const kind = classifyFailure(failure);
+      const wait = retryAfterMs(failure);
+      const prefix: Partial<Record<FailureKind, string>> = {
+        auth: "AUTH_REQUIRED: ",
+        no_credit: "NO_CREDIT: ",
+        rate_limited: "RATE_LIMITED: ",
+        transient: "TRANSIENT: ",
+      };
+      const tag = prefix[kind] ?? "";
       return {
         status: "error",
         summary: "",
-        exitReason: auth ? `AUTH_REQUIRED: ${failure.slice(0, 260)}` : failure.slice(0, 300),
-        authRequired: auth,
+        exitReason: `${tag}${failure.slice(0, 300 - tag.length)}`,
+        authRequired: kind === "auth",
+        failureKind: kind,
+        ...(wait === undefined ? {} : { retryAfterMs: wait }),
         sentinelMissing: true,
         ...base,
       };

@@ -192,7 +192,21 @@ export function registerTools(server: McpServer, deps: McpDeps): void {
     return {
       db,
       engines: Object.fromEntries(
-        engines.map((e) => [e.engine, { installed: e.detected, auth: e.auth, authSource: e.authSource }]),
+        engines.map((e) => [
+          e.engine,
+          {
+            installed: e.detected,
+            auth: e.auth,
+            authSource: e.authSource,
+            // §11.3b. `auth` says a credential exists; `state` says whether the provider will
+            // actually do any work. A session driving LightsOut from here needs the second one:
+            // "authenticated" was reported happily while every run died in its first seconds.
+            state: e.state,
+            ...(e.stateDetail ? { stateDetail: e.stateDetail } : {}),
+            ...(e.stateSince ? { stateSince: e.stateSince } : {}),
+            ...(e.retryAfter ? { retryAfter: e.retryAfter } : {}),
+          },
+        ]),
       ),
       network: deps.config.egress,
       activeRuns: orchestrator.activeRuns,

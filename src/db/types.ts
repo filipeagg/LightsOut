@@ -54,6 +54,10 @@ export type EventType =
   | "git.tag"
   | "git.push"
   | "system.auth"
+  /** A provider said it cannot work right now: no credit, rate-limited (§11.3b). */
+  | "system.engine"
+  /** A failure worth waiting out rather than blaming the task on (§6.9). */
+  | "system.retry"
   | "phase.state"
   | "config.changed"
   | "knowledge.attached"

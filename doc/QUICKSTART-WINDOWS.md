@@ -2,6 +2,8 @@
 
 Everything runs inside one container. The only prerequisite is Docker Desktop.
 
+Repository: <https://github.com/filipeagg/LightsOut>
+
 ## 1. Install Docker Desktop
 
 ```powershell
@@ -11,17 +13,6 @@ winget install Docker.DockerDesktop
 Open it once and leave it running. It starts by itself on later reboots.
 
 ## 2. Start LightsOut
-
-Take these two files from the repository and keep them together in any folder, then double-click
-the first one:
-
-- `scripts/windows/1-Start-LightsOut.bat`
-- `scripts/windows/Start-LightsOut.ps1`
-
-It pulls the image, runs the container with automatic restart, and opens the panel at
-<http://127.0.0.1:8484>. No clone is needed.
-
-The same thing as one command:
 
 ```powershell
 docker run -d --name lightsout --restart unless-stopped `
@@ -37,20 +28,26 @@ docker run -d --name lightsout --restart unless-stopped `
 The image is public and multi-arch, so there is no registry login. Every setting has a working
 default; there is no file to edit.
 
-## 3. Connect the engines (once per machine)
+The panel is at <http://127.0.0.1:8484>.
 
-Double-click `2-Connect-Claude.bat`, then `3-Connect-Codex.bat`. Each prints a URL: open it,
-approve with your own account, and the script confirms by reading `/health`.
+## 3. Connect the engines
 
-Credentials live in this machine's `claude-auth` and `codex-auth` volumes and survive updates.
+From the web wizard: <http://127.0.0.1:8484/setup.html>
+
+Press **Connect** on each engine. The page runs the engine CLI's own login, shows its output
+unedited, and gives you the field for whatever it asks for; an API key works too. Claude runs the
+work and Codex gives the second opinion before a doubt is opened, so connect both.
+
+Credentials stay in this machine's `claude-auth` and `codex-auth` volumes and survive updates.
 
 ## 4. Connect Claude Desktop
 
-Install the `lightsout.mcpb` extension: drag it onto the Claude Desktop window, or
-Settings → Extensions → Advanced settings → Install Extension…
+Download the extension:
+<https://github.com/filipeagg/LightsOut/raw/main/scripts/windows/lightsout.mcpb>
 
-Download it from the latest release (asset `lightsout.mcpb`). It asks for one setting, the port,
-and 8484 is the default. Restart Claude Desktop afterwards.
+Install it by dragging it onto the Claude Desktop window, or through Settings → Extensions →
+Advanced settings → Install Extension… It asks for one setting, the port, and 8484 is the default.
+Restart Claude Desktop afterwards.
 
 This is the only supported way to reach a local MCP server. A custom connector URL does not work —
 Claude reaches remote MCP servers from Anthropic's cloud, which has no route to your `127.0.0.1` —
@@ -68,9 +65,9 @@ docker pull ghcr.io/filipeagg/lightsout:latest
 docker rm -f lightsout
 ```
 
-Then start again — `1-Start-LightsOut.bat` does both steps itself. Migrations run at boot and every
-volume survives, so credentials, database and projects are kept. Restart Claude Desktop: it reads
-the tool list once, when it connects.
+Then run the command from step 2 again. Migrations run at boot and every volume survives, so
+credentials, database and projects are kept. Restart Claude Desktop: it reads the tool list once,
+when it connects.
 
 ## Worth knowing
 

@@ -26,7 +26,7 @@ import { KnowledgeLoader } from "./knowledge/loader.js";
 import { Vault } from "./vault/vault.js";
 import { Actions } from "./control/actions.js";
 import { LoginFlows } from "./setup/login-flows.js";
-import { ensureCodexConfig } from "./setup/engine-config.js";
+import { ensureClaudeConfig, ensureCodexConfig } from "./setup/engine-config.js";
 import { PreviewManager } from "./preview/manager.js";
 import { Scheduler } from "./triggers/scheduler.js";
 
@@ -90,6 +90,15 @@ async function main(): Promise<void> {
   console.log(`[boot] codex config ${engineConfig.action}: ${engineConfig.reason}`);
   if (engineConfig.action === "kept" && engineConfig.reason.includes("refuse its own writes")) {
     console.warn(`[boot] ${engineConfig.path} confines the engine below what LightsOut expects`);
+  }
+  // The same rule for the other engine (§7.8). This container has no bubblewrap and no user
+  // namespaces, so a sandbox the engine tries to start cannot start; it is told not to try.
+  const claudeConfig = await ensureClaudeConfig(
+    process.env.CLAUDE_CONFIG_DIR ?? path.join(process.env.HOME ?? "/home/app", ".claude"),
+  );
+  console.log(`[boot] claude config ${claudeConfig.action}: ${claudeConfig.reason}`);
+  if (claudeConfig.action === "kept" && claudeConfig.reason.includes("cannot start")) {
+    console.warn(`[boot] ${claudeConfig.path} asks for a sandbox this container cannot provide`);
   }
 
   // 4b. Agent profiles and policy packs: the builtin library layered under the workspace

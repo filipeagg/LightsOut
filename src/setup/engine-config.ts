@@ -89,3 +89,83 @@ export async function ensureCodexConfig(codexHome: string): Promise<EngineConfig
   await writeFile(file, MANAGED_CODEX_CONFIG, "utf8");
   return { path: file, action: "written", reason: "ours, and out of date" };
 }
+
+/**
+ * The same rule, for the other engine (ST-09, DESIGN §7.8).
+ *
+ * `ensureCodexConfig` has existed since the `contract-prober` evening; nothing did the equivalent
+ * for `claude`, and the container showed why it matters: `bwrap` is not installed in the image at
+ * all, the process runs as a non-root user with every capability dropped, and `unshare -Ur`
+ * answers `Operation not permitted` under Docker's default seccomp profile. An engine that tries
+ * to start a sandbox there cannot succeed — the only question is whether it says so in a warning
+ * or in the middle of somebody's task.
+ *
+ * So the engine is told, once, not to try. `sandbox.enabled: false` is the documented setting;
+ * the sandbox it disables covers Bash subprocesses, and LightsOut mediates and audits every one
+ * of those over ACP already (PE-01..05) inside a container that holds one workspace (RT-01).
+ *
+ * The marker does not live in the file. `settings.json` belongs to the engine and its schema is
+ * the engine's business, so a stray key of ours could become its problem at the next version
+ * bump; a sidecar holding exactly what we wrote answers "is this ours" without touching it.
+ */
+export const MANAGED_CLAUDE_SETTINGS = `${JSON.stringify({ sandbox: { enabled: false } }, null, 2)}\n`;
+const CLAUDE_MARKER_FILE = ".lightsout-managed-settings";
+
+export async function ensureClaudeConfig(claudeHome: string): Promise<EngineConfigResult> {
+  const file = path.join(claudeHome, "settings.json");
+  const marker = path.join(claudeHome, CLAUDE_MARKER_FILE);
+
+  let existing: string | undefined;
+  try {
+    existing = await readFile(file, "utf8");
+  } catch {
+    existing = undefined;
+  }
+
+  if (existing === undefined) {
+    await mkdir(claudeHome, { recursive: true });
+    await writeFile(file, MANAGED_CLAUDE_SETTINGS, "utf8");
+    await writeFile(marker, MANAGED_CLAUDE_SETTINGS, "utf8");
+    return {
+      path: file,
+      action: "written",
+      reason:
+        "no settings.json: the engine would keep trying to start a sandbox this container " +
+        "cannot give it (no bubblewrap, no user namespaces)",
+    };
+  }
+
+  let ours: string | undefined;
+  try {
+    ours = await readFile(marker, "utf8");
+  } catch {
+    ours = undefined;
+  }
+
+  if (ours === undefined || ours !== existing) {
+    // Somebody else's file, or ours with their edits on top: theirs either way.
+    let confined = false;
+    try {
+      const parsed = JSON.parse(existing) as { sandbox?: { enabled?: boolean } };
+      confined = parsed.sandbox?.enabled === true;
+    } catch {
+      confined = false;
+    }
+    return {
+      path: file,
+      action: "kept",
+      reason: confined
+        ? "left alone (not written by LightsOut), but sandbox.enabled is true: this container " +
+          "has no bubblewrap and no user namespaces, so the engine's sandbox cannot start"
+        : "left alone: not written by LightsOut",
+    };
+  }
+
+  if (existing.trim() === MANAGED_CLAUDE_SETTINGS.trim()) {
+    return { path: file, action: "unchanged", reason: "already what this version writes" };
+  }
+
+  await writeFile(file, MANAGED_CLAUDE_SETTINGS, "utf8");
+  await writeFile(marker, MANAGED_CLAUDE_SETTINGS, "utf8");
+  return { path: file, action: "written", reason: "ours, and out of date" };
+}

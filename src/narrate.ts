@@ -138,7 +138,15 @@ export function describeEvent(type: string, payload: Payload): Omit<NarratedLine
       };
     case "advisor.consulted":
       return {
-        text: `second opinion from ${read(payload, "engine")}: ${payload.agrees ? "agrees" : "disagrees"}`,
+        // `null` is the advisor failing, not objecting (§8.2): a timeline that says "disagrees"
+        // about a consultation that never happened is evidence nobody should be reading.
+        text: `second opinion from ${read(payload, "engine")}: ${
+          payload.agrees === null || payload.agrees === undefined
+            ? "could not answer"
+            : payload.agrees
+              ? "agrees"
+              : "disagrees"
+        }`,
         tone: "decision",
       };
     case "verify.start":

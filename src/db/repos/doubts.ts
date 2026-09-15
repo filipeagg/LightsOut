@@ -23,7 +23,12 @@ export type OpenDoubt = {
 
 export type SecondOpinion = {
   engine: string;
-  agrees: boolean;
+  /**
+   * Three answers, not two: `true` agrees, `false` objects, and `null` means the advisor could
+   * not answer at all (§8.2). Collapsing the third into `false` is how a doubt came to be
+   * opened on the strength of a disagreement that never happened.
+   */
+  agrees: boolean | null;
   confidence: number;
   reasoning?: string;
 };

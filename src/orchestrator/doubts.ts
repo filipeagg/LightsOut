@@ -197,7 +197,10 @@ export class DoubtService {
             confidence: result.answer.confidence,
             choice: result.answer.choice,
           }
-        : { engine: result.engine, agrees: false, error: result.error },
+        : // An advisor that could not answer has not disagreed. Recording `false` here is how a
+          // timeline came to say "the advisor disagreed" about a consultation that never
+          // happened — and a doubt was opened on that ground. `null` is the third answer.
+          { engine: result.engine, agrees: null, error: result.error },
     });
     return result;
   }
@@ -334,7 +337,10 @@ export class DoubtService {
               confidence: advisor.answer.confidence,
               reasoning: advisor.answer.rationale,
             }
-          : { engine: advisor.engine, agrees: false, confidence: 0, reasoning: advisor.error },
+          : // `null`, not `false`: the advisor failed, it did not object. A person reading the
+            // doubt must be able to tell "the other engine thinks you are wrong" from "the other
+            // engine never answered", because only one of those is evidence.
+            { engine: advisor.engine, agrees: null, confidence: 0, reasoning: advisor.error },
       );
     }
     this.repos.events.append({
@@ -362,7 +368,10 @@ export class DoubtService {
       recommendation: doubt.recommendation,
       ...(opinion
         ? {
-            secondOpinion: `${opinion.engine} → ${opinion.agrees ? "agrees" : "disagrees"} (${opinion.confidence.toFixed(2)})`,
+            secondOpinion:
+              opinion.agrees === null
+                ? `${opinion.engine} → could not answer${opinion.reasoning ? `: ${opinion.reasoning}` : ""}`
+                : `${opinion.engine} → ${opinion.agrees ? "agrees" : "disagrees"} (${opinion.confidence.toFixed(2)})`,
           }
         : {}),
       status: doubt.status,

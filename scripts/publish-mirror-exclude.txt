@@ -30,6 +30,7 @@ scripts/probe-summary.mjs
 scripts/probe-xlsx.py
 scripts/probe-mapa-gates.mjs
 scripts/probe-hosts.mjs
+scripts/lo-diag.mjs
 scripts/status.mjs
 scripts/time-folder-walk.mjs
 scripts/verify-2607.mjs

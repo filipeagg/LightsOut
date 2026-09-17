@@ -422,19 +422,32 @@ export class Actions {
     const dir = path.join(this.deps.config.workspace, "projects", id);
     const remote = opts.remote ?? imported.manifest.project.remote;
     const onDisk = existsSync(dir);
-    if (!onDisk && !remote) {
+    /**
+     * §9.7.2b. This used to return here: dependencies installed, no project, `ok: true`, and a
+     * note in a field nobody reads — the import that "worked" and left nothing to see.
+     *
+     * The manifest has always carried `lightsout.yaml` verbatim, so the project is declared from
+     * it instead. What comes back is a real project with `missing.workdir` naming the clone that
+     * has to arrive, and a launch that refuses until it does. With neither a declaration nor a
+     * directory there is still nothing to adopt, and the old refusal stands.
+     */
+    const declaration = imported.manifest.project.declaration.trim();
+    if (!onDisk && !remote && !declaration) {
       return {
         ...imported,
         adopted: false,
         note:
-          `the dependencies are installed, but there is no clone of ${id} to adopt and the ` +
-          "bundle names no remote. Clone the project into projects/ and call adopt_project",
+          `the dependencies are installed, but there is no clone of ${id} to adopt, the bundle ` +
+          "names no remote, and it carries no declaration either. Clone the project into " +
+          "projects/ and call adopt_project",
       };
     }
 
     const adoptedResult = await this.adoptProject(actor, {
       id,
       ...(onDisk ? {} : { remote }),
+      // Used only if the clone did not happen or was never possible (§9.7.2b).
+      ...(onDisk || !declaration ? {} : { declaration }),
     });
     return {
       ...imported,

@@ -18,6 +18,11 @@ export type CreateProject = {
   templateReason?: string | null;
   /** OR-12: runs finish without a person. Defaults to on — that is what the system is for. */
   unattended?: boolean;
+  /**
+   * §9.7.2b: the declaration text, set only when the project is declared without a working copy.
+   * Left null otherwise, because then `lightsout.yaml` on disk is the declaration.
+   */
+  declaration?: string | null;
 };
 
 export type UpdateProject = Partial<
@@ -35,8 +40,8 @@ export class ProjectsRepo {
       .prepare(
         `INSERT INTO projects
            (id, name, path, context, repo_remote, push_policy, policy_pack, verify_cmd,
-            template_id, template_reason, unattended, archived, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+            template_id, template_reason, unattended, declaration, archived, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
       )
       .run(
         input.id,
@@ -50,6 +55,7 @@ export class ProjectsRepo {
         input.templateId ?? null,
         input.templateReason ?? null,
         input.unattended === false ? 0 : 1,
+        input.declaration ?? null,
         nowIso(),
       );
     return this.getOrThrow(input.id);

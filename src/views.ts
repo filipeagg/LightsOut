@@ -8,6 +8,7 @@
  *
  * Everything in this file is SELECT-only (OB-01).
  */
+import { existsSync } from "node:fs";
 import type { Config } from "./config.js";
 import type { Repos } from "./db/repos/index.js";
 import type { ChainRow, DoubtRow, ProjectRow, RunRow } from "./db/types.js";
@@ -251,6 +252,12 @@ export function projectListItem(deps: ViewDeps, project: ProjectRow) {
     openDoubts: repos.doubts.listOpen(project.id).length,
     lastActivity: history[0]?.started_at ?? project.created_at,
     archived: project.archived === 1,
+    /**
+     * §9.7.2b: false on a project declared from a bundle whose clone has not arrived. Observed
+     * rather than stored, like every other absence in this system — the moment the repository
+     * lands this becomes true on its own, with nothing to remember to update.
+     */
+    hasWorkdir: existsSync(project.path),
   };
 }
 

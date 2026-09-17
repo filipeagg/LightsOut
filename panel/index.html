@@ -950,7 +950,12 @@ function viewProjects() {
     <div class="card"><table>
       <thead><tr><th>Project</th><th>Status</th><th>Progress</th><th>Doubts</th><th>Last activity</th></tr></thead>
       <tbody>${o.projects.map((p) => `<tr onclick="location.hash='#/p/${encodeURIComponent(p.id)}'" style="cursor:pointer">
-        <td><b>${esc(p.name)}</b>${p.archived ? ` <span class="pill amber">archived</span>` : ""}
+        <td><b>${esc(p.name)}</b>${p.archived ? ` <span class="pill amber">archived</span>` : ""}${
+          // §9.7.2b: declared from a bundle, still waiting for its repository. Saying so here is
+          // the whole point of letting the project exist before its working copy does.
+          p.hasWorkdir === false
+            ? ` <span class="pill amber" title="Put the repository at ${esc(p.path)} and adopt it again">no working copy</span>`
+            : ""}
           <div class="tiny muted mono">${esc(p.path)}</div></td>
         <td>${statusPill(p.status)}</td>
         <td style="min-width:160px">${bar(p)}

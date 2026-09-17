@@ -85,6 +85,12 @@ export type ProjectRow = {
   /** TP-09: why there is no template, when there is none. NULL on rows that predate the question. */
   template_reason: string | null;
   /**
+   * §9.7.2b: `lightsout.yaml` as it stood when this project was declared without a working copy,
+   * and NULL on every project that had its directory from the start. A stand-in, never the source
+   * of truth — while the file is on disk, the file is the declaration and this is not read.
+   */
+  declaration: string | null;
+  /**
    * OR-12 (§7.7): runs of this project finish without a person. A `require_human` verdict off the
    * hard floor is settled by the judge or the advisor, or refused with its reason — never parked.
    * 1 by default: unattended is what the system is for.

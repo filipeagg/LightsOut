@@ -455,6 +455,15 @@ export const MIGRATIONS: Migration[] = [
   { version: 13, name: "why a project has no template", up: TEMPLATE_REASON_SQL },
   { version: 14, name: "notes left for a running run", up: RUN_NOTES_SQL },
   { version: 15, name: "triggers, launches with a clock on them", up: TRIGGERS_SQL },
+  {
+    version: 16,
+    name: "the declaration a project was adopted from, for while its working copy is absent",
+    // §9.7.2b. A stand-in, never the source of truth: while projects/<id>/lightsout.yaml exists
+    // that file *is* the declaration and this column is not read. It exists so an imported
+    // project waiting for its clone can still say which bases and vault entries it requires —
+    // otherwise `missing` would report an empty list and read as "nothing left to do".
+    up: "ALTER TABLE projects ADD COLUMN declaration TEXT;",
+  },
 ];
 
 /** The marker migration 4 writes, and the panel looks for (PM-09). */

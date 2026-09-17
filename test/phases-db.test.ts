@@ -126,6 +126,7 @@ describe("migration 2", () => {
       "13:why a project has no template",
       "14:notes left for a running run",
       "15:triggers, launches with a clock on them",
+      "16:the declaration a project was adopted from, for while its working copy is absent",
     ]);
     // Migration 4 gives the legacy project a brief it can be told apart from a real one (PM-09).
     expect(

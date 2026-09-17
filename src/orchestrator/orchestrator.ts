@@ -17,6 +17,7 @@ import { ProjectGit } from "../projects/git.js";
 import { ProjectDocs } from "../projects/docs.js";
 import { ensureScratch, sweep } from "../projects/hygiene.js";
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { readProjectConfig } from "../projects/config.js";
 import { runVerify } from "./verify.js";
 import { RunLocks } from "./locks.js";
@@ -162,6 +163,7 @@ export class Orchestrator {
   /** Append tasks to a new or existing chain and start it when the project is free. */
   launchChain(input: LaunchChainInput): LaunchResult {
     const project = this.repos.projects.getOrThrow(input.projectId);
+    this.assertWorkdir(project);
     const chain = this.repos.chains.create({
       projectId: project.id,
       title: input.title,
@@ -204,6 +206,7 @@ export class Orchestrator {
 
   launchTask(input: LaunchTaskInput): LaunchResult {
     const project = this.repos.projects.getOrThrow(input.projectId);
+    this.assertWorkdir(project);
     const chain = input.chainId
       ? this.repos.chains.getOrThrow(input.chainId)
       : (this.repos.chains.activeForProject(project.id) ??
@@ -232,6 +235,22 @@ export class Orchestrator {
 
     const started = this.tryDrive(project, chain);
     return { chainId: chain.id, taskIds: [task.id], started, queued: !started };
+  }
+
+  /**
+   * A project can exist before its working copy does (§9.7.2b), and the launch is where that has
+   * to stop being tolerable: there is no directory to run in.
+   *
+   * Refusing here names the missing path and the way out. Letting it through would mean the same
+   * fact arriving as an adapter dying on a `cwd` that does not exist — three layers from the
+   * cause, with a task marked failed for it.
+   */
+  private assertWorkdir(project: ProjectRow): void {
+    if (existsSync(project.path)) return;
+    throw new Error(
+      `${project.id} has no working copy at ${project.path}. It was declared from a bundle and ` +
+        "the repository has not arrived yet: put it there, then call adopt_project again",
+    );
   }
 
   /**

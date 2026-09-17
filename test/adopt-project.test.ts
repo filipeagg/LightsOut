@@ -7,7 +7,7 @@
  * is not that it is called something else — it is that it reads.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { openDb, type Db } from "../src/db/db.js";
@@ -218,5 +218,63 @@ describe("the declaration is a merge, not a regeneration (PM-13)", () => {
     expect(config.areas[0]!.access).toBe("read");
     // The inline override pack still parses, which is the half of the file that predates PM-13.
     expect(pack?.rules[0]!.class).toBe("deps_install");
+  });
+});
+
+/**
+ * §9.7.2b: the import that used to leave nothing behind.
+ *
+ * No directory and no remote, but the bundle carries `lightsout.yaml` verbatim — so the project
+ * exists, says what it still needs, and refuses a launch until its clone arrives. Before this it
+ * returned `ok: true` with a note in a field nobody reads, and the panel showed nothing at all.
+ */
+describe("a project declared before its working copy arrives (§9.7.2b)", () => {
+  it("builds the project from the declaration and names the directory that is missing", async () => {
+    const result = await adoptProject(repos, workspace, {
+      id: "consultant-portal",
+      declaration: DECLARATION,
+    });
+
+    expect(result.adopted).toBe(true);
+    expect(result.project.name).toBe("Consultant Portal");
+    expect(result.project.template_id).toBe("full-development");
+    expect(result.phases).toBe(2);
+    expect(result.missing.workdir).toBe(path.join(workspace, "projects", "consultant-portal"));
+  });
+
+  it("reports what it requires, which is the reason the stand-in is kept at all", async () => {
+    const result = await adoptProject(repos, workspace, {
+      id: "consultant-portal",
+      declaration: DECLARATION,
+    });
+
+    // Read from `projects.declaration`: there is no file to read it from, and reporting an empty
+    // list here would say "nothing left to do" at the moment everything is left to do.
+    expect(result.missing.vault).toEqual(["jira"]);
+    expect(result.missing.knowledge).toEqual(["acme-core"]);
+  });
+
+  it("writes nothing into the directory it is waiting for", async () => {
+    await adoptProject(repos, workspace, { id: "consultant-portal", declaration: DECLARATION });
+
+    // `git clone` refuses a target that is not empty, so a scratch folder created here would be
+    // the thing that makes the clone impossible.
+    await expect(stat(path.join(workspace, "projects", "consultant-portal"))).rejects.toThrow();
+  });
+
+  it("lets the file take over once the clone lands", async () => {
+    await adoptProject(repos, workspace, { id: "consultant-portal", declaration: DECLARATION });
+    await plantProject();
+
+    // Idempotent, and now reading the real thing: the stand-in stops being consulted.
+    const again = await adoptProject(repos, workspace, { id: "consultant-portal" });
+    expect(again.adopted).toBe(false);
+    expect(again.missing.workdir).toBeNull();
+  });
+
+  it("still refuses when there is no declaration either", async () => {
+    await expect(adoptProject(repos, workspace, { id: "nothing-here" })).rejects.toThrow(
+      /no project at/,
+    );
   });
 });

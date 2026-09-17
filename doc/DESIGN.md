@@ -1942,6 +1942,35 @@ adopt_project { id, remote? }      →  { project, adopted, phases, missing }
   task whose preconditions are unmet. Saying it at adoption turns that into a list instead of a
   surprise.
 
+##### A project may exist before its working copy does (§9.7.2b)
+
+Everything above assumes the directory is already there, and for a long time its absence was a
+refusal: no directory, no project, and an import that answered `ok: true` with a note in a field
+nobody reads. That is the one place in this design where *incomplete* was rendered as *invisible*,
+and it contradicts the rule the rest of it follows — adoption succeeds with a non-empty `missing`
+precisely because knowing what is absent is more useful before a launch than during one.
+
+The bundle has carried what is needed all along: `manifest.project.declaration` is the project's
+`lightsout.yaml` **verbatim**, put there so a person can see what they are adopting. So when there
+is no directory and no remote to produce one, `adopt_project` accepts that text through
+`declaration` and **declares** the project instead of refusing: the row, its phases, its knowledge
+attachments, and `missing.workdir` naming the path that still has to arrive. The panel shows a
+project waiting for its working copy rather than showing nothing at all.
+
+Three rules keep that honest:
+
+- **The file wins.** While `projects/<id>/lightsout.yaml` exists it *is* the declaration. The copy
+  kept on the row (`projects.declaration`, migration 16) is a stand-in consulted only while the
+  file is absent, so a clone that lands later silently takes over and the two cannot disagree.
+- **Nothing is written into `projects/<id>/`.** Not the declaration, not the scratch directory.
+  `git clone` refuses a directory that is not empty, and a project waiting for its clone that has
+  quietly made its own target non-empty would be a worse dead end than the one this replaces.
+- **A project with no working copy cannot be launched.** The guard is at the launch and says so —
+  never inside a run, where the same fact arrives as an adapter dying on a `cwd` that is not there.
+
+`missing.workdir` is therefore a fifth kind of absence beside knowledge, agents, vault and areas,
+and the only one that stops a launch outright rather than being reported and worked around.
+
 #### 9.7.3 The bundle (PM-14, KB-14, VT-09)
 
 `<projectId>.lobundle` is a zip — the format `src/http/zip.ts` already writes by hand for SU-06,
@@ -2028,7 +2057,7 @@ it is an action:
 | knowledge | writes each bundled base that is **absent** | never overwrites; an existing base is reported with `differs: true/false` from its sha |
 | agents, templates | same rule | same |
 | vault | creates the named entries with **empty fields** | never touches an entry that exists — a field with a value is not overwritten by an import, ever |
-| project | clones `remote` when given and the directory is absent, then `adopt_project` | everything `adopt_project` refuses |
+| project | clones `remote` when given and the directory is absent, then `adopt_project`; with neither, **declares it from `manifest.project.declaration` and reports `missing.workdir`** (§9.7.2b) | everything `adopt_project` refuses |
 
 It returns what adoption returns plus what it wrote, and `missing` now means what a person still
 has to do: fill these vault fields, provide this linked base's folder, log in to this engine.

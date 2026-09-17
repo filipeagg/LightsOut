@@ -39,3 +39,6 @@ dist/*
 
 # Junk a mis-resolved DOCKER_CONFIG once created inside the repo
 C*Usersfcg102006/
+
+# Files the desktop app drops here when it delivers something to the user.
+Claude outputs/

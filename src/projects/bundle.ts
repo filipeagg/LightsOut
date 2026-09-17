@@ -18,6 +18,7 @@ import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { z } from "zod";
 import { buildZip, readZip, ZipError, type ZipEntry } from "../http/zip.js";
 import { CONFIG_FILE } from "./config.js";
+import { ProjectGit } from "./git.js";
 import type { AgentsLoader } from "../agents/loader.js";
 import type { KnowledgeLoader } from "../knowledge/loader.js";
 import type { TemplatesLoader } from "../templates/loader.js";
@@ -84,6 +85,16 @@ export const bundleManifestSchema = z
       .object({
         id: z.string().min(1),
         name: z.string().default(""),
+        /**
+         * How the working copy travels (§9.7.3b). `clone` means the importing side can fetch the
+         * code itself from `remote`; `copy` means somebody has to bring the directory.
+         *
+         * It exists because `remote: ""` could not say which: a project with no remote and a
+         * project whose remote nobody had recorded read identically, and the importer guessed.
+         * `copy` is the default so an older bundle, written before this field, is read as the
+         * cautious thing rather than as a promise it cannot keep.
+         */
+        transport: z.enum(["clone", "copy"]).default("copy"),
         remote: z.string().default(""),
         /** `lightsout.yaml` verbatim, so a person can see what they are adopting. */
         declaration: z.string().default(""),
@@ -178,13 +189,23 @@ export async function exportBundle(
   deps: ExportBundleDeps,
 ): Promise<ExportedBundle> {
   const entries: ZipEntry[] = [];
+  // The row knows when somebody told it; the repository knows always (§9.7.1b). Asking here as
+  // well as in `syncDeclaration` means an export is correct even on a project whose declaration
+  // has not been rewritten since it gained an origin.
+  const remote =
+    input.project.repo_remote ??
+    (await new ProjectGit(input.project.path).getRemote().catch(() => undefined)) ??
+    "";
   const manifest: BundleManifest = {
     format: BUNDLE_FORMAT,
     exported: { at: new Date().toISOString(), lightsout: deps.version },
     project: {
       id: input.project.id,
       name: input.project.name,
-      remote: input.project.repo_remote ?? "",
+      // §9.7.3b: stated, never guessed. The row is consulted first and the repository asked when
+      // it says nothing (§9.7.1b), so a project with an origin is never exported as uncopyable.
+      transport: remote ? "clone" : "copy",
+      remote,
       declaration: await readFile(path.join(input.project.path, CONFIG_FILE), "utf8").catch(
         () => "",
       ),

@@ -1942,6 +1942,26 @@ adopt_project { id, remote? }      →  { project, adopted, phases, missing }
   task whose preconditions are unmet. Saying it at adoption turns that into a list instead of a
   surprise.
 
+##### The remote is observed, not waited for (§9.7.1b)
+
+`remote:` is written from `projects.repo_remote`, and that column is filled at exactly two moments:
+`create_project` when somebody passes one, and `adopt_project` when the declaration already
+carried one. A project that was created locally and given an `origin` afterwards — the ordinary
+way a repository acquires one — never tells the row, so the row says null, the declaration says
+`remote: ''`, and the bundle inherits the silence.
+
+The cost of that silence is not theoretical: `consultant-portal` has had
+`git.example.com/…` as its origin for months, and the bundle exported from it said
+the project had no remote, so the import could not clone and the transfer fell back to a hand-made
+zip of 316 MB. The repository knew the whole time; nobody asked it.
+
+So the declaration **reads the repository**. `ProjectGit.getRemote()` — it already had
+`hasRemote()` and `setRemote()`, and could tell you whether an origin existed without being able
+to say what it was — is consulted whenever the row has none, at adoption and whenever the
+declaration is written. The row records what git reports. A row that already names a remote is
+left alone: somebody chose it, and a checkout pointing elsewhere is their business, not ours to
+overwrite.
+
 ##### A project may exist before its working copy does (§9.7.2b)
 
 Everything above assumes the directory is already there, and for a long time its absence was a
@@ -2061,6 +2081,44 @@ it is an action:
 
 It returns what adoption returns plus what it wrote, and `missing` now means what a person still
 has to do: fill these vault fields, provide this linked base's folder, log in to this engine.
+
+##### The bundle says how the project travels, and the import says what to do next (§9.7.3b)
+
+Two silences, and the same root. `manifest.project.remote` is a string that defaults to empty, so
+an importer reading it cannot tell **"this project has no remote"** from **"nobody ever recorded
+one"** — and until §9.7.1b those were the same thing on every project here. Meanwhile the answer to
+`import_bundle` said what had been *written* and what was *missing*, but never what the person
+should now **do**, which on a half-installed machine is the only question they have.
+
+So the manifest states the transport outright:
+
+```yaml
+project:
+  id: consultant-portal
+  transport: clone        # clone | copy
+  remote: https://…/consultant-portal.git
+```
+
+`clone` means the importing side can fetch the code itself and the import does. `copy` means the
+working copy has to arrive another way, and the import declares the project instead (§9.7.2b) so
+it is visible while it waits. The value is computed at export from the repository, never guessed:
+an origin makes it `clone`, its genuine absence makes it `copy`.
+
+And the import answers with **`next`** — an ordered, machine-first list of what is left, derived
+from what actually happened rather than written in advance:
+
+```
+next:
+  - code: cloned from https://…            (or: put the working copy at /workspace/projects/<id>)
+  - vault: fill cropwise, acmeproduct, jira …   (created empty, values never travel — VT-09)
+  - knowledge: provide <base>              (declared by the project, not carried — KB-14)
+  - deps: the first launch will ask for a toolchain grant (ST-07)
+```
+
+This is MC-09 applied to the one flow where the client is, by definition, a session that has never
+seen this project: it teaches the next step from the bundle in front of it. A `guide{topic:'sharing'}`
+section covers the general shape; `next` covers *this* bundle, on *this* machine, and the two must
+not disagree — the guide describes the mechanism, the answer describes the situation.
 
 **Why empty vault entries rather than a list.** The user's call, and the reason is that the list
 is a thing to lose: an entry visible in the panel with three empty fields is a form, and a form

@@ -48,6 +48,19 @@ vault: entries named by the bundle are created with their fields empty.
 then: it adopts the project, cloning the remote when there is no directory yet.
 answers: what was written, what was left alone, what still needs configuring.
 
+## you_received_a_bundle
+
+first: `import_bundle {path}`. It installs the dependencies and creates the project in one call.
+read_next: the answer carries `next` — what is left, in the order it has to be done, for this
+  bundle on this machine. Follow that rather than this page: this page is the mechanism, `next`
+  is the situation.
+transport_clone: the bundle names a remote and the import clones it. Nothing else to do for code.
+transport_copy: no remote. The project is still created — declared from the bundle (§9.7.2b) —
+  and `missing.workdir` names where the directory has to go. Put it there, then `adopt_project`.
+vault: entries arrive with empty fields. Fill them in the panel; a value never travels.
+deps: do not run an install by hand. The first launch asks for a toolchain grant (ST-07).
+engines: log in on this machine; they are your own accounts (SU-04).
+
 ## what_never_transfers
 
 engine_login: his own account (SU-04).

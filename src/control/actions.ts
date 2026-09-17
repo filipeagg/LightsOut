@@ -48,6 +48,7 @@ import {
 import { vaultAuthSchema } from "../vault/schema.js";
 import { readProjectConfig } from "../projects/config.js";
 import { buildDeclaration, writeDeclaration } from "../projects/declaration.js";
+import { ProjectGit } from "../projects/git.js";
 import type { ProjectPhaseRow, ProjectRow, TaskLevel } from "../db/types.js";
 import { existsSync } from "node:fs";
 import { activeRunFor } from "../views.js";
@@ -192,8 +193,23 @@ export class Actions {
    * failure is recorded rather than thrown, and the next change writes the whole file again.
    */
   private async syncDeclaration(projectId: string): Promise<void> {
-    const project = this.deps.repos.projects.get(projectId);
+    let project = this.deps.repos.projects.get(projectId);
     if (!project) return;
+    /**
+     * §9.7.1b: ask the repository what its origin is, when the row does not know.
+     *
+     * The row is only told at `create_project` and `adopt_project`, so a project that was made
+     * here and given an origin afterwards kept saying it had none — and the bundle exported from
+     * it said so too, which is how a transfer that should have been a clone became a 316 MB zip.
+     * A row that already names a remote is left alone: somebody chose that.
+     */
+    if (!project.repo_remote) {
+      const observed = await new ProjectGit(project.path).getRemote().catch(() => undefined);
+      if (observed) {
+        this.deps.repos.projects.update(project.id, { repoRemote: observed });
+        project = this.deps.repos.projects.getOrThrow(project.id);
+      }
+    }
     try {
       await writeDeclaration(
         project.path,
@@ -360,6 +376,10 @@ export class Actions {
    * Order matters and is the order of the table in §9.7.3: the dependencies first, so that when
    * adoption reports what is missing, it is reporting what this file could not supply rather than
    * what it has not got to yet.
+   *
+   * The answer carries `next` (§9.7.3b): the import already said what it wrote and what was
+   * missing, and never said what to *do*, which on a machine that has just received a bundle is
+   * the only question there is.
    */
   async importBundle(
     actor: Actor,
@@ -372,6 +392,8 @@ export class Actions {
       phases?: number;
       missing?: AdoptProjectResult["missing"];
       note?: string;
+      /** §9.7.3b: what is left to do, in the order it has to be done. */
+      next?: string[];
     }
   > {
     // A path rather than bytes is the MCP case, and a person there types the path they can see
@@ -455,6 +477,7 @@ export class Actions {
       adopted: adoptedResult.adopted,
       phases: adoptedResult.phases,
       missing: adoptedResult.missing,
+      next: importNext(imported, adoptedResult, { cloned: !onDisk && !!remote }),
     };
   }
 
@@ -2093,4 +2116,65 @@ export class Actions {
     this.changed("vault", entryId, actor, "delete");
     return { deleted };
   }
+}
+
+/**
+ * What is left to do after an import, computed from what it actually did (§9.7.3b, MC-09).
+ *
+ * The client of this answer is, by definition, a session that has never seen this project: it
+ * knows nothing the bundle did not tell it. `guide{topic:'sharing'}` describes the mechanism in
+ * general; this describes *this* bundle on *this* machine, which is the part a guide cannot know.
+ *
+ * Machine-first (BA-07), one line per thing, and ordered so the blocking one comes first — the
+ * working copy, because without it nothing can be launched at all.
+ */
+function importNext(
+  imported: ImportBundleResult,
+  adopted: AdoptProjectResult,
+  ctx: { cloned: boolean },
+): string[] {
+  const next: string[] = [];
+
+  if (adopted.missing.workdir) {
+    const from =
+      imported.manifest.project.transport === "clone" && imported.manifest.project.remote
+        ? `clone ${imported.manifest.project.remote} into it`
+        : "the bundle carries no code and names no remote: copy the project directory there";
+    next.push(`code: no working copy at ${adopted.missing.workdir} — ${from}, then adopt_project`);
+  } else if (ctx.cloned) {
+    next.push(`code: cloned from ${imported.manifest.project.remote}`);
+  }
+
+  if (adopted.missing.vault.length > 0) {
+    next.push(
+      `vault: fill ${adopted.missing.vault.join(", ")} in the panel — ` +
+        "the entries exist with empty fields and a value never travels in a bundle (VT-09)",
+    );
+  }
+
+  // Named by the bundle and not carried by it: a base whose documents live outside knowledge/
+  // (KB-14), or one the exporting machine did not have installed either.
+  const declared = imported.knowledge.declared.map((base) => base.id);
+  const stillMissing = adopted.missing.knowledge.filter((id) => !declared.includes(id));
+  if (declared.length > 0) {
+    next.push(`knowledge: ${declared.join(", ")} named by the project but not carried (KB-14)`);
+  }
+  if (stillMissing.length > 0) {
+    next.push(`knowledge: ${stillMissing.join(", ")} still absent here`);
+  }
+
+  if (adopted.missing.agents.length > 0) {
+    next.push(`agents: ${adopted.missing.agents.join(", ")} not installed here (AP-07)`);
+  }
+  if (adopted.missing.areas.length > 0) {
+    next.push(`areas: ${adopted.missing.areas.join(", ")} do not exist here (PE-09)`);
+  }
+
+  // Not a gap in the transfer, and saying so stops it being read as one (§9.7.4).
+  next.push(
+    "deps: nothing to install by hand — the first launch asks for a toolchain grant (ST-07)",
+  );
+  next.push("engine: log in to the engines on this machine, they are your own accounts (SU-04)");
+
+  return next;
 }

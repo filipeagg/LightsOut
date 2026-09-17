@@ -112,6 +112,22 @@ export class ProjectGit {
     return remotes.some((r) => r.name === name);
   }
 
+  /**
+   * The push URL of a remote, or undefined (§9.7.1b).
+   *
+   * The omission this fills: the class could say *whether* an origin existed and could *set* one,
+   * and could not say what it was — so `projects.repo_remote` stayed null on every project that
+   * acquired its origin after being created here, the declaration said `remote: ''`, and a bundle
+   * exported from a project with a perfectly good remote claimed it had none.
+   */
+  async getRemote(name = "origin"): Promise<string | undefined> {
+    if (!(await this.isRepo())) return undefined;
+    const remotes = await this.git.getRemotes(true);
+    const found = remotes.find((r) => r.name === name);
+    const url = found?.refs.push || found?.refs.fetch;
+    return url?.trim() || undefined;
+  }
+
   async setRemote(url: string, name = "origin"): Promise<void> {
     if (await this.hasRemote(name)) {
       await this.git.remote(["set-url", name, url]);

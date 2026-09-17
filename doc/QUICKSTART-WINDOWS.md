@@ -77,5 +77,7 @@ when it connects.
 - **The extension is only a bridge.** It declares no tools of its own — the container serves the
   tool list when Claude Desktop connects — so it does not have to match the image version.
 - **Projects do not travel with the image.** To take one from another machine: clone its
-  repository, then use *Adopt existing* and *Import bundle* in the panel. The bundle names the
-  credentials it needs but never carries their values, so you set those yourself.
+  repository and use *Adopt existing*, or import the `.lobundle` its owner exported. The bundle
+  names the credentials it needs but never carries their values, so you set those yourself. When
+  the project has no git remote at all, the bundle carries the repository too, as a `git bundle`,
+  and the import unpacks it — there is nothing to copy by hand.

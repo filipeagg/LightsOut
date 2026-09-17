@@ -4,6 +4,7 @@
  * Agents never push: `git_push` is denied by policy and the orchestrator owns the remote.
  * `--force` is not implemented at all, so there is no code path that can rewrite history.
  */
+import { stat } from "node:fs/promises";
 import { simpleGit, type SimpleGit } from "simple-git";
 
 export type CommitResult = { sha: string; created: boolean };
@@ -126,6 +127,59 @@ export class ProjectGit {
     const found = remotes.find((r) => r.name === name);
     const url = found?.refs.push || found?.refs.fetch;
     return url?.trim() || undefined;
+  }
+
+  /**
+   * Pack the whole repository into one file (`git bundle`), for a project git cannot carry.
+   *
+   * PM-14 amended (§9.7.3). The rule that a bundle holds no project file exists so an archive
+   * cannot become a stale second copy of a tree git already serves. Where there is no remote git
+   * serves nothing, and the rule then protects a transfer that cannot happen at all. A `git
+   * bundle` is not a copy of the working tree: it is the history, it clones, and a later one
+   * pulls incrementally on top — which is the one form of the code that travels without becoming
+   * a snapshot.
+   *
+   * `--all HEAD` so every branch and tag comes along *and* the clone has something to check out.
+   * Undefined when there is nothing to pack: not a repository, or not one commit in it.
+   */
+  async createBundle(target: string): Promise<{ branch: string; bytes: number } | undefined> {
+    if (!(await this.isRepo())) return undefined;
+    if (!(await this.head())) return undefined;
+    await this.git.raw(["bundle", "create", target, "--all", "HEAD"]);
+    const { size } = await stat(target);
+    return { branch: await this.currentBranch(), bytes: size };
+  }
+
+  /**
+   * Clone from a `git bundle` file into `target`, then forget where it came from.
+   *
+   * The origin a clone writes would name a temporary file deleted moments later, and a remote
+   * that resolves to nothing is worse than no remote at all: `getRemote` would report it, the
+   * declaration would record it, and the push policy (PM-05) would one day try to use it.
+   */
+  static async restoreFromBundle(bundleFile: string, target: string): Promise<void> {
+    await simpleGit({ maxConcurrentProcesses: 1 }).clone(bundleFile, target);
+    await simpleGit({ baseDir: target, maxConcurrentProcesses: 1 })
+      .remote(["remove", "origin"])
+      .catch(() => undefined);
+  }
+
+  /**
+   * The first file at HEAD containing `value`, if any — the leak scan for a carried repository.
+   *
+   * With its limit stated rather than implied: **HEAD only**. Every other entry of a bundle is
+   * scanned byte by byte (VT-09), which a compressed pack defeats, and grepping all of history is
+   * a cost nobody pays twice. A credential committed and later removed is not caught here; §9.7.3
+   * says so out loud instead of the code pretending otherwise.
+   */
+  async grepHead(value: string): Promise<string | undefined> {
+    try {
+      const out = await this.git.raw(["grep", "-I", "-l", "-F", "-e", value, "HEAD"]);
+      const first = out.split("\n").find((line) => line.trim().length > 0);
+      return first?.replace(/^HEAD:/, "").trim() || undefined;
+    } catch {
+      return undefined; // exit 1 is "no match", which is the ordinary case
+    }
   }
 
   async setRemote(url: string, name = "origin"): Promise<void> {

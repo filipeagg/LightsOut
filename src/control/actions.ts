@@ -461,7 +461,8 @@ export class Actions {
         note:
           `the dependencies are installed, but there is no clone of ${id} to adopt, the bundle ` +
           "names no remote, and it carries no declaration either. Clone the project into " +
-          "projects/ and call adopt_project",
+          "projects/ and call adopt_project" +
+          (imported.repo && !imported.repo.restored ? `. ${imported.repo.note ?? ""}` : ""),
       };
     }
 
@@ -2139,8 +2140,18 @@ function importNext(
     const from =
       imported.manifest.project.transport === "clone" && imported.manifest.project.remote
         ? `clone ${imported.manifest.project.remote} into it`
-        : "the bundle carries no code and names no remote: copy the project directory there";
+        : imported.repo && !imported.repo.restored
+          ? `the bundle carries the repository but it was not unpacked — ${imported.repo.note ?? "no reason recorded"}`
+          : "the bundle carries no code and names no remote: copy the project directory there";
     next.push(`code: no working copy at ${adopted.missing.workdir} — ${from}, then adopt_project`);
+  } else if (imported.repo?.restored) {
+    // PM-14 amended: it arrived in the archive because there was no remote to fetch it from, and
+    // that has a consequence the person needs now rather than later.
+    next.push(
+      `code: restored from the repository carried in the bundle` +
+        `${imported.repo.branch ? ` (branch ${imported.repo.branch})` : ""} — it has no remote, ` +
+        "so changes travel as another bundle, never as a pull",
+    );
   } else if (ctx.cloned) {
     next.push(`code: cloned from ${imported.manifest.project.remote}`);
   }

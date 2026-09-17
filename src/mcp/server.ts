@@ -44,7 +44,10 @@ Rules that are expensive to get wrong:
   and "none" is an answer that carries its reason.
 - A profile's engine and model are defaults; any launch may override them.
 - Nothing that serves runs in an agent's terminal: it never returns. preview_start gives a URL.
-- Correct a run in flight with steer_run rather than killing it. Recurring work is a trigger.`;
+- Correct a run in flight with steer_run rather than killing it. Recurring work is a trigger.
+- A \`.lobundle\` is a project somebody sent. Put it under the workspace folder, then
+  import_bundle{path}: it installs what it carries, unpacks the repository if the bundle holds
+  one, creates the project, and answers with \`next\` — what is left, in order.`;
 
 const CLOSING = `
 

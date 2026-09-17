@@ -98,9 +98,15 @@ describe("the manual served over MCP (MC-09)", () => {
     // "four nouns" (none of them knowledge) and concludes there is no knowledge to query — a
     // real client did exactly that about the "mercado" base before this line existed.
     expect(SERVER_INSTRUCTIONS).toMatch(/list_knowledge/);
+    // MC-09 where it is most needed: the client receiving a `.lobundle` is by definition a
+    // session that has never seen the project, and a real one was handed one and did nothing
+    // with it. The rule names the tool and points at `next`, which carries the situation.
+    expect(SERVER_INSTRUCTIONS).toMatch(/import_bundle/);
     // Short: it is in context for every conversation. The budget grows only with a rule that
     // earned its place; every line here is one a client demonstrably got wrong without it.
-    expect(SERVER_INSTRUCTIONS.length).toBeLessThan(1900);
+    // Raised from 1900 for the `.lobundle` rule above, which is three lines and replaces a
+    // failure nobody could see: an import that answered `ok` and left nothing behind.
+    expect(SERVER_INSTRUCTIONS.length).toBeLessThan(2150);
   });
 
   it("names the curated bases an install actually has (KB-01, §10.0d)", () => {

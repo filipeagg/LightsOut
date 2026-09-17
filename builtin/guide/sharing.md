@@ -35,15 +35,18 @@ answers: `missing` — bases, agent profiles, vault entries and areas absent her
 
 holds: knowledge bases, workspace agent profiles, the workspace template, vault entry names.
 holds_not: any file of the project. The code travels by git.
+holds_repo_when: no remote. The repository travels as `project/repo.bundle`, a git bundle.
 holds_never: a credential value. The writer scans its own output and aborts on one.
+repo_scan_limit: a carried repository is grepped at HEAD only, not through its history.
 writes: `<workspace>/exports/<projectId>.lobundle`.
 answers: the path on the user's own machine, and what the bundle requires.
 
 ## import_bundle
 
 input: `import_bundle {path}` — the path to the .lobundle file.
-order: knowledge, then agents and templates, then vault, then adoption.
+order: repository if carried, then knowledge, agents, templates, vault, then adoption.
 overwrites: nothing. An existing base is reported, with whether it differs.
+overwrites_repo: never. A directory at projects/<id> is left alone and reported.
 vault: entries named by the bundle are created with their fields empty.
 then: it adopts the project, cloning the remote when there is no directory yet.
 answers: what was written, what was left alone, what still needs configuring.
@@ -55,8 +58,10 @@ read_next: the answer carries `next` — what is left, in the order it has to be
   bundle on this machine. Follow that rather than this page: this page is the mechanism, `next`
   is the situation.
 transport_clone: the bundle names a remote and the import clones it. Nothing else to do for code.
-transport_copy: no remote. The project is still created — declared from the bundle (§9.7.2b) —
-  and `missing.workdir` names where the directory has to go. Put it there, then `adopt_project`.
+transport_bundle: no remote; the repository came inside and was unpacked, history and all.
+transport_bundle_after: it has no remote here, so changes travel back as another bundle.
+transport_copy: no remote, no repository. The project is declared and `missing.workdir` names
+  where the directory goes. Put it there, then `adopt_project`.
 vault: entries arrive with empty fields. Fill them in the panel; a value never travels.
 deps: do not run an install by hand. The first launch asks for a toolchain grant (ST-07).
 engines: log in on this machine; they are your own accounts (SU-04).

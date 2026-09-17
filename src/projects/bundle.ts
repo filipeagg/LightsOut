@@ -10,9 +10,17 @@
  * `src/`, not `doc/`, not even `lightsout.yaml` as a file — only its text inside the manifest, for
  * a machine that has no clone yet. That is what makes it safe to hand around: an archive that
  * cannot contain the code cannot be a stale copy of it.
+ *
+ * One exception, and it is the case the rule was never about (PM-14 amended, §9.7.3): a project
+ * with **no remote**. Git carries nothing there, so "the code comes from git" is advice about a
+ * transfer that cannot happen, and what the rule protects against — a second copy drifting from
+ * the one git serves — has no first copy to drift from. Then, and only then, the archive holds
+ * `project/repo.bundle`: the repository as a `git bundle`, which is history rather than a
+ * snapshot, clones into place, and accepts a later bundle as an incremental pull.
  */
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { z } from "zod";
@@ -31,6 +39,15 @@ export const BUNDLE_EXTENSION = ".lobundle";
 
 /** The only prefixes an archive may hold, besides the manifest itself. */
 const ALLOWED_PREFIXES = ["knowledge/", "agents/", "templates/"] as const;
+
+/**
+ * The one entry that may hold the project, and only as a `git bundle` (PM-14 amended).
+ *
+ * A single fixed name rather than a `project/` prefix on purpose: the exception is *the
+ * repository*, not "project files are allowed now". Anything else under `project/` is refused
+ * exactly as `src/main.ts` always was.
+ */
+export const REPO_ENTRY = "project/repo.bundle";
 
 /**
  * A value shorter than this is not scanned for in the leak check.
@@ -87,15 +104,31 @@ export const bundleManifestSchema = z
         name: z.string().default(""),
         /**
          * How the working copy travels (§9.7.3b). `clone` means the importing side can fetch the
-         * code itself from `remote`; `copy` means somebody has to bring the directory.
+         * code itself from `remote`; `bundle` means the archive carries the repository itself
+         * (PM-14 amended); `copy` means somebody has to bring the directory by hand.
          *
          * It exists because `remote: ""` could not say which: a project with no remote and a
          * project whose remote nobody had recorded read identically, and the importer guessed.
          * `copy` is the default so an older bundle, written before this field, is read as the
          * cautious thing rather than as a promise it cannot keep.
          */
-        transport: z.enum(["clone", "copy"]).default("copy"),
+        transport: z.enum(["clone", "bundle", "copy"]).default("copy"),
         remote: z.string().default(""),
+        /**
+         * The repository carried in the archive, present only with `transport: bundle`.
+         *
+         * `branch` is what the exporting side had checked out, stated so the receiving person can
+         * see which line of work arrived without having to go and look.
+         */
+        repo: z
+          .object({
+            file: z.string().min(1),
+            branch: z.string().default(""),
+            bytes: z.number().int().nonnegative().default(0),
+            sha256: z.string().default(""),
+          })
+          .strict()
+          .optional(),
         /** `lightsout.yaml` verbatim, so a person can see what they are adopting. */
         declaration: z.string().default(""),
       })
@@ -184,18 +217,81 @@ export function fingerprint(files: { rel: string; data: Buffer }[]): string {
   return hash.digest("hex");
 }
 
+/**
+ * The repository as a `git bundle`, for a project no remote can carry (PM-14 amended, §9.7.3).
+ *
+ * Undefined rather than an error when there is nothing to pack — a directory git has never seen
+ * is not a failure of the export, it is a project that travels as `copy` and says so.
+ *
+ * The leak check here is the honest one, not the reassuring one. `assertNoSecrets` reads bytes,
+ * and the bytes of a pack are compressed, so it would pass over a credential without seeing it.
+ * The repository is therefore asked directly, with `git grep` at HEAD — and that is **all** it
+ * covers: a value committed in March and deleted in April is inside the history this file carries
+ * and no check here will find it. Stated in §9.7.3 as a property of the transport rather than
+ * left for somebody to discover.
+ */
+async function packRepository(
+  git: ProjectGit,
+  projectId: string,
+  stored: VaultEntry[],
+): Promise<{ data: Buffer; branch: string; bytes: number; sha256: string } | undefined> {
+  const scratch = await mkdtemp(path.join(tmpdir(), "lo-repo-"));
+  try {
+    const file = path.join(scratch, `${projectId}.bundle`);
+    const made = await git.createBundle(file).catch(() => undefined);
+    if (!made) return undefined;
+
+    for (const entry of stored) {
+      for (const [field, value] of Object.entries(entry.fields)) {
+        if (value.length < MIN_SCANNED_VALUE) continue;
+        const hit = await git.grepHead(value);
+        if (hit) {
+          throw new BundleLeakError(
+            `refusing to export: ${hit} holds the stored value of ${entry.id}.${field}, and this ` +
+              "bundle would carry the repository (VT-09). Take it out of the tree, commit, and " +
+              "export again",
+          );
+        }
+      }
+    }
+
+    const data = await readFile(file);
+    return {
+      data,
+      branch: made.branch,
+      bytes: made.bytes,
+      sha256: createHash("sha256").update(data).digest("hex"),
+    };
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}
+
 export async function exportBundle(
   input: ExportBundleInput,
   deps: ExportBundleDeps,
 ): Promise<ExportedBundle> {
   const entries: ZipEntry[] = [];
+  // Read before anything is packed, because the repository check below needs the values and the
+  // final byte scan needs them too. They never leave this process either way (VT-09).
+  const stored = deps.vaultEntries ? await deps.vaultEntries() : [];
+
+  // Only when the directory is really there: `simpleGit` refuses a baseDir that does not exist,
+  // and a project declared but not yet cloned (§9.7.2b) is exactly that case.
+  const git = (await pathExists(input.project.path))
+    ? new ProjectGit(input.project.path)
+    : undefined;
   // The row knows when somebody told it; the repository knows always (§9.7.1b). Asking here as
   // well as in `syncDeclaration` means an export is correct even on a project whose declaration
   // has not been rewritten since it gained an origin.
   const remote =
-    input.project.repo_remote ??
-    (await new ProjectGit(input.project.path).getRemote().catch(() => undefined)) ??
-    "";
+    input.project.repo_remote ?? (await git?.getRemote().catch(() => undefined)) ?? "";
+
+  // PM-14 amended: only when git carries nothing, and only as history.
+  const packed =
+    remote || !git ? undefined : await packRepository(git, input.project.id, stored);
+  if (packed) entries.push({ name: REPO_ENTRY, data: packed.data });
+
   const manifest: BundleManifest = {
     format: BUNDLE_FORMAT,
     exported: { at: new Date().toISOString(), lightsout: deps.version },
@@ -203,9 +299,21 @@ export async function exportBundle(
       id: input.project.id,
       name: input.project.name,
       // §9.7.3b: stated, never guessed. The row is consulted first and the repository asked when
-      // it says nothing (§9.7.1b), so a project with an origin is never exported as uncopyable.
-      transport: remote ? "clone" : "copy",
+      // it says nothing (§9.7.1b), so a project with an origin is never exported as uncopyable —
+      // and `copy` is now only what is left when there is neither an origin nor a repository to
+      // pack, which is a directory that git has never seen.
+      transport: remote ? "clone" : packed ? "bundle" : "copy",
       remote,
+      ...(packed
+        ? {
+            repo: {
+              file: REPO_ENTRY,
+              branch: packed.branch,
+              bytes: packed.bytes,
+              sha256: packed.sha256,
+            },
+          }
+        : {}),
       declaration: await readFile(path.join(input.project.path, CONFIG_FILE), "utf8").catch(
         () => "",
       ),
@@ -294,7 +402,6 @@ export async function exportBundle(
   }
 
   // --- vault: names, and the check that it is only names (VT-09) -------------------------
-  const stored = deps.vaultEntries ? await deps.vaultEntries() : [];
   const byId = new Map(stored.map((entry) => [entry.id, entry]));
   for (const entryId of input.vaultIds) {
     const entry = byId.get(entryId);
@@ -357,6 +464,8 @@ export function assertNoSecrets(entries: ZipEntry[], stored: VaultEntry[]): void
 
 export type ImportBundleDeps = {
   workspace: string;
+  /** Where working copies live. Defaults to `<workspace>/projects`, which is where they do. */
+  projectsDir?: string;
   agents: AgentsLoader;
   knowledge?: KnowledgeLoader;
   templates?: TemplatesLoader;
@@ -381,8 +490,21 @@ export type ImportedGroup = {
   declared: { id: string; note: string }[];
 };
 
+/** What became of the repository the archive carried, when it carried one (PM-14 amended). */
+export type ImportedRepo = {
+  /** True when this import cloned it into `projects/<id>`. */
+  restored: boolean;
+  path: string;
+  branch?: string;
+  /** Why not, when `restored` is false. Never a silence: a repository that arrived and was not
+   * unpacked is exactly the situation the caller has to be told about. */
+  note?: string;
+};
+
 export type ImportBundleResult = {
   manifest: BundleManifest;
+  /** Absent when the archive carried no repository, which is the ordinary case. */
+  repo?: ImportedRepo;
   knowledge: ImportedGroup;
   agents: ImportedGroup;
   templates: ImportedGroup;
@@ -402,10 +524,11 @@ export function openBundle(data: Buffer): { manifest: BundleManifest; files: Map
     if (name.startsWith("/") || name.split("/").includes("..") || name.includes("\0")) {
       throw new ZipError(`refusing an archive entry that escapes it: ${entry.name}`);
     }
-    if (!ALLOWED_PREFIXES.some((prefix) => name.startsWith(prefix))) {
+    if (name !== REPO_ENTRY && !ALLOWED_PREFIXES.some((prefix) => name.startsWith(prefix))) {
       throw new ZipError(
-        `refusing ${entry.name}: a bundle holds the manifest, knowledge/, agents/ and ` +
-          "templates/, and nothing of the project itself (PM-14)",
+        `refusing ${entry.name}: a bundle holds the manifest, knowledge/, agents/, templates/ ` +
+          `and — only for a project with no remote — ${REPO_ENTRY}; nothing of the project ` +
+          "itself (PM-14)",
       );
     }
     files.set(name, entry.data);
@@ -432,11 +555,73 @@ async function pathExists(target: string): Promise<boolean> {
   }
 }
 
+/**
+ * Clone the carried repository into `projects/<id>` (PM-14 amended, §9.7.3).
+ *
+ * The same refusal that governs every other kind of entry governs this one: **an import never
+ * overwrites what the receiving machine already has.** A directory with anything in it is left
+ * exactly as it was and reported, because a half-finished working copy is somebody's work and an
+ * archive has no business deciding it was the wrong version.
+ *
+ * A failure here is reported rather than thrown. The rest of the import — knowledge, agents,
+ * vault — is worth having even when the clone did not happen, and `next` says what is left.
+ */
+async function restoreRepository(
+  manifest: BundleManifest,
+  files: Map<string, Buffer>,
+  deps: ImportBundleDeps,
+): Promise<ImportedRepo | undefined> {
+  const carried = files.get(REPO_ENTRY);
+  if (!carried) return undefined;
+
+  const projectsDir = deps.projectsDir ?? path.join(deps.workspace, "projects");
+  const target = path.join(projectsDir, manifest.project.id);
+  const present = await readdir(target).catch(() => [] as string[]);
+  if (present.length > 0) {
+    return {
+      restored: false,
+      path: target,
+      note:
+        "a working copy is already there, so the repository in the bundle was not unpacked and " +
+        "nothing of yours was touched. `git pull <the bundle file>` inside it applies the " +
+        "history instead",
+    };
+  }
+
+  const scratch = await mkdtemp(path.join(tmpdir(), "lo-repo-"));
+  try {
+    const file = path.join(scratch, "repo.bundle");
+    await writeFile(file, carried);
+    await mkdir(projectsDir, { recursive: true });
+    // `git clone` refuses a target that exists, and an empty directory left by a previous attempt
+    // is exactly the thing it would refuse.
+    await rm(target, { recursive: true, force: true });
+    await ProjectGit.restoreFromBundle(file, target);
+    return {
+      restored: true,
+      path: target,
+      ...(manifest.project.repo?.branch ? { branch: manifest.project.repo.branch } : {}),
+    };
+  } catch (err) {
+    return {
+      restored: false,
+      path: target,
+      note: `the repository in the bundle could not be unpacked: ${(err as Error).message}`,
+    };
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}
+
 export async function importBundle(
   data: Buffer,
   deps: ImportBundleDeps,
 ): Promise<ImportBundleResult> {
   const { manifest, files } = openBundle(data);
+
+  // First, because everything after it is a dependency *of* the working copy, and because
+  // adoption downstream asks whether the directory is there.
+  const repo = await restoreRepository(manifest, files, deps);
 
   const knowledge: ImportedGroup = { written: [], skipped: [], declared: [] };
   for (const required of manifest.requires.knowledge) {
@@ -548,5 +733,5 @@ export async function importBundle(
     vault.created.push(required.id);
   }
 
-  return { manifest, knowledge, agents, templates, vault };
+  return { manifest, ...(repo ? { repo } : {}), knowledge, agents, templates, vault };
 }

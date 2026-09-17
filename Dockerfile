@@ -18,9 +18,12 @@ RUN npx tsc -p tsconfig.json && node scripts/copy-assets.mjs
 
 # Test stage: dev dependencies plus the toolchain better-sqlite3 needs.
 # Built and run by scripts/verify/phase2.sh; not part of the runtime image.
+# `git` because the runtime has it (below) and a growing number of these tests are about what
+# LightsOut does with a repository — adoption, and the bundle that carries one (PM-14 amended).
+# A test image without it would pass by not exercising the thing that ships.
 FROM node:22-slim AS test
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 make g++ \
+      python3 make g++ git \
     && rm -rf /var/lib/apt/lists/*
 # Same npm pin as the builder stage, and for the same reason.
 RUN npm install -g npm@12.0.2 --no-audit --no-fund

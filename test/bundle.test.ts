@@ -21,7 +21,10 @@ import {
   exportBundle,
   importBundle,
   openBundle,
+  REPO_ENTRY,
 } from "../src/projects/bundle.js";
+import { CONFIG_FILE } from "../src/projects/config.js";
+import { ProjectGit } from "../src/projects/git.js";
 import type { ProjectRow } from "../src/db/types.js";
 import type { VaultEntry } from "../src/vault/schema.js";
 
@@ -344,5 +347,121 @@ describe("importing one (PM-14, KB-14)", () => {
     const raw = readZip(bundle.data).find((entry) => entry.name === BUNDLE_MANIFEST)!;
     const parsed = loadYaml(raw.data.toString("utf8")) as Record<string, unknown>;
     expect(parsed.format).toBe(1);
+  });
+});
+
+/**
+ * PM-14 amended (§9.7.3): the repository travels only where git cannot carry it.
+ *
+ * The two halves are one rule, so they are tested as one: a project **with** an origin must still
+ * come out of here without a byte of its code in the archive, and a project **without** one must
+ * come out with its history and arrive as a working copy on the other side.
+ */
+describe("a project with no remote carries its repository (PM-14 amended)", () => {
+  async function plantRepo(id: string, branch = "main"): Promise<string> {
+    const dir = path.join(workspace, "projects", id);
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      path.join(dir, CONFIG_FILE),
+      `name: ${id}\ncontext: |\n  goal: a portal\n`,
+      "utf8",
+    );
+    await writeFile(path.join(dir, "src.ts"), "export const x = 1;\n", "utf8");
+    await new ProjectGit(dir).init(branch);
+    return dir;
+  }
+
+  it("packs the history, states the transport, and restores a working copy on import", async () => {
+    await plantRepo("consultant-portal", "Cropwise");
+    const deps = await loaders();
+
+    const bundle = await exportBundle(
+      {
+        project: project({ repo_remote: null }),
+        agentIds: [],
+        knowledgeIds: [],
+        vaultIds: ["jira"],
+      },
+      { workspace, ...deps, vaultEntries: async () => [JIRA], version: "0.2.5" },
+    );
+
+    // Stated, not guessed — and `copy` is no longer what a project without an origin gets.
+    expect(bundle.manifest.project.transport).toBe("bundle");
+    expect(bundle.manifest.project.remote).toBe("");
+    expect(bundle.manifest.project.repo?.file).toBe(REPO_ENTRY);
+    expect(bundle.manifest.project.repo?.branch).toBe("Cropwise");
+    expect(bundle.manifest.project.repo?.bytes).toBeGreaterThan(0);
+
+    // The exception is the repository and nothing else: still not one project file as a file.
+    const names = readZip(bundle.data).map((entry) => entry.name);
+    expect(names).toContain(REPO_ENTRY);
+    expect(names.some((name) => name.endsWith("src.ts"))).toBe(false);
+
+    const other = await mkdtemp(path.join(tmpdir(), "lo-bundle-repo-"));
+    try {
+      const agents = new AgentsLoader(other);
+      await agents.load();
+      const result = await importBundle(bundle.data, { workspace: other, agents });
+
+      expect(result.repo?.restored).toBe(true);
+      const restored = path.join(other, "projects", "consultant-portal");
+      expect(await readFile(path.join(restored, "src.ts"), "utf8")).toBe("export const x = 1;\n");
+      // History, not a snapshot — and with no origin pointing at the temporary file it came from.
+      expect(await new ProjectGit(restored).head()).toBeTruthy();
+      expect(await new ProjectGit(restored).getRemote()).toBeUndefined();
+    } finally {
+      await rm(other, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves a working copy that is already there exactly as it was", async () => {
+    await plantRepo("consultant-portal");
+    const deps = await loaders();
+    const bundle = await exportBundle(
+      { project: project({ repo_remote: null }), agentIds: [], knowledgeIds: [], vaultIds: [] },
+      { workspace, ...deps, version: "0.2.5" },
+    );
+
+    const other = await mkdtemp(path.join(tmpdir(), "lo-bundle-repo-"));
+    try {
+      const mine = path.join(other, "projects", "consultant-portal");
+      await mkdir(mine, { recursive: true });
+      await writeFile(path.join(mine, "src.ts"), "mine, half finished\n", "utf8");
+      const agents = new AgentsLoader(other);
+      await agents.load();
+
+      const result = await importBundle(bundle.data, { workspace: other, agents });
+      expect(result.repo?.restored).toBe(false);
+      expect(await readFile(path.join(mine, "src.ts"), "utf8")).toBe("mine, half finished\n");
+    } finally {
+      await rm(other, { recursive: true, force: true });
+    }
+  });
+
+  it("still carries no code when there is a remote to carry it", async () => {
+    await plantRepo("consultant-portal");
+    const deps = await loaders();
+    const bundle = await exportBundle(
+      { project: project(), agentIds: [], knowledgeIds: [], vaultIds: [] },
+      { workspace, ...deps, version: "0.2.5" },
+    );
+
+    expect(bundle.manifest.project.transport).toBe("clone");
+    expect(bundle.manifest.project.repo).toBeUndefined();
+    expect(readZip(bundle.data).map((entry) => entry.name)).not.toContain(REPO_ENTRY);
+  });
+
+  it("refuses to pack a repository holding a stored credential (VT-09)", async () => {
+    const dir = await plantRepo("consultant-portal");
+    await writeFile(path.join(dir, "config.ts"), `export const t = "${JIRA.fields.token}";\n`, "utf8");
+    await new ProjectGit(dir).commitAll("chore: the mistake");
+    const deps = await loaders();
+
+    await expect(
+      exportBundle(
+        { project: project({ repo_remote: null }), agentIds: [], knowledgeIds: [], vaultIds: ["jira"] },
+        { workspace, ...deps, vaultEntries: async () => [JIRA], version: "0.2.5" },
+      ),
+    ).rejects.toThrow(BundleLeakError);
   });
 });

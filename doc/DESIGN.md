@@ -2002,7 +2002,8 @@ consultant-portal.lobundle
 ├── knowledge/<baseId>/…        the manifest and index of an owned base
 ├── knowledge/<any>/<path>/…    the folder it reads its documents from, when that is elsewhere
 ├── agents/<id>.yaml            workspace profiles the phases name
-└── templates/<id>.yaml         the workspace template it came from, when it is not a builtin
+├── templates/<id>.yaml         the workspace template it came from, when it is not a builtin
+└── project/repo.bundle         the repository — only when the project has no remote (§9.7.3c)
 ```
 
 Every `knowledge/…` entry is named by its **workspace-relative path**, so the archive is a slice
@@ -2051,7 +2052,8 @@ requires:
 **There is no project file in it.** No `src/`, no `doc/`, not even `lightsout.yaml` as a file —
 only its text inside `bundle.yaml`, for the case where the importer has no clone yet. This is the
 whole reason the bundle is safe to hand around: it cannot be a stale copy of the code, because it
-never holds the code.
+never holds the code. The single exception, and the reason it is not a hole in the rule, is
+§9.7.3c.
 
 **Export** (`export_bundle {projectId}`) collects the bases attached to the project, the agent
 profiles its phases name that are not builtins, its workspace template, and the vault entries
@@ -2095,14 +2097,16 @@ So the manifest states the transport outright:
 ```yaml
 project:
   id: consultant-portal
-  transport: clone        # clone | copy
+  transport: clone        # clone | bundle | copy
   remote: https://…/consultant-portal.git
 ```
 
-`clone` means the importing side can fetch the code itself and the import does. `copy` means the
-working copy has to arrive another way, and the import declares the project instead (§9.7.2b) so
-it is visible while it waits. The value is computed at export from the repository, never guessed:
-an origin makes it `clone`, its genuine absence makes it `copy`.
+`clone` means the importing side can fetch the code itself and the import does. `bundle` means the
+archive carries the repository and the import unpacks it (§9.7.3c). `copy` means the working copy
+has to arrive another way, and the import declares the project instead (§9.7.2b) so it is visible
+while it waits. The value is computed at export from the repository, never guessed: an origin
+makes it `clone`, no origin but a repository makes it `bundle`, and `copy` is what is left — a
+directory git has never seen.
 
 And the import answers with **`next`** — an ordered, machine-first list of what is left, derived
 from what actually happened rather than written in advance:
@@ -2125,6 +2129,52 @@ is a thing to lose: an entry visible in the panel with three empty fields is a f
 gets filled in. The risk it introduces — an abandoned import leaves half-configured entries — is
 visible in the same place and deleting one is one click, which is a better failure than a
 credential the person forgot was needed until a run stopped on it.
+
+##### With no remote, the repository travels in the bundle (§9.7.3c, PM-14 amended)
+
+PM-14's rule — *the bundle carries no file of the project* — has a reason, and the reason is the
+whole of it: **the code comes from git, and a second copy in an archive would drift from the one
+git serves.** Read against a project with no remote, that reason evaporates. Git serves nothing.
+There is no first copy to drift from. The rule was protecting a transfer that cannot happen, and
+what it actually produced was the live failure of §9.7.2b's sibling: a bundle handed over, an
+import that reported `ok`, and a colleague with every dependency installed and no project — told
+to "copy the directory", which means a 316 MB zip made by hand, without history, without branches,
+and without the leak scan that the bundle performs on everything else.
+
+So the exception is drawn at the reason rather than at the sentence:
+
+| the project has | the bundle carries | transport |
+|---|---|---|
+| an origin | nothing of the code | `clone` |
+| no origin, but a repository | `project/repo.bundle` — a `git bundle` of `--all HEAD` | `bundle` |
+| no repository at all | nothing of the code | `copy` |
+
+Three properties make this a transfer rather than a copy, and all three matter:
+
+- **It is history, not a snapshot.** `git clone repo.bundle` produces a real repository with every
+  branch and tag. The receiving side can commit, branch and diff; the next transfer is another
+  bundle applied with `git pull`, which is incremental, not 316 MB again.
+- **It cannot masquerade as a remote.** The clone's `origin` would name a temporary file deleted
+  moments later, so it is removed: `getRemote()` reports none, the declaration records none, and
+  PM-05 never tries to push into a path that does not exist. The `next` line says the consequence
+  out loud — *changes travel as another bundle, never as a pull*.
+- **It never overwrites.** The same refusal as every other entry: a directory at
+  `projects/<id>` with anything in it is left exactly as it was and reported. A half-finished
+  working copy is somebody's work, and an archive does not get to decide it was the wrong version.
+
+**And the honest part.** `assertNoSecrets` scans bytes, and a pack is compressed, so the check that
+guards every other entry would pass over a credential inside this one without seeing it. The
+repository is therefore asked directly — `git grep` for each stored value — and the limit of that
+is stated rather than implied: **HEAD only**. A value committed in March and deleted in April is
+inside the history this file carries, and nothing here will find it. Gitignored files (`.env`,
+`probes/`) never enter a bundle because they were never committed, which is the larger of the two
+risks and the one that is actually closed. Grepping all of history is a cost nobody pays twice,
+and a check people route around is worse than a limit people know about.
+
+This is the second time the same shape has come up (§9.7.2b was the first): a rule written for the
+common case, applied to the case it was never about, produces an answer that is formally correct
+and useless to the person holding it. Both fixes were the same move — go back to the reason, and
+let the rule end where the reason ends.
 
 #### 9.7.4 What still has to be done by hand, and is meant to be
 

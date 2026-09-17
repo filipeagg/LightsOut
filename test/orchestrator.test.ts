@@ -579,7 +579,37 @@ describe("chain loop", () => {
     expect(repos.chains.getOrThrow(launch.chainId).status).toBe("completed");
   });
 
-  it("refuses to resume a completed chain and is a no-op on an active one", async () => {
+  /**
+   * §11.2c: the dead end a restart leaves behind. The row says `active`, its task says `queued`,
+   * and nothing is driving it — so the chain cannot be resumed because it is active, and the task
+   * cannot be requeued because it is queued. This is that state, built by hand because that is
+   * exactly how a restart hands it over: rows without the promise that justified them.
+   */
+  it("drives an active chain that nothing is driving", async () => {
+    const ran: string[] = [];
+    const { project, orch } = await orchestrator("", ran);
+    const chain = repos.chains.create({ projectId: project.id, title: "forgotten" });
+    repos.chains.setStatus(chain.id, "active");
+    const task = repos.tasks.create({
+      chainId: chain.id,
+      projectId: project.id,
+      title: "left queued by the restart",
+      spec: "do the thing",
+      agentId: "builder",
+    });
+
+    const result = orch.resumeChain(chain.id);
+    expect(result.started).toBe(true);
+    await orch.idle();
+
+    expect(ran).toEqual([task.id]);
+    expect(repos.chains.getOrThrow(chain.id).status).toBe("completed");
+  });
+
+  // The active case requeues nothing because nothing is unfinished — not because the chain says
+  // `active`. Since §11.2c that distinction is the point: an active chain with work left in it is
+  // driven, and this one has none.
+  it("refuses to resume a completed chain, and requeues nothing when nothing is unfinished", async () => {
     const ran: string[] = [];
     const { project, orch } = await orchestrator("", ran);
     const launch = orch.launchChain({

@@ -770,13 +770,26 @@ export class Orchestrator {
    * container restart or a failed task was a dead end, with its tasks stuck `interrupted` and no
    * action anywhere that could move them. Tasks that did not finish are queued again; tasks that
    * ended `ok` are left alone, so resuming never redoes completed work.
+   *
+   * It is also the safety net for a chain whose row says `active` while nothing is driving it
+   * (§11.2c) — see the note below. That is a net, not the fix: the missing dispatch belongs where
+   * the project lock is released, and that is still open.
    */
   resumeChain(chainId: string): { chainId: string; requeued: string[]; started: boolean } {
     const chain = this.repos.chains.getOrThrow(chainId);
-    if (chain.status === "active") {
-      return { chainId: chain.id, requeued: [], started: this.driving.has(chain.id) };
-    }
     if (chain.status === "completed") throw new Error(`chain ${chain.id} is already completed`);
+
+    /**
+     * `active` is a claim about a promise in this process, and the row cannot see whether that
+     * promise exists (§11.2c). Only a chain that is *both* active and in `driving` has nothing to
+     * ask for; an active row with no driver behind it is the dead end this used to return `ok`
+     * to — the state a restart leaves behind when a chain was holding a queued task, where the
+     * chain cannot be resumed because it is active and the task cannot be requeued because it is
+     * queued. Checking the claim instead of trusting it is the whole fix.
+     */
+    const alreadyDriven = chain.status === "active" && this.driving.has(chain.id);
+    if (alreadyDriven) return { chainId: chain.id, requeued: [], started: true };
+    const redriven = chain.status === "active";
 
     const requeued: string[] = [];
     for (const task of this.repos.tasks.listByChain(chain.id)) {
@@ -789,10 +802,17 @@ export class Orchestrator {
       });
     }
 
-    this.repos.chains.setStatus(chain.id, "active");
+    if (!redriven) this.repos.chains.setStatus(chain.id, "active");
     this.repos.events.append({
       type: "chain.state",
-      payload: { chainId: chain.id, status: "active", reason: "resumed", tasks: requeued.length },
+      payload: {
+        chainId: chain.id,
+        status: "active",
+        // The timeline has to tell "somebody resumed a paused chain" from "somebody restarted one
+        // this process had forgotten it was driving" (§11.2c).
+        reason: redriven ? "redriven" : "resumed",
+        tasks: requeued.length,
+      },
     });
     this.bus.emit("overview");
 

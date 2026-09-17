@@ -2258,6 +2258,33 @@ Behavioral notes: `launch_*` returns within ~1 s (run starts async); `project_st
 
 `UPDATE runs SET status='interrupted', exit_reason='container restart' WHERE status IN ('running','waiting_human')` + matching task/chain updates + one `system` event each, including the stored `acp_session` for manual resume. Doubts stay open across restarts (they live in the DB). "Manual resume" is `resume_chain` / `POST /api/projects/:id/resume` (§10.2): without it the recovery pass is a dead end, leaving tasks `interrupted` and no action able to move them.
 
+### 11.2c A chain is `active` because something is driving it
+
+`chains.status = 'active'` is a claim about a promise held in memory — `Orchestrator.driving`,
+keyed by chain id — and the database cannot see whether that promise exists. Every restart
+therefore invents the same lie: rows that say `active` with nothing behind them.
+
+Observed on 2026-09-17. The container was restarted while `consultant-portal` held a queued task.
+The recovery pass (§11.2) only repairs runs that were `running` or `waiting_human`; this task was
+`queued`, an ordinary state nobody had to fix, so nothing was repaired — and nothing was
+dispatched either. The panel showed an active chain, a task named as `next`, and no run, for as
+long as anyone cared to wait. The one action that exists for this could not help: `resume_chain`
+returned early on `status === 'active'`, reporting `started` from `driving` and requeueing
+nothing, so it answered `ok: true` and did precisely nothing. Active because it cannot be
+resumed, queued because it cannot be requeued, and no run to stop.
+
+**So `resume_chain` treats `active` as a claim to check rather than a state to trust.** Active
+*and* present in `driving` is the only case with nothing to do, and it is the only one that
+returns early. Active and undriven takes the ordinary resume path — unfinished tasks queued
+again, the chain driven — and records `reason: 'redriven'` on its `chain.state` event, so the
+timeline tells "somebody resumed a paused chain" apart from "somebody restarted one the process
+had forgotten".
+
+**This is the safety net, not the fix.** The dispatch that went missing belongs where the project
+lock is released (OR-08), after an abort as much as after a normal finish, and that is still open.
+A net is cheap and catches whatever else reaches this state; it is not a reason to stop looking
+for the hole that put it there.
+
 ### 11.2b Failure containment
 
 Nothing a single run does may end the process, because the process is every other project's chain too. Three layers, outermost last:
